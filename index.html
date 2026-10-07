@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 0.13.0
+  Version 0.13.1
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -378,6 +378,24 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-07
+
+0.13.0 was tagged but never published: its own test suite stopped it, which
+is what that check is for. Everything listed under 0.13.0 below reaches the
+site with this release.
+
+### Added
+
+- Every setting you've changed from its default is marked with a dot beside
+  its name, so you can see what you've adjusted without having to remember
+  what the defaults were.
+
+### Fixed
+
+- A test asserted that three videos are buffered ahead, which stopped being
+  true in 0.13.0 on machines with few processor cores -- including the one
+  that builds and publishes the page, so 0.13.0 never went out.
+
 ## [0.13.0] - 2026-10-07
 
 ### Changed
@@ -405,8 +423,9 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 - The settings panel no longer opens as one long wall of controls. Each
   section (Appearance, What's in the feed, and so on) starts folded up, and
-  you open the one you want. A section you have changed something in says so
-  next to its name, so your own adjustments are easy to find again.
+  you open the one you want.
+- Each folded-up section says how many of its settings you've changed, so
+  your own adjustments are easy to find again.
 - Settings that only apply while another setting is switched on are now
   indented underneath it and greyed out when they don't apply, which they
   were always meant to be.
@@ -872,7 +891,7 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v0.13.0 · Bluesky</title>
+<title>Catch-up v0.13.1 · Bluesky</title>
 <style>
 /* ---------- Atkinson Hyperlegible ----------
    Embedded rather than fetched from Google Fonts, so a copy saved to disk
@@ -1243,6 +1262,10 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
    renderDrawer and syncDependents. */
 .set.sub-set{margin-left:3px; padding-left:14px; border-left:2px solid var(--line)}
 .set.sub-set.off{opacity:.45}
+/* A setting you've moved off its default gets a dot beside its name, so what
+   you've changed is visible without having to remember the defaults. The
+   group summaries count these. */
+.set.changed .set-name::after{content:""; display:inline-block; width:6px; height:6px; margin-left:6px; vertical-align:middle; border-radius:50%; background:var(--accent)}
 /* The last row in a group doesn't need a rule; the group's own does the job. */
 .group-body .set:last-child{border-bottom:0}
 .set{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:7px 0; border-bottom:1px solid var(--line)}
@@ -1447,7 +1470,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "0.13.0";
+const APP_VERSION = "0.13.1";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -1585,9 +1608,11 @@ const POST_KINDS = [["images", "Images (1–4)"], ["gallery", "Galleries (5+)"],
                        syncDependents.
    A {group: "Name"} entry starts a new group. Each group renders as a
    <details> that is CLOSED when the drawer opens: there are a lot of settings
-   here and showing them all at once is a wall of controls. The summary shows
-   "N changed" when any setting in that group differs from its default, so a
-   group you have tinkered with can be found without opening every one. */
+   here and showing them all at once is a wall of controls. Any setting whose
+   value differs from its default is marked (.set.changed), and each group's
+   summary counts those, so what you've adjusted is visible folded up or open.
+   syncDependents() keeps all of that in step after a change WITHOUT
+   re-rendering the drawer, which would take focus off the control in use. */
 const SETTINGS_SCHEMA = [
   { group: "Appearance" },
   { key: "theme", link: true, label: "Theme", type: "select", options: [["system", "Match system"], ["light", "Light"], ["dark", "Dark"]], apply: "look" },
@@ -3849,7 +3874,7 @@ function renderDrawer() {
     if (s.group) {
       endGroup();
       const n = changedInGroup(s.group);
-      html += `<details class="group"><summary>${esc(s.group)}${n ? `<span class="group-sum">${n} changed</span>` : ""}</summary><div class="group-body">`;
+      html += `<details class="group" data-group="${esc(s.group)}"><summary>${esc(s.group)}<span class="group-sum">${n ? `${n} changed` : ""}</span></summary><div class="group-body">`;
       groupOpen = true;
       continue;
     }
@@ -3867,14 +3892,15 @@ function renderDrawer() {
     else if (s.type === "text") ctl = `<input type="text" id="${id}" data-k="${s.key}" value="${esc(v)}" placeholder="${esc(s.placeholder || "")}" spellcheck="false" autocomplete="off"${dis}>`;
     else if (s.type === "multi") {
       ctl = `<div class="checks">${s.options.map(([val, lab]) => `<label><input type="checkbox" data-k="${s.key}" value="${val}" ${(v || []).includes(val) ? "checked" : ""}>${esc(lab)}</label>`).join("")}</div>`;
-      html += `<div class="set multi"><label>${esc(s.label)}${s.sub ? `<span class="sub">${esc(s.sub)}</span>` : ""}</label>${ctl}</div>`;
+      html += `<div class="set multi" data-row="${s.key}"><label><span class="set-name">${esc(s.label)}</span>${s.sub ? `<span class="sub">${esc(s.sub)}</span>` : ""}</label>${ctl}</div>`;
       continue;
     }
-    html += `<div class="set${dep}" data-row="${s.key}"><label for="${id}">${esc(s.label)}${s.sub ? `<span class="sub">${esc(s.sub)}</span>` : ""}</label>${ctl}</div>`;
+    html += `<div class="set${dep}" data-row="${s.key}"><label for="${id}"><span class="set-name">${esc(s.label)}</span>${s.sub ? `<span class="sub">${esc(s.sub)}</span>` : ""}</label>${ctl}</div>`;
   }
   endGroup();
   html += `<details class="group"><summary>Reset</summary><div class="group-body"><button class="btn" type="button" id="btnResetSettings">Restore default settings</button><button class="btn" type="button" id="btnClearPos">Forget my reading position</button></div></details>`;
   d.innerHTML = html;
+  syncDependents();
   $("#btnCloseDrawer").onclick = closeDrawer;
   $("#btnResetSettings").onclick = () => { endLinkOverlay(false); settings = structuredClone(DEFAULTS); saveSettings(); applyLook(); renderDrawer(); if (state.run && !$("#viewFeed").classList.contains("hidden")) buildView({ fresh: false, keepPosition: true }); toast("Settings restored"); };
   $("#btnClearPos").onclick = () => { if (me()) LS.del("position:" + me()); state.maxRead = null; toast("Reading position forgotten"); if (!$("#viewStart").classList.contains("hidden")) prepareStart(); };
@@ -3899,15 +3925,32 @@ $("#drawer").addEventListener("input", ev => {
   }
   if (s.key === "contextCount" && !$("#viewStart").classList.contains("hidden")) prepareStart();
 });
-/* Greys out (and disables) the settings that only apply while another setting
-   has a particular value. Called when any setting changes, instead of
-   re-rendering the whole drawer, so the control you're using keeps focus. */
+/* Brings the open drawer back in step with the current settings, without
+   re-rendering it (which would lose the focus and caret of whatever control
+   you're using). Three things depend on the values:
+     - settings that only apply while another setting has a particular value
+       are greyed out and disabled when it doesn't;
+     - every setting you've moved off its default is marked, so you can see
+       what you've changed without comparing against anything;
+     - each group's summary counts those, so a folded-up group still says
+       whether there's anything of yours inside it. */
 function syncDependents() {
   for (const s of SETTINGS_SCHEMA) {
-    if (!s.when) continue;
-    const on = settings[s.when.key] === s.when.value;
-    $(`#drawer [data-row="${s.key}"]`)?.classList.toggle("off", !on);
-    for (const el of $$(`#drawer [data-k="${s.key}"]`)) el.disabled = !on;
+    if (s.group) continue;
+    const row = $(`#drawer [data-row="${s.key}"]`);
+    if (s.when) {
+      const on = settings[s.when.key] === s.when.value;
+      row?.classList.toggle("off", !on);
+      for (const el of $$(`#drawer [data-k="${s.key}"]`)) el.disabled = !on;
+    }
+    const changed = JSON.stringify(settings[s.key]) !== JSON.stringify(DEFAULTS[s.key]);
+    row?.classList.toggle("changed", changed);
+    if (row) row.title = changed ? "Changed from the default" : "";
+  }
+  for (const g of $$("#drawer details.group")) {
+    const n = changedInGroup(g.dataset.group);
+    const sum = g.querySelector(".group-sum");
+    if (sum) sum.textContent = n ? `${n} changed` : "";
   }
 }
 function openDrawer() { renderDrawer(); $("#drawer").classList.remove("hidden"); $("#scrim").classList.remove("hidden"); }

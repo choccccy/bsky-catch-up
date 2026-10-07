@@ -78,13 +78,16 @@ test("copy link on gallery posts uses the embed proxy", async () => {
 
 test("videos preload ahead, switch to full buffering on play, and unload", async () => {
   const timeline = Array.from({ length: 6 }, (_, i) => h.item(h.post("V" + i, a, 10 + i, { embed: h.embeds.video() })));
-  const page = await h.loadPage({ server: { timeline } });
+  // Pin the count: since 0.13.0 the DEFAULT follows the device, so leaving it
+  // unset makes this test depend on how many cores the machine running it
+  // has (CI runners have few, and preload 1 instead of 3).
+  const page = await h.loadPage({ settings: { preloadVideos: 3 }, server: { timeline } });
   await page.startDate(h.BASE);
   const po = page.observers.find(o => o.opts.rootMargin);
   const boxes = po.targets.slice(0, 6);
   po.cb(boxes.map(target => ({ target, isIntersecting: true })));
   await h.wait(350);
-  assert.deepEqual(boxes.map(b => !!b._video), [true, true, true, false, false, false], "3 preloaded by default");
+  assert.deepEqual(boxes.map(b => !!b._video), [true, true, true, false, false, false], "3 preloaded, as set");
   assert.equal(boxes[0]._hls.config.maxBufferLength, 6);
   boxes[0].querySelector(".play").click();
   assert.equal(boxes[0]._hls.config.maxBufferLength, 30);

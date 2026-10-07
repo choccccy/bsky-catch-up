@@ -69,7 +69,7 @@ test("a group says how many of its settings you've changed", async () => {
   page.window.openDrawer();
   const badge = name => {
     const g = page.$$("#drawer details.group").find(x => x.querySelector("summary").textContent.startsWith(name));
-    return g.querySelector(".group-sum")?.textContent ?? null;
+    return g.querySelector(".group-sum")?.textContent || null;   // empty = nothing changed
   };
   assert.equal(badge("Appearance"), "2 changed", "theme and hourDividers both live here");
   assert.equal(badge("What's in the feed"), null, "untouched groups say nothing");
@@ -93,4 +93,44 @@ test("sub-settings are marked off while their parent setting doesn't apply", asy
     assert.ok(!r.classList.contains("off"), `${r.dataset.row} should be live now`);
     assert.ok(!r.querySelector("[data-k]").disabled);
   }
+});
+
+test("how many videos to preload by default follows the device", async () => {
+  // A cheap phone shouldn't start by buffering three HLS streams. The setting
+  // still overrides this; only the starting value is decided here.
+  const page = await h.loadPage({});
+  const w = page.window;
+  const forDevice = (deviceMemory, hardwareConcurrency) => {
+    Object.defineProperty(w.navigator, "deviceMemory", { value: deviceMemory, configurable: true });
+    Object.defineProperty(w.navigator, "hardwareConcurrency", { value: hardwareConcurrency, configurable: true });
+    return w.defaultPreloadVideos();
+  };
+  assert.equal(forDevice(32, 10), 3, "desktop");
+  assert.equal(forDevice(4, 8), 1, "little memory");
+  assert.equal(forDevice(8, 4), 1, "few cores");
+  assert.equal(forDevice(undefined, undefined), 3, "a browser that won't say: assume a desktop");
+});
+
+test("each setting you've changed is marked, and the marks keep up", async () => {
+  const page = await h.loadPage({ settings: { theme: "dark" } });
+  page.window.openDrawer();
+  const marked = () => page.$$("#drawer .set.changed").map(r => r.dataset.row).sort();
+  const badge = name => {
+    const g = page.$$("#drawer details.group").find(x => x.querySelector("summary").textContent.startsWith(name));
+    return g.querySelector(".group-sum").textContent || null;
+  };
+  // fetchMethod and rpm come from the harness's own settings, theme from here.
+  assert.deepEqual(marked(), ["fetchMethod", "rpm", "theme"]);
+  assert.equal(page.$('[data-row="theme"]').title, "Changed from the default");
+
+  // Changing another one marks it immediately, without reopening the drawer.
+  await page.setSetting("hourDividers", false);
+  assert.deepEqual(marked(), ["fetchMethod", "hourDividers", "rpm", "theme"]);
+  assert.equal(badge("Appearance"), "2 changed");
+
+  // Putting one back clears its mark and the count with it.
+  await page.setSetting("theme", "system");
+  assert.deepEqual(marked(), ["fetchMethod", "hourDividers", "rpm"]);
+  assert.equal(badge("Appearance"), "1 changed");
+  assert.equal(page.$('[data-row="theme"]').title, "");
 });
