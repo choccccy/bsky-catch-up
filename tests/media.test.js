@@ -185,3 +185,129 @@ test("reply reminders say what the parent has attached", async () => {
   await page.startDate(h.BASE);
   assert.equal(page.article("R").querySelector(".parent-mini .pm-media").textContent, "3 images");
 });
+
+// ---------------------------------------------------------------------------
+// "Show images whole" (settings.wholeImages) and its sub-settings.
+// ---------------------------------------------------------------------------
+
+/** Loads a page with the whole-image mode on, plus any other settings. */
+const whole = (server, settings = {}) =>
+  h.loadPage({ settings: { wholeImages: "whole", ...settings }, server });
+
+test("by default images keep the Bluesky app's square layout", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(3) }))] } });
+  await page.startDate(h.BASE);
+  assert.equal(page.$$(".img-cell").length, 0, "no whole-image cells");
+  assert.equal(page.$$(".alt-cap").length, 0, "no alt captions");
+  assert.equal(page.$(".imgs").className, "imgs n3");
+  // Thumbnails, not full-size files.
+  assert.deepEqual(page.$$(".imgs img").map(i => i.getAttribute("src")), ["thumb1.jpg", "thumb2.jpg", "thumb3.jpg"]);
+  assert.ok(!page.document.documentElement.hasAttribute("data-whole"));
+});
+
+test("whole mode gives every image its real ratio as --ar", async () => {
+  const ratios = [{ width: 16, height: 9 }, { width: 3, height: 4 }];
+  const page = await whole({ timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(2, ratios) }))] });
+  await page.startDate(h.BASE);
+  assert.deepEqual(page.$$(".imgs .img").map(b => b.style.getPropertyValue("--ar").trim()), ["16/9", "3/4"]);
+  // The height cap is applied as a width worked out from these two numbers,
+  // so they have to be there alongside the "16/9" form.
+  assert.deepEqual(page.$$(".imgs .img").map(b => [b.style.getPropertyValue("--arw").trim(), b.style.getPropertyValue("--arh").trim()]),
+    [["16", "9"], ["3", "4"]]);
+  assert.equal(page.$$(".img-cell").length, 2, "each image gets its own cell");
+  assert.ok(page.document.documentElement.hasAttribute("data-whole"));
+});
+
+test("an image with no aspectRatio just gets no --ar", async () => {
+  const e = h.embeds.images(1); delete e.images[0].aspectRatio;
+  const page = await whole({ timeline: [h.item(h.post("I", a, 10, { embed: e }))] });
+  await page.startDate(h.BASE);
+  assert.equal(page.$(".imgs .img").style.getPropertyValue("--ar"), "");
+});
+
+test("whole mode loads full-size files, and the sub-setting turns that off", async () => {
+  const srcs = p => p.$$(".imgs img").map(i => i.getAttribute("src"));
+  const on = await whole({ timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(2) }))] });
+  await on.startDate(h.BASE);
+  assert.deepEqual(srcs(on), ["full1.jpg", "full2.jpg"]);
+  const off = await whole({ timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(2) }))] }, { wholeFullsize: false });
+  await off.startDate(h.BASE);
+  assert.deepEqual(srcs(off), ["thumb1.jpg", "thumb2.jpg"]);
+});
+
+test("alt text becomes a caption, and replaces the ALT badge", async () => {
+  const page = await whole({ timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(2) }))] });
+  await page.startDate(h.BASE);
+  // Only the first image has alt text in the builder.
+  assert.deepEqual(page.$$(".alt-cap").map(c => c.textContent), ["first image"]);
+  assert.equal(page.$$(".alt-badge").length, 0, "the badge gives way to the caption");
+  const off = await whole({ timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(2) }))] }, { wholeAlt: false });
+  await off.startDate(h.BASE);
+  assert.equal(off.$$(".alt-cap").length, 0);
+  assert.equal(off.$$(".alt-badge").length, 1, "the badge comes back");
+});
+
+test("a very tall image can be asked to fill the post's width", async () => {
+  const tall = [{ width: 1, height: 4 }, { width: 4, height: 3 }];
+  const page = await whole({ timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(2, tall) }))] });
+  await page.startDate(h.BASE);
+  const wraps = page.$$(".tallwrap");
+  assert.equal(wraps.length, 1, "only the very tall one gets the button");
+  assert.ok(!wraps[0].classList.contains("open"));
+  page.$('[data-act="expand-img"]').click();
+  assert.ok(page.$(".tallwrap").classList.contains("open"));
+});
+
+test("the lightbox still steps through every image in whole mode", async () => {
+  const page = await whole({ timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(3) }))] });
+  await page.startDate(h.BASE);
+  page.$$('.imgs [data-act="zoom"]')[1].click();
+  const lb = page.$("#lightbox");
+  assert.equal(lb.querySelector(".lb-count").textContent, "2 / 3");
+  assert.equal(lb.querySelector("img").getAttribute("src"), "full2.jpg");
+});
+
+test("galleries load full-size in whole mode but stay a strip", async () => {
+  const page = await whole({ timeline: [h.item(h.post("G", a, 10, { embed: h.embeds.gallery(6) }))] });
+  await page.startDate(h.BASE);
+  assert.equal(page.$(".gallery").children.length, 6, "still one strip of six");
+  assert.deepEqual(page.$$(".gallery img").map(i => i.getAttribute("src")).slice(0, 2), ["gfull1.jpg", "gfull2.jpg"]);
+  // Strip items size themselves from the inline aspect-ratio, and need the
+  // two numbers as well so the height cap can be applied as a width.
+  const it = page.$(".g-item");
+  assert.equal(it.style.aspectRatio, "4/3");
+  assert.deepEqual([it.style.getPropertyValue("--arw").trim(), it.style.getPropertyValue("--arh").trim()], ["4", "3"]);
+});
+
+test("only posts with pictures or video are allowed the extra width", async () => {
+  const page = await whole({ timeline: [
+    h.item(h.post("IMG", a, 10, { embed: h.embeds.images(1) })),
+    h.item(h.post("VID", a, 11, { embed: h.embeds.video() })),
+    h.item(h.post("LINK", a, 12, { embed: h.embeds.link() })),
+    h.item(h.post("TEXT", a, 13)),
+  ] });
+  await page.startDate(h.BASE);
+  const wide = k => page.article(k).classList.contains("has-media");
+  assert.deepEqual([wide("IMG"), wide("VID"), wide("LINK"), wide("TEXT")], [true, true, false, false]);
+});
+
+test("the sub-settings do nothing while the mode is off", async () => {
+  const page = await h.loadPage({
+    settings: { wholeImages: "app", wholeAlt: true, wholeFullsize: true, wholeVideo: true, wholeLinkThumbs: true },
+    server: { timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(2) }))] },
+  });
+  await page.startDate(h.BASE);
+  assert.deepEqual(page.$$(".imgs img").map(i => i.getAttribute("src")), ["thumb1.jpg", "thumb2.jpg"]);
+  assert.equal(page.$$(".alt-cap").length, 0);
+  const r = page.document.documentElement;
+  assert.ok(!r.hasAttribute("data-whole") && !r.hasAttribute("data-whole-video") && !r.hasAttribute("data-whole-link"));
+});
+
+test("the mode and its width can be set from a catch-up link", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(2) }))] } });
+  await page.startDate(h.BASE);
+  assert.ok(!page.document.documentElement.hasAttribute("data-whole"));
+  await page.setSetting("wholeImages", "whole");
+  assert.ok(page.document.documentElement.hasAttribute("data-whole"));
+  assert.equal(page.$$(".img-cell").length, 2);
+});

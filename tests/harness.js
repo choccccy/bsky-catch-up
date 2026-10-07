@@ -94,7 +94,15 @@ function item(p, opts = {}) {
 }
 /** Embed views. */
 const embeds = {
-  images: n => ({ $type: "app.bsky.embed.images#view", images: Array.from({ length: n }, (_, i) => ({ thumb: `thumb${i + 1}.jpg`, fullsize: `full${i + 1}.jpg`, alt: i === 0 ? "first image" : "" })) }),
+  /**
+   * An images embed (1-4). Real app.bsky.embed.images#view entries carry an
+   * aspectRatio, so these do too; pass one {width,height} for every image, or
+   * an array to give each its own (used by the whole-image layout tests).
+   */
+  images: (n, ar = { width: 4, height: 3 }) => ({ $type: "app.bsky.embed.images#view", images: Array.from({ length: n }, (_, i) => ({
+    thumb: `thumb${i + 1}.jpg`, fullsize: `full${i + 1}.jpg`, alt: i === 0 ? "first image" : "",
+    aspectRatio: Array.isArray(ar) ? ar[i] : ar,
+  })) }),
   gallery: n => ({ $type: "app.bsky.embed.gallery#view", items: Array.from({ length: n }, (_, i) => ({ $type: "app.bsky.embed.gallery#viewImage", thumbnail: `gthumb${i + 1}.jpg`, fullsize: `gfull${i + 1}.jpg`, alt: i === 1 ? "second" : "", aspectRatio: { width: 4, height: 3 } })) }),
   video: () => ({ $type: "app.bsky.embed.video#view", cid: "vid", playlist: "https://video.example/playlist.m3u8", thumbnail: "vthumb.jpg", aspectRatio: { width: 16, height: 9 } }),
   /** An uploaded GIF, which Bluesky stores as a video with presentation "gif". */

@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 0.11.6
+  Version 0.12.0
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -35,9 +35,12 @@ VERSIONING
   That attachment is load-bearing: the "keep your own copy" link in the
   sign-in page's About block points at
     <repo>/releases/download/vX.Y.Z/bluesky-catchup-vX.Y.Z.html
-  built from APP_VERSION, so every release MUST attach a file with exactly
-  that name or the link 404s. The same goes for the tag itself, which the
-  top-bar link points at.
+  and the "you're running version X" link next to it at the tag, both built
+  from APP_VERSION. So every release MUST exist as a tag and MUST attach a
+  file with exactly that name, or those two links 404. Both are behind the
+  "About" fold on the sign-in page only; the top-bar link, which is on every
+  screen, deliberately points at the repository instead, so the link people
+  actually see can't rot.
 
 WHAT THIS IS
   A self-contained web page (this one file) that you open straight from disk
@@ -134,6 +137,44 @@ CATCH-UP LINKS (URL #fragment)
   Code: readHashRequest(), runHashRequest(), writeHash(), applyLinkSettings(),
   buildShareLink().
 
+WHOLE-IMAGE MODE ("Show images whole", settings.wholeImages)
+  By default the page lays media out like the Bluesky app: 1-4 images in a
+  square grid cropped to fill, and galleries as a strip cropped to a fixed
+  height. That suits a dense mobile timeline, not someone sitting down at a
+  desktop to look at what they missed, so this mode exists.
+  With it on:
+    - every picture keeps its own shape; nothing is cropped (object-fit
+      becomes contain, and each cell carries its real ratio);
+    - a post that carries pictures or video may be WIDER than the reading
+      column, by settings.mediaWidth (a multiple of the column width). Text,
+      dividers and text-only posts stay at the column width;
+    - no picture is taller than --media-cap (90% of the window below the top
+      bar), so even the tallest leaves a margin above and below it. The cap is
+      applied as a WIDTH, worked out from the ratio: a max-height on a box
+      that has an aspect-ratio shrinks only its height, so the picture would
+      letterbox inside it instead of getting smaller;
+    - a picture taller than TALL_RATIO fits that cap only by becoming narrow,
+      so it also gets a button to fill the post's width (.tallwrap), which
+      makes it taller than the screen on purpose;
+    - sub-settings add the author's alt text as a caption, load full-size
+      files instead of thumbnails, give video its own shape, and stop link
+      previews being cropped. They are greyed out while the mode is off.
+  Two things to know before changing any of this:
+    - Ratios are emitted as the custom property --ar, NOT as an inline
+      aspect-ratio. An inline aspect-ratio would beat the stylesheet and
+      break the default square grid; --ar is only read under
+      :root[data-whole]. See arOf().
+    - Media widens the POST, it never overflows it. .post sets
+      content-visibility:auto, which implies paint containment and would clip
+      anything sticking out (the same reason .post.anchor has to turn it
+      off), and that containment is what keeps long feeds smooth.
+  Every cell carries its ratio from the start so lazily-loaded pictures don't
+  resize as they arrive; otherwise the reading position and progress strip
+  would drift under the reader.
+  imagesHtml() keeps the default layout's markup exactly as it was before the
+  mode existed and branches to imageCellHtml() for the new one, so the default
+  path can't regress.
+
 FILE LAYOUT
   <style>    CSS, organised by area. Colours are CSS custom properties on
              :root, redefined for dark mode (both the OS preference and the
@@ -149,7 +190,8 @@ FILE LAYOUT
              (computeView, arrangeThreads) & rendering (renderMore,
              renderItem, post/action markup, quote-like-state hydration);
              embeds (images, galleries, video, links, quotes, summaries of
-             deeply nested attachments); video (players, preloading,
+             deeply nested attachments; the "Show images whole" layout lives
+             with them, see WHOLE-IMAGE MODE below); video (players, preloading,
              autoplay); interactions (likes/reposts, copy, menus, lightbox);
              reading position (header clock); views/forms; banner & global
              error handling; settings drawer; boot.
@@ -326,6 +368,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [0.12.0] - 2026-10-07
+
+### Added
+
+- A new setting, **Show images whole**, for people who would rather see a
+  picture than a thumbnail of it. The Bluesky app crops pictures to squares
+  and hides most of a gallery behind a sideways scroll; with this on, every
+  picture keeps its own shape, nothing is cropped, and posts with pictures
+  are allowed to be wider than the column of text, so the pictures have room
+  to be big. Off by default: nothing changes until you turn it on.
+- Four sub-settings underneath it: how much wider those posts may be, whether
+  to print the author's description of a picture underneath it instead of
+  hiding it behind the ALT badge, whether to load pictures at full size
+  (sharper, but a much bigger download on a long catch-up), and whether video
+  and link previews get the same treatment.
+- No picture is ever taller than the window, so even the biggest leaves a
+  margin above and below it and you never lose your place. A very tall
+  picture only fits by being narrow, so it gets a "show this one larger"
+  button for when you actually want to read it.
 
 ## [0.11.6] - 2026-10-07
 
@@ -649,10 +711,12 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
 - Short safety note on the sign-in page: create a new app password just for
   this page and leave direct-message access off.
 - Provenance. #barSrc in the top bar ("v<version> MIT") is visible in
-    every view, signed in or not, and links to this exact release; the
+    every view, signed in or not, and links to the repository itself --
+    deliberately NOT to the release for the running version, so the link
+    can't rot if a release is ever missing or named differently. The
     "About" block on the sign-in page has the fuller version (repository,
-    release, licence, issues, and a direct download of this version's
-    HTML). boot() fills both in from APP_VERSION and
+    this release, licence, issues, and a direct download of this version's
+    HTML); those two ARE version-pinned, see VERSIONING. boot() fills both in from APP_VERSION and
     REPO_URL, so they never need updating by hand.
   - "About this page and your privacy" section on the sign-in page: what the
   page connects to, why a unique app password still matters, what "Stay
@@ -752,7 +816,7 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v0.11.6 · Bluesky</title>
+<title>Catch-up v0.12.0 · Bluesky</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
@@ -768,6 +832,9 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
   --accent:#3550C8; --accent-ink:#FFFFFF; --like:#D6336C; --repost:#23865F; --anchor:#FFF4C2; --anchor-line:#E3B505; --hour-bg:#DFE5F6;
   --shadow:0 1px 0 rgba(27,36,48,.06);
   --fs:16px; --col:640px;
+  /* The tallest a picture may be: 90% of the window below the top bar, so
+     even the biggest leaves a margin above and below it. */
+  --media-cap:calc((100vh - var(--bar-h, 58px)) * 0.9);
   --font:"Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 :root[data-theme="dark"]{
@@ -816,6 +883,24 @@ button,input,select{font:inherit; color:inherit}
 
 /* layout */
 main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
+/* "Show images whole" (settings.wholeImages): posts carrying pictures may be
+   wider than the reading column, so images don't have to be shrunk to fit it.
+   main widens to make room; everything that isn't media is pinned back to
+   --col and centred, so text keeps its measure and the day/hour dividers stay
+   where they were. Media can't overflow its post: .post sets
+   content-visibility:auto, which implies paint containment and would clip it
+   (same reason .post.anchor has to turn it off). So the post itself grows. */
+:root[data-whole] main{max-width:min(calc(var(--col) * var(--media-mult, 1.75)), 100%)}
+:root[data-whole] .post,
+:root[data-whole] .feed-head,
+:root[data-whole] .day,
+:root[data-whole] .hour{max-width:var(--col); margin-inline:auto}
+:root[data-whole] .post.has-media{max-width:min(calc(var(--col) * var(--media-mult, 1.75)), 100%)}
+/* Text in a widened post must come out the same measure as text in an
+   ordinary one, so the cap is the column minus what the post's own box eats:
+   14px padding each side plus the 1px borders. */
+:root[data-whole] .post.has-media .pv-text,
+:root[data-whole] .post.has-media .post-meta-line{max-width:calc(var(--col) - 30px)}
 /* ---------- panels and forms (login, start, progress screens) ---------- */
 .panel{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:20px; box-shadow:var(--shadow)}
 .panel h1{font-size:1.5em; margin:0 0 4px}
@@ -973,9 +1058,45 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .imgs.n2 .img, .imgs.n4 .img{aspect-ratio:1/1}
 .imgs.n3 .img{aspect-ratio:1/1}
 .imgs.n3 .img:first-child{aspect-ratio:auto}
+/* Whole-image mode. Every cell carries its real ratio as --ar (set by
+   imagesHtml from the embed's aspectRatio); these rules let it win over the
+   square grid above. Rows are deliberately ragged: cells keep their own
+   height rather than being stretched or cropped to match a neighbour. */
+:root[data-whole] .imgs{align-items:start; gap:6px; overflow:visible; border-radius:0}
+/* No picture is taller than --media-cap, so even the tallest post leaves a
+   margin above and below it on screen. The cap has to be applied as a WIDTH:
+   on a box with an aspect-ratio, a max-height just shrinks the box's height
+   and leaves its width alone, so the picture letterboxes inside it instead of
+   getting smaller. Working out the width that yields that height (hence
+   --arw/--arh) keeps the box exactly the picture's shape. */
+:root[data-whole] .imgs .img{
+  border-radius:10px; overflow:hidden; height:auto; margin-inline:auto;
+  aspect-ratio:var(--ar, 1/1);
+  width:min(100%, calc(var(--media-cap) * var(--arw, 1) / var(--arh, 1)));
+}
+:root[data-whole] .imgs .img img{object-fit:contain}
+:root[data-whole] .imgs.n1 .img img{max-height:none}
+/* The n3 "first image spans two rows" rule above doesn't need undoing here:
+   in this mode the grid items are the .img-cell wrappers, so a grid-row on
+   the .img inside one has no effect. */
+/* A very tall picture (taller than TALL_RATIO) still fits the screen under
+   the cap above, but fitting makes it narrow and hard to actually read, so it
+   gets a button that lets it fill the post's width instead. Opened, it is
+   taller than the screen on purpose: that's the point of asking. */
+.tallwrap{position:relative; display:flex; flex-direction:column}
+.tallwrap .tall-cover{display:flex; justify-content:center; padding:6px 0 0}
+.tallwrap.open .tall-cover{display:none}
+:root[data-whole] .tallwrap.open .img{width:100%}
+/* The author's own description of the picture, shown under it. */
+.img-cell{display:flex; flex-direction:column; gap:4px; min-width:0}
+.alt-cap{font-size:.85em; color:var(--muted); line-height:1.4; white-space:pre-wrap}
 .alt-badge{position:absolute; left:6px; bottom:6px; background:rgba(0,0,0,.65); color:#fff; font-size:.7em; font-weight:700; padding:1px 5px; border-radius:4px}
 .ext{display:flex; flex-direction:column; border:1px solid var(--line); border-radius:10px; overflow:hidden; text-decoration:none; color:var(--ink)}
 .ext img{width:100%; aspect-ratio:1.91/1; object-fit:cover; display:block; background:var(--surface-2)}
+/* Whole-image mode with "don't crop link previews": show the thumbnail at
+   whatever shape it actually is. The external embed carries no aspectRatio,
+   so the image's own intrinsic size decides. */
+:root[data-whole-link] .ext img{aspect-ratio:auto; height:auto; object-fit:contain; max-height:var(--media-cap)}
 .ext-body{padding:8px 12px}
 .ext-title{font-weight:700; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
 .ext-desc{font-size:.88em; color:var(--muted); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
@@ -1003,6 +1124,11 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .video{position:relative; border-radius:10px; overflow:hidden; background:#000; max-height:560px; display:flex; align-items:center; justify-content:center}
 .video img{width:100%; height:100%; object-fit:contain; display:block}
 .video video{width:100%; max-height:560px; display:block; background:#000}
+/* Whole-image mode with "give video its own shape": drop the 560px cap so
+   tall (phone-shot) video isn't squeezed. The inline aspect-ratio videoHtml
+   already sets does the rest. */
+:root[data-whole-video] .video{max-height:var(--media-cap)}
+:root[data-whole-video] .video video{max-height:var(--media-cap)}
 .play{position:absolute; inset:0; margin:auto; width:64px; height:64px; border-radius:50%; border:0; background:rgba(0,0,0,.6); color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center}
 .play svg{width:28px; height:28px; margin-left:4px}
 .video-fail{padding:16px; color:#ddd; font-size:.9em; text-align:center}
@@ -1062,6 +1188,14 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .g-nav{position:absolute; top:50%; transform:translateY(-50%); width:34px; height:34px; border-radius:50%; border:0; background:rgba(0,0,0,.6); color:#fff; font-size:22px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0 0 3px}
 .g-nav.prev{left:8px} .g-nav.next{right:8px}
 .g-nav.off{display:none}
+/* Whole-image mode: the strip stays a strip (you asked for it to), but each
+   item keeps its own shape instead of being cropped to a fixed height, and
+   it may use the post's extra width. */
+/* Same cap as the grid, applied as a width for the same reason: a height on
+   a box with an aspect-ratio would letterbox a wide picture inside a narrow
+   post rather than making it smaller. */
+:root[data-whole] .g-item{height:auto; max-width:100%; width:min(100%, calc(var(--media-cap) * var(--arw, 1) / var(--arh, 1)))}
+:root[data-whole] .g-item img{object-fit:contain}
 .embed-unknown{border:1px dashed var(--line); border-radius:10px; padding:8px 10px; color:var(--muted); font-size:.9em}
 
 /* ---------- overlays: image lightbox, toast notifications, repost menu ---------- */
@@ -1096,7 +1230,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
       <div class="clock-sub" id="clockSub">Read your Bluesky Following feed from any point in time</div>
     </div>
     <div class="bar-actions">
-      <a class="bar-src" id="barSrc" href="https://github.com/choccccy/bsky-catch-up" target="_blank" rel="noopener" title="Open source, MIT licence — view this version on GitHub"><span class="src-v">v<span id="barVersion"></span> &middot; </span>MIT</a>
+      <a class="bar-src" id="barSrc" href="https://github.com/choccccy/bsky-catch-up" target="_blank" rel="noopener" title="Open source, MIT licence — see the code on GitHub"><span class="src-v">v<span id="barVersion"></span> &middot; </span>MIT</a>
       <button class="btn hidden" id="btnNew" type="button">New catch-up</button>
       <button class="btn" id="btnSettings" type="button">Settings</button>
       <button class="btn hidden" id="btnSignOut" type="button">Sign out</button>
@@ -1220,7 +1354,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "0.11.6";
+const APP_VERSION = "0.12.0";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -1271,6 +1405,7 @@ const DEFAULTS = {
   theme: "system", fontSize: 16, columnWidth: 640, timeFormat: "absolute", dayDividers: true, hourDividers: true, showCounts: true,
   showReposts: true, replies: "followed", showQuotes: true, onlyTypes: [], replyContext: "reminder", collapseRepeats: true, showOwn: true,
   sensitive: "blur", videoMode: "click", gifMode: "auto", preloadVideos: 3, confirmRepost: true, galleryProxy: true, galleryProxyHost: "xbsky.app",
+  wholeImages: "app", mediaWidth: 1, wholeAlt: true, wholeFullsize: true, wholeVideo: true, wholeLinkThumbs: true,
   contextCount: 12, scrollTo: "anchor", trackPosition: true, fetchMethod: "auto",
   concurrency: 6, rpm: 500, batchSize: 150,
 };
@@ -1328,8 +1463,13 @@ const POST_KINDS = [["images", "Images (1–4)"], ["gallery", "Galleries (5+)"],
    - sub               optional explanatory line under the label
    - apply             "look"   -> applyLook() (CSS variables / theme)
                        "render" -> rebuild the feed in place, keeping position
+                       "both"   -> applyLook() AND rebuild (for a setting that
+                                   changes both a root flag and the markup)
                        "videos" -> re-evaluate which videos are preloaded
-                       absent   -> value is just read the next time it's used */
+                       absent   -> value is just read the next time it's used
+   - when              {key, value}: this setting only applies while another
+                       setting has that value. Shown indented and greyed out
+                       otherwise (renderDrawer / syncDependents). */
 const SETTINGS_SCHEMA = [
   { group: "Appearance" },
   { key: "theme", link: true, label: "Theme", type: "select", options: [["system", "Match system"], ["light", "Light"], ["dark", "Dark"]], apply: "look" },
@@ -1351,6 +1491,13 @@ const SETTINGS_SCHEMA = [
   { key: "showOwn", link: true, label: "My own posts and reposts", type: "bool", apply: "render" },
   { key: "sensitive", link: true, label: "Adult or graphic media", type: "select", options: [["blur", "Blur"], ["show", "Show"], ["hide", "Hide the post"]], apply: "render" },
   { group: "Media and actions" },
+  { key: "wholeImages", link: true, label: "Show images whole", sub: "The Bluesky app crops pictures to squares and hides most of a gallery. \u201cShow them whole\u201d gives every picture its own shape, and lets posts with pictures be wider than the text column.", type: "select",
+    options: [["app", "Like the Bluesky app"], ["whole", "Show them whole"]], apply: "both" },
+  { key: "mediaWidth", when: { key: "wholeImages", value: "whole" }, link: true, label: "How much wider", sub: "Posts with pictures, as a multiple of the column width above. 1\u00d7 keeps them the same width as everything else. They never grow past the window.", type: "range", min: 1, max: 2.5, step: 0.25, unit: "\u00d7", apply: "look" },
+  { key: "wholeAlt", when: { key: "wholeImages", value: "whole" }, link: true, label: "Show the author's image description", sub: "Prints the alt text under the picture instead of hiding it behind the ALT badge.", type: "bool", apply: "render" },
+  { key: "wholeFullsize", when: { key: "wholeImages", value: "whole" }, link: true, label: "Load pictures at full size", sub: "Sharper when pictures are big, but downloads a lot more on a long catch-up.", type: "bool", apply: "render" },
+  { key: "wholeVideo", when: { key: "wholeImages", value: "whole" }, link: true, label: "Give video its own shape too", sub: "Otherwise tall video (the kind filmed on a phone) is squeezed.", type: "bool", apply: "look" },
+  { key: "wholeLinkThumbs", when: { key: "wholeImages", value: "whole" }, link: true, label: "Don't crop link previews", type: "bool", apply: "look" },
   { key: "videoMode", link: true, label: "Videos", type: "select", options: [["click", "Click to play"], ["autoplay", "Autoplay muted in view"]], apply: "render" },
   { key: "gifMode", link: true, label: "GIFs", sub: "Bluesky turns uploaded GIFs into short silent videos; these loop like GIFs. If your system asks for reduced motion, they always wait for a click.", type: "select", options: [["auto", "Play automatically"], ["click", "Click to play"]], apply: "render" },
   { key: "preloadVideos", link: true, label: "Videos to preload ahead", sub: "Buffers the first few seconds of the next videos so they start instantly when you press play. 0 turns this off.", type: "number", min: 0, max: 10, apply: "videos" },
@@ -1392,6 +1539,13 @@ function applyLook() {
   if (settings.theme === "system") r.removeAttribute("data-theme"); else r.setAttribute("data-theme", settings.theme);
   r.style.setProperty("--fs", settings.fontSize + "px");
   r.style.setProperty("--col", settings.columnWidth + "px");
+  // "Show images whole": a root flag the media CSS keys off, plus how much
+  // wider a post with pictures may be than the text column.
+  const whole = settings.wholeImages === "whole";
+  r.toggleAttribute("data-whole", whole);
+  r.toggleAttribute("data-whole-video", whole && settings.wholeVideo);
+  r.toggleAttribute("data-whole-link", whole && settings.wholeLinkThumbs);
+  r.style.setProperty("--media-mult", String(settings.mediaWidth));
   requestAnimationFrame(() => r.style.setProperty("--bar-h", $("#bar").offsetHeight + "px"));
 }
 
@@ -2125,6 +2279,11 @@ function isQuote(p) { const r = quotedRecordOf(p); return !!r && (r.$type?.start
    (what you see inside the quote counts too). "quote" = it quotes a post;
    "text" = no attachments at all. Tenor links and videos with the "gif"
    presentation hint count as GIFs, not links or videos. */
+/* Whether a post carries something that benefits from the extra width in
+   whole-image mode: a picture, a gallery, or a video/GIF. Link cards and
+   plain quotes don't widen the post. */
+const WIDE_KINDS = ["images", "gallery", "video", "gif"];
+function hasWideMedia(p) { const k = postKinds(p); return WIDE_KINDS.some(x => k.has(x)); }
 function postKinds(p) {
   const kinds = new Set();
   const scan = (e, inQuote) => {
@@ -2662,6 +2821,10 @@ function renderItem(it, i, ctx = "none") {
   if (it.key === state.anchorKey) el.classList.add("anchor", "bleed");
   else if (state.anchorViewIdx > 0 && i < state.anchorViewIdx) el.classList.add("context");
   if (ctx === "joined") el.classList.add("joined");
+  // In whole-image mode, only posts that actually carry a picture or video
+  // are allowed to be wider than the reading column (see the .has-media CSS).
+  // postKinds() already works out what a post (and its quote) contains.
+  if (wholeMode() && hasWideMedia(p)) el.classList.add("has-media");
   let html = "";
   if (isRepost(fi)) {
     const by = fi.reason.by || {};
@@ -2722,14 +2885,52 @@ function wrapSensitive(inner, p) {
   const lab = labelsOf(p).concat(labelsOf(p.author)).find(v => SENSITIVE.has(v)) || "sensitive";
   return `<div class="blurwrap blurred"><div class="blur-inner">${inner}</div><div class="blur-cover"><button type="button" data-act="reveal">Show ${esc(lab.replace("-", " "))} media</button></div></div>`;
 }
-/* Image grid (1-4 images, laid out like the Bluesky app). Single images keep
-   their aspect ratio; thumbnails load lazily; clicking opens the lightbox with
-   the full-size image and alt text. */
+/* A picture taller than this (height / width) fits the screen only by being
+   narrow, so in whole-image mode it gets a button that lets it fill the
+   post's width instead; see .tallwrap. */
+const TALL_RATIO = 2;
+/* Whether whole-image mode is on (settings.wholeImages). */
+function wholeMode() { return settings.wholeImages === "whole"; }
+/* "width/height" for an embed's aspectRatio, or null if it didn't send one.
+   Emitted as the custom property --ar rather than an inline aspect-ratio,
+   because an inline aspect-ratio would beat the stylesheet and break the
+   square grid that the default (Bluesky-app) layout depends on. The CSS
+   picks --ar up only under :root[data-whole]. */
+function arOf(x) {
+  const w = x?.aspectRatio?.width, h = x?.aspectRatio?.height;
+  if (!(w > 0 && h > 0)) return null;
+  // ratio is the "16/9" form for aspect-ratio; vars carries the same thing as
+  // --ar plus the two numbers separately, because CSS can't do arithmetic on
+  // "16/9" and the height cap is applied by working out the width that
+  // produces it (see --media-cap).
+  return { ratio: `${w}/${h}`, vars: `--ar:${w}/${h}; --arw:${w}; --arh:${h}`, tall: h / w > TALL_RATIO };
+}
+/* Image grid (1-4 images). By default this is the Bluesky app's layout:
+   squares, cropped to fill. With "Show images whole" on, every cell carries
+   its real ratio in --ar and nothing is cropped; optionally the author's alt
+   text is printed underneath and very tall pictures are capped (see
+   imagesWholeHtml). The markup for the default layout is deliberately
+   unchanged from before the setting existed, so it can't regress. */
 function imagesHtml(images, p) {
   const n = Math.min(images.length, 4);
+  if (wholeMode()) return wrapSensitive(`<div class="imgs n${n}">${images.slice(0, 4).map(imageCellHtml).join("")}</div>`, p);
   const one = n === 1 && images[0].aspectRatio ? ` style="aspect-ratio:${images[0].aspectRatio.width}/${images[0].aspectRatio.height}; max-height:520px"` : "";
   const cells = images.slice(0, 4).map(im => `<button class="img" type="button" data-act="zoom" data-full="${esc(im.fullsize)}" data-alt="${esc(im.alt || "")}"${n === 1 ? one : ""}><img src="${esc(im.thumb)}" alt="${esc(im.alt || "")}" loading="lazy">${im.alt ? '<span class="alt-badge">ALT</span>' : ""}</button>`).join("");
   return wrapSensitive(`<div class="imgs n${n}">${cells}</div>`, p);
+}
+/* One cell of a whole-image grid: the picture at its own shape, wrapped in a
+   height cap if it's very tall, with the alt text underneath if asked for.
+   The button stays inside .imgs so the lightbox still finds every picture in
+   the post (see the "zoom" action). */
+function imageCellHtml(im) {
+  const ar = arOf(im);
+  const src = settings.wholeFullsize ? (im.fullsize || im.thumb) : (im.thumb || im.fullsize);
+  const btn = `<button class="img" type="button" data-act="zoom" data-full="${esc(im.fullsize)}" data-alt="${esc(im.alt || "")}"${ar ? ` style="${ar.vars}"` : ""}><img src="${esc(src)}" alt="${esc(im.alt || "")}" loading="lazy">${im.alt && !settings.wholeAlt ? '<span class="alt-badge">ALT</span>' : ""}</button>`;
+  const body = ar?.tall
+    ? `<div class="tallwrap">${btn}<div class="tall-cover"><button class="btn" type="button" data-act="expand-img">Show this one larger</button></div></div>`
+    : btn;
+  const cap = settings.wholeAlt && im.alt ? `<div class="alt-cap">${esc(im.alt)}</div>` : "";
+  return `<div class="img-cell">${body}${cap}</div>`;
 }
 /* Video placeholder: thumbnail + play button. The actual <video> element and
    HLS player are only created on demand (attachVideo), so a feed with
@@ -2747,9 +2948,17 @@ function galleryHtml(e, p) {
     if (im.$type && im.$type !== "app.bsky.embed.gallery#viewImage" || !im.fullsize) {
       return `<div class="g-item g-unsupported"><a href="${esc(postUrl(p))}" target="_blank" rel="noopener">This item can't be shown here. Open on bsky.app</a>${count}</div>`;
     }
-    const ar = im.aspectRatio?.width && im.aspectRatio?.height ? `${im.aspectRatio.width}/${im.aspectRatio.height}` : "1/1";
-    return `<button class="img g-item" type="button" data-act="zoom" data-full="${esc(im.fullsize)}" data-alt="${esc(im.alt || "")}" style="aspect-ratio:${ar}">
-      <img src="${esc(im.thumbnail || im.fullsize)}" alt="${esc(im.alt || "")}" loading="lazy">${im.alt ? '<span class="alt-badge">ALT</span>' : ""}${count}</button>`;
+    // aspect-ratio inline (the strip has always sized its items by it), plus
+    // the same custom properties the whole-image cap needs; see --media-cap.
+    const a = arOf(im);
+    const ar = a ? `aspect-ratio:${a.ratio}; ${a.vars}` : "aspect-ratio:1/1";
+    // In whole-image mode the strip keeps its shape rather than cropping
+    // (CSS), and optionally loads the full-size file. Alt text stays on the
+    // badge and in the viewer here: a caption under a horizontally scrolling
+    // strip has nowhere good to sit.
+    const src = wholeMode() && settings.wholeFullsize ? (im.fullsize || im.thumbnail) : (im.thumbnail || im.fullsize);
+    return `<button class="img g-item" type="button" data-act="zoom" data-full="${esc(im.fullsize)}" data-alt="${esc(im.alt || "")}" style="${ar}">
+      <img src="${esc(src)}" alt=""${esc(im.alt || "")}" loading="lazy">${im.alt ? '<span class="alt-badge">ALT</span>' : ""}${count}</button>`;
   }).join("");
   return wrapSensitive(`<div class="gallery-wrap"><div class="gallery">${cells}</div>
     <button class="g-nav prev off" type="button" data-act="gscroll" data-dir="-1" aria-label="Previous image">‹</button>
@@ -3187,6 +3396,7 @@ document.addEventListener("click", ev => {
   }
   else if (act === "gscroll") scrollGallery(btn.closest(".gallery-wrap"), Number(btn.dataset.dir));
   else if (act === "reveal") { btn.closest(".blurwrap").classList.remove("blurred"); schedulePreload(); }
+  else if (act === "expand-img") btn.closest(".tallwrap").classList.add("open");
   else if (act === "expand-parent") {
     const it = state.itemByKey.get(btn.closest(".post")?.dataset.key);
     const parent = it?.fi.reply?.[btn.dataset.which === "root" ? "root" : "parent"];
@@ -3401,18 +3611,23 @@ function renderDrawer() {
   for (const s of SETTINGS_SCHEMA) {
     if (s.group) { html += `<h3>${esc(s.group)}</h3>`; continue; }
     const v = settings[s.key]; const id = "set-" + s.key;
+    // A setting with `when` only applies while another setting has a given
+    // value (see syncDependents): it is indented under its parent and greyed
+    // out, rather than hidden, so you can see what the mode would give you.
+    const dep = s.when ? ` sub-set${settings[s.when.key] === s.when.value ? "" : " off"}` : "";
     let ctl = "";
-    if (s.type === "bool") ctl = `<input type="checkbox" id="${id}" data-k="${s.key}" ${v ? "checked" : ""}>`;
-    else if (s.type === "select") ctl = `<select id="${id}" data-k="${s.key}">${s.options.map(([val, lab]) => `<option value="${val}" ${val === v ? "selected" : ""}>${esc(lab)}</option>`).join("")}</select>`;
-    else if (s.type === "range") ctl = `<span style="display:flex;align-items:center;gap:6px"><input type="range" id="${id}" data-k="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${v}"><span class="val" data-val="${s.key}">${v}${s.unit || ""}</span></span>`;
-    else if (s.type === "number") ctl = `<input type="number" id="${id}" data-k="${s.key}" min="${s.min}" max="${s.max}" value="${v}">`;
-    else if (s.type === "text") ctl = `<input type="text" id="${id}" data-k="${s.key}" value="${esc(v)}" placeholder="${esc(s.placeholder || "")}" spellcheck="false" autocomplete="off">`;
+    const dis = s.when && settings[s.when.key] !== s.when.value ? " disabled" : "";
+    if (s.type === "bool") ctl = `<input type="checkbox" id="${id}" data-k="${s.key}" ${v ? "checked" : ""}${dis}>`;
+    else if (s.type === "select") ctl = `<select id="${id}" data-k="${s.key}"${dis}>${s.options.map(([val, lab]) => `<option value="${val}" ${val === v ? "selected" : ""}>${esc(lab)}</option>`).join("")}</select>`;
+    else if (s.type === "range") ctl = `<span style="display:flex;align-items:center;gap:6px"><input type="range" id="${id}" data-k="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${v}"${dis}><span class="val" data-val="${s.key}">${v}${s.unit || ""}</span></span>`;
+    else if (s.type === "number") ctl = `<input type="number" id="${id}" data-k="${s.key}" min="${s.min}" max="${s.max}" value="${v}"${dis}>`;
+    else if (s.type === "text") ctl = `<input type="text" id="${id}" data-k="${s.key}" value="${esc(v)}" placeholder="${esc(s.placeholder || "")}" spellcheck="false" autocomplete="off"${dis}>`;
     else if (s.type === "multi") {
       ctl = `<div class="checks">${s.options.map(([val, lab]) => `<label><input type="checkbox" data-k="${s.key}" value="${val}" ${(v || []).includes(val) ? "checked" : ""}>${esc(lab)}</label>`).join("")}</div>`;
       html += `<div class="set multi"><label>${esc(s.label)}${s.sub ? `<span class="sub">${esc(s.sub)}</span>` : ""}</label>${ctl}</div>`;
       continue;
     }
-    html += `<div class="set"><label for="${id}">${esc(s.label)}${s.sub ? `<span class="sub">${esc(s.sub)}</span>` : ""}</label>${ctl}</div>`;
+    html += `<div class="set${dep}" data-row="${s.key}"><label for="${id}">${esc(s.label)}${s.sub ? `<span class="sub">${esc(s.sub)}</span>` : ""}</label>${ctl}</div>`;
   }
   html += `<h3>Reset</h3><button class="btn" type="button" id="btnResetSettings">Restore default settings</button><button class="btn" type="button" id="btnClearPos">Forget my reading position</button>`;
   d.innerHTML = html;
@@ -3431,14 +3646,26 @@ $("#drawer").addEventListener("input", ev => {
   if (s.type === "multi") v = $$(`#drawer [data-k="${s.key}"]:checked`).map(x => x.value);
   if (s.type === "number") { if (isNaN(v)) return; v = Math.max(s.min, Math.min(s.max, v)); }
   setSetting(s.key, v);
+  syncDependents();
   if (s.type === "range") $(`[data-val="${s.key}"]`).textContent = v + (s.unit || "");
-  if (s.apply === "look") applyLook();
+  if (s.apply === "look" || s.apply === "both") applyLook();
   if (s.apply === "videos") schedulePreload();
-  if (s.apply === "render" && state.run && !$("#viewFeed").classList.contains("hidden")) {
+  if ((s.apply === "render" || s.apply === "both") && state.run && !$("#viewFeed").classList.contains("hidden")) {
     clearTimeout(renderDebounce); renderDebounce = setTimeout(() => buildView({ fresh: false, keepPosition: true }), 250);
   }
   if (s.key === "contextCount" && !$("#viewStart").classList.contains("hidden")) prepareStart();
 });
+/* Greys out (and disables) the settings that only apply while another setting
+   has a particular value. Called when any setting changes, instead of
+   re-rendering the whole drawer, so the control you're using keeps focus. */
+function syncDependents() {
+  for (const s of SETTINGS_SCHEMA) {
+    if (!s.when) continue;
+    const on = settings[s.when.key] === s.when.value;
+    $(`#drawer [data-row="${s.key}"]`)?.classList.toggle("off", !on);
+    for (const el of $$(`#drawer [data-k="${s.key}"]`)) el.disabled = !on;
+  }
+}
 function openDrawer() { renderDrawer(); $("#drawer").classList.remove("hidden"); $("#scrim").classList.remove("hidden"); }
 function closeDrawer() { $("#drawer").classList.add("hidden"); $("#scrim").classList.add("hidden"); }
 $("#btnSettings").addEventListener("click", openDrawer);
@@ -3474,8 +3701,8 @@ window.addEventListener("unhandledrejection", ev => {
   // Provenance links (top bar + "About" block), pointed at the running version.
   for (const id of ["aboutVersion", "barVersion", "aboutDlVersion"]) $("#" + id).textContent = APP_VERSION;
   $("#aboutDownload").href = `${REPO_URL}/releases/download/v${APP_VERSION}/bluesky-catchup-v${APP_VERSION}.html`;
-  for (const id of ["aboutRelease", "barSrc"]) $("#" + id).href = `${REPO_URL}/releases/tag/v${APP_VERSION}`;
-  $("#aboutRepo").href = REPO_URL;
+  $("#aboutRelease").href = `${REPO_URL}/releases/tag/v${APP_VERSION}`;
+  for (const id of ["aboutRepo", "barSrc"]) $("#" + id).href = REPO_URL;
   $("#clockSub").textContent = "Read your Bluesky Following feed from any point in time";
   if (inEmbeddedFrame()) showBanner("This page is running inside another window (such as a chat preview), which may block it from reaching Bluesky. If signing in fails, download the file and open it directly in your browser.", { notice: true });
   const s = LS.get("session");
