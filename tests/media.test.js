@@ -225,14 +225,37 @@ test("an image with no aspectRatio just gets no --ar", async () => {
   assert.equal(page.$(".imgs .img").style.getPropertyValue("--ar"), "");
 });
 
-test("whole mode loads full-size files, and the sub-setting turns that off", async () => {
-  const srcs = p => p.$$(".imgs img").map(i => i.getAttribute("src"));
-  const on = await whole({ timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(2) }))] });
-  await on.startDate(h.BASE);
-  assert.deepEqual(srcs(on), ["full1.jpg", "full2.jpg"]);
-  const off = await whole({ timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(2) }))] }, { wholeFullsize: false });
-  await off.startDate(h.BASE);
-  assert.deepEqual(srcs(off), ["thumb1.jpg", "thumb2.jpg"]);
+test("the big file is offered only when the slot could use it", async () => {
+  // One image fills the post (~610px here), so at 2x it wants more than the
+  // 1000px thumbnail: both sizes are offered and the browser picks. Two
+  // images share the row (~302px each), so even a 3x phone can't use the
+  // 2000px file -- offering it would cost ~11MB of decoded memory for
+  // nothing, so it isn't offered at all.
+  const one = await whole({ timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(1) }))] });
+  await one.startDate(h.BASE);
+  const big = one.$(".imgs img");
+  assert.deepEqual(big.getAttribute("srcset").split(", "), ["thumb1.jpg 1000w", "full1.jpg 2000w"]);
+  assert.match(big.getAttribute("sizes"), /^\d+px$/);
+
+  const two = await whole({ timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(2) }))] });
+  await two.startDate(h.BASE);
+  for (const img of two.$$(".imgs img")) {
+    assert.equal(img.getAttribute("srcset").split(", ").length, 1, "small cells get the thumbnail only");
+    assert.match(img.getAttribute("srcset"), /^thumb\d\.jpg 1000w$/);
+  }
+  // src stays the thumbnail everywhere, so a browser without srcset is fine.
+  assert.deepEqual(two.$$(".imgs img").map(i => i.getAttribute("src")), ["thumb1.jpg", "thumb2.jpg"]);
+});
+
+test("every rendered image decodes off the main thread", async () => {
+  const page = await whole({ timeline: [
+    h.item(h.post("I", a, 10, { embed: h.embeds.images(2) })),
+    h.item(h.post("G", a, 11, { embed: h.embeds.gallery(3) })),
+  ] });
+  await page.startDate(h.BASE);
+  const imgs = page.$$("#feed .imgs img, #feed .gallery img");
+  assert.ok(imgs.length >= 5);
+  for (const i of imgs) assert.equal(i.getAttribute("decoding"), "async");
 });
 
 test("alt text becomes a caption, and replaces the ALT badge", async () => {
@@ -267,11 +290,13 @@ test("the lightbox still steps through every image in whole mode", async () => {
   assert.equal(lb.querySelector("img").getAttribute("src"), "full2.jpg");
 });
 
-test("galleries load full-size in whole mode but stay a strip", async () => {
+test("galleries offer both sizes in whole mode but stay a strip", async () => {
   const page = await whole({ timeline: [h.item(h.post("G", a, 10, { embed: h.embeds.gallery(6) }))] });
   await page.startDate(h.BASE);
   assert.equal(page.$(".gallery").children.length, 6, "still one strip of six");
-  assert.deepEqual(page.$$(".gallery img").map(i => i.getAttribute("src")).slice(0, 2), ["gfull1.jpg", "gfull2.jpg"]);
+  // A strip item fills the post, so both sizes are offered there.
+  assert.deepEqual(page.$$(".gallery img").map(i => i.getAttribute("src")).slice(0, 2), ["gthumb1.jpg", "gthumb2.jpg"]);
+  assert.deepEqual(page.$(".gallery img").getAttribute("srcset").split(", "), ["gthumb1.jpg 1000w", "gfull1.jpg 2000w"]);
   // Strip items size themselves from the inline aspect-ratio, and need the
   // two numbers as well so the height cap can be applied as a width.
   const it = page.$(".g-item");
@@ -310,4 +335,84 @@ test("the mode and its width can be set from a catch-up link", async () => {
   await page.setSetting("wholeImages", "whole");
   assert.ok(page.document.documentElement.hasAttribute("data-whole"));
   assert.equal(page.$$(".img-cell").length, 2);
+});
+
+test("images carry the author's alt text as a real alt attribute", async () => {
+  // 0.12.0 shipped a mangled gallery <img> whose alt text became a stray
+  // attribute, leaving alt empty for screen readers. Nothing asserted the
+  // attribute itself, so nothing caught it.
+  const page = await h.loadPage({ server: { timeline: [
+    h.item(h.post("G", a, 10, { embed: h.embeds.gallery(3) })),
+    h.item(h.post("I", a, 11, { embed: h.embeds.images(2) })),
+  ] } });
+  await page.startDate(h.BASE);
+  const altsOf = sel => page.$$(sel).map(i => i.getAttribute("alt"));
+  assert.deepEqual(altsOf(".gallery img"), ["", "second", ""], "gallery alt text reaches the img");
+  assert.deepEqual(altsOf(".imgs img"), ["first image", ""], "grid alt text reaches the img");
+  // No generated image may carry a junk attribute from a broken template.
+  for (const img of page.$$("#feed img")) {
+    const names = [...img.attributes].map(x => x.name);
+    assert.ok(names.every(n => /^[a-z-]+$/.test(n)), `odd attribute on an image: ${names.join(", ")}`);
+  }
+});
+
+test("whole mode keeps alt on the img even when it also shows a caption", async () => {
+  const page = await whole({ timeline: [h.item(h.post("I", a, 10, { embed: h.embeds.images(2) }))] });
+  await page.startDate(h.BASE);
+  assert.deepEqual(page.$$(".imgs img").map(i => i.getAttribute("alt")), ["first image", ""]);
+  assert.deepEqual(page.$$(".alt-cap").map(c => c.textContent), ["first image"]);
+});
+
+/** Makes the page believe canPlayType answers `answer` for HLS. */
+const sayHls = (page, answer) => {
+  page.window.HTMLMediaElement.prototype.canPlayType = function (t) {
+    return t === "application/vnd.apple.mpegurl" ? answer : "";
+  };
+};
+
+test('a "maybe" answer is not good enough to skip hls.js', async () => {
+  // Desktop Chrome answers "maybe" for HLS and then cannot play it. Trusting
+  // that answer breaks video on exactly the browsers that need hls.js, so
+  // only "probably" counts as native support.
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("V", a, 10, { embed: h.embeds.video() }))] } });
+  await page.startDate(h.BASE);
+  sayHls(page, "maybe");
+  page.$('[data-act="play"]').click();
+  await h.wait(30);
+  assert.equal(page.window.__hls.length, 1, "fell back to hls.js, as it must");
+  assert.equal(page.$(".video video").getAttribute("src"), null, "the stream did not go to the element");
+});
+
+test("a browser that plays HLS itself never reaches for hls.js", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("V", a, 10, { embed: h.embeds.video() }))] } });
+  await page.startDate(h.BASE);
+  sayHls(page, "probably");
+  page.$('[data-act="play"]').click();
+  await h.wait(30);
+  assert.equal(page.window.__hls.length, 0, "no hls.js player was built");
+  const v = page.$(".video video");
+  assert.equal(v.getAttribute("src"), "https://video.example/playlist.m3u8", "the stream went straight to the element");
+});
+
+test("without native HLS the page still builds an hls.js player", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("V", a, 10, { embed: h.embeds.video() }))] } });
+  await page.startDate(h.BASE);
+  page.$('[data-act="play"]').click();
+  await h.wait(30);
+  assert.equal(page.window.__hls.length, 1);
+  assert.equal(page.window.__hls[0].src, "https://video.example/playlist.m3u8");
+});
+
+test("the page fetches nothing at all when it loads", async () => {
+  // hls.js is fetched on demand (see ensureHls) and the typeface is embedded,
+  // so opening the page makes no third-party request: no ~600KB of JavaScript
+  // to parse for a reader who never watches a video, and a copy saved to disk
+  // looks the same offline.
+  // Read the FILE, not the loaded DOM: loadPage strips <script src> and <link>
+  // so tests never touch the network, which would hide a tag that came back.
+  const src = require("fs").readFileSync(h.PAGE_PATH, "utf8");
+  const head = src.slice(0, src.indexOf("</head>"));
+  assert.equal(head.match(/<script\s+src=/g), null, "no external script in the head");
+  assert.equal(head.match(/<link\s/g), null, "no stylesheet or preconnect in the head");
+  assert.equal(src.match(/fonts\.(googleapis|gstatic)\.com/g), null, "no Google Fonts reference anywhere");
 });

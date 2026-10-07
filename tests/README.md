@@ -39,9 +39,13 @@ CATCHUP_HTML=../path/to/page.html npm test
   up, fix the page, update the builders in `harness.js`, and add a test.
 - jsdom does no layout, so nothing here checks how things look (sizes,
   scrolling, sticky elements). Check those in a real browser.
-- External resources (Google Fonts, hls.js) are removed when loading the
-  page; hls.js is replaced by a small stand-in that records what the page
-  asks of it.
+- The page fetches nothing when it loads (the typeface is embedded, and
+  hls.js is fetched on demand), but `<script src>` and `<link>` are stripped
+  anyway so a test can never reach the network. A test that wants to assert
+  something about those tags must read the file at `h.PAGE_PATH`, not the
+  loaded DOM. hls.js is replaced by a small stand-in that records what the
+  page asks of it; `canPlayType` is left alone, so the page takes the
+  hls.js path unless a test says otherwise.
 
 ## Adding tests
 

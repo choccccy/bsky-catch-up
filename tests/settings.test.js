@@ -51,3 +51,46 @@ test("request-tuning settings are not shareable", async () => {
     assert.equal(page.eval(`linkable(SETTINGS_SCHEMA.find(s => s.key === "${k}"))`), false, k);
   }
 });
+
+test("the drawer opens with every group collapsed", async () => {
+  const page = await h.loadPage({});
+  page.window.openDrawer();
+  const groups = page.$$("#drawer details.group");
+  assert.ok(groups.length >= 5, "the groups are rendered as collapsible sections");
+  assert.deepEqual(groups.map(g => g.open), groups.map(() => false), "all start closed");
+  // Every setting lives inside a group, so nothing is stranded outside one.
+  const rows = page.$$("#drawer .set");
+  assert.ok(rows.length > 20);
+  for (const r of rows) assert.ok(r.closest("details.group"), `${r.dataset.row || "a row"} is outside a group`);
+});
+
+test("a group says how many of its settings you've changed", async () => {
+  const page = await h.loadPage({ settings: { hourDividers: false, theme: "dark" } });
+  page.window.openDrawer();
+  const badge = name => {
+    const g = page.$$("#drawer details.group").find(x => x.querySelector("summary").textContent.startsWith(name));
+    return g.querySelector(".group-sum")?.textContent ?? null;
+  };
+  assert.equal(badge("Appearance"), "2 changed", "theme and hourDividers both live here");
+  assert.equal(badge("What's in the feed"), null, "untouched groups say nothing");
+  // The harness itself loads with fetchMethod "timeline" (not the default
+  // "auto"), so this group is legitimately marked -- which is the badge
+  // doing its job, not a stray.
+  assert.equal(badge("Catching up"), "1 changed");
+});
+
+test("sub-settings are marked off while their parent setting doesn't apply", async () => {
+  const page = await h.loadPage({ settings: { wholeImages: "app" } });
+  page.window.openDrawer();
+  const subs = page.$$("#drawer .set.sub-set");
+  assert.ok(subs.length >= 4);
+  for (const r of subs) {
+    assert.ok(r.classList.contains("off"), `${r.dataset.row} should be marked off`);
+    assert.ok(r.querySelector("[data-k]").disabled, `${r.dataset.row} should be disabled`);
+  }
+  await page.setSetting("wholeImages", "whole");
+  for (const r of page.$$("#drawer .set.sub-set")) {
+    assert.ok(!r.classList.contains("off"), `${r.dataset.row} should be live now`);
+    assert.ok(!r.querySelector("[data-k]").disabled);
+  }
+});
