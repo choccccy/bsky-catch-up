@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 0.11.2
+  Version 0.11.3
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -218,11 +218,16 @@ PROJECT STATUS AND HANDOFF
   How the project is documented: this file explains itself. Its comments
   (this header, plus a comment on every section and function) are the
   documentation, including the changelog below. The owner prefers it that
-  way: don't add separate README/CHANGELOG/notes files. The only other
-  files are the tests (tests/, with a short tests/README.md on running
-  them) and four small non-documentation files the repository and the
-  host need: LICENSE, CNAME, .nojekyll and .gitignore (see "Hosting and
-  license" below).
+  way: the changelog and all maintainer notes stay in this file; don't add
+  a separate CHANGELOG.md or notes files. The one exception (added in
+  0.11.3) is a short README.md, which exists for people arriving at the
+  repository on GitHub: it is a signpost only -- what the page is, the two
+  ways to use it, and "the real documentation is the comment at the top of
+  index.html". Keep it short and don't let it grow into a second copy of
+  these notes. The other files are the tests (tests/, with a short
+  tests/README.md on running them) and four small non-documentation files
+  the repository and the host need: LICENSE, CNAME, .nojekyll and
+  .gitignore (see "Hosting and license" below).
 
   How it's worked on:
     - One change at a time, each released as a new version (see
@@ -303,6 +308,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [0.11.3] - 2026-10-07
+
+### Added
+
+- The page now says where it comes from. The top bar carries a quiet
+  "v0.11.3 · MIT" link in every view, signed in or not, pointing at the
+  exact release you're running; the "About this page" section on the
+  sign-in screen adds the source, the licence and the issue tracker. The
+  page is open source and shouldn't look like it appeared out of nowhere.
+- A README for people who find the project on GitHub. The documentation
+  itself stays where it has always been, in the comment at the top of this
+  file.
+
+### Changed
+
+- The note about only using copies you trust now points at the official
+  copy at <https://bsky-catch-up.choccy.gay/> to compare against.
 
 ## [0.11.2] - 2026-10-07
 
@@ -579,7 +602,12 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 - Short safety note on the sign-in page: create a new app password just for
   this page and leave direct-message access off.
-- "About this page and your privacy" section on the sign-in page: what the
+- Provenance. #barSrc in the top bar ("v<version> MIT") is visible in
+    every view, signed in or not, and links to this exact release; the
+    "About" block on the sign-in page has the fuller version (repository,
+    release, licence, issues). boot() fills both in from APP_VERSION and
+    REPO_URL, so they never need updating by hand.
+  - "About this page and your privacy" section on the sign-in page: what the
   page connects to, why a unique app password still matters, what "Stay
   signed in" stores, that likes and reposts are real, using only copies from
   people you trust, opening the file directly, and that it's not an official
@@ -677,7 +705,7 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v0.11.2 · Bluesky</title>
+<title>Catch-up v0.11.3 · Bluesky</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
@@ -726,7 +754,11 @@ button,input,select{font:inherit; color:inherit}
 .clock{display:flex; flex-direction:column; min-width:0; flex:1}
 .clock-time{font-weight:700; font-size:1.15em; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .clock-sub{font-size:.8em; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-.bar-actions{display:flex; gap:6px}
+.bar-actions{display:flex; gap:6px; align-items:center}
+/* Persistent provenance: the page says where it comes from in every view,
+   including while reading, not just on the sign-in screen. */
+.bar-src{font-size:.8em; color:var(--muted); text-decoration:none; white-space:nowrap; padding:0 4px}
+.bar-src:hover,.bar-src:focus-visible{color:var(--ink); text-decoration:underline}
 .btn{border:1px solid var(--line); background:var(--surface); border-radius:8px; padding:6px 12px; cursor:pointer}
 .btn:hover{background:var(--surface-2)}
 .btn.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:700}
@@ -999,7 +1031,10 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .menu button, .menu a{display:flex; align-items:center; gap:8px; width:100%; background:none; border:0; padding:8px 10px; border-radius:6px; text-align:left; cursor:pointer; color:var(--ink); text-decoration:none; font-size:.92em}
 .menu button:hover, .menu a:hover{background:var(--surface-2)}
 @media (prefers-reduced-motion: reduce){ *{transition:none !important} }
-@media (max-width:560px){ .bar-actions .btn{padding:6px 8px} .pv-handle{max-width:120px} }
+/* Narrow screens: the reading clock needs the room, so the provenance link
+   drops to just "MIT" (still linking to this release; the version is in the
+   "About" block and the link target). */
+@media (max-width:560px){ .bar-actions .btn{padding:6px 8px} .pv-handle{max-width:120px} .bar-src{padding:0 2px} .bar-src .src-v{display:none} }
 </style>
 </head>
 <body>
@@ -1014,6 +1049,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
       <div class="clock-sub" id="clockSub">Read your Bluesky Following feed from any point in time</div>
     </div>
     <div class="bar-actions">
+      <a class="bar-src" id="barSrc" href="https://github.com/choccccy/bsky-catch-up" target="_blank" rel="noopener" title="Open source, MIT licence — view this version on GitHub"><span class="src-v">v<span id="barVersion"></span> &middot; </span>MIT</a>
       <button class="btn hidden" id="btnNew" type="button">New catch-up</button>
       <button class="btn" id="btnSettings" type="button">Settings</button>
       <button class="btn hidden" id="btnSignOut" type="button">Sign out</button>
@@ -1052,11 +1088,12 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
     <details class="about">
       <summary>About this page and your privacy</summary>
       <ul>
+        <li><strong>Where this page comes from.</strong> It's an open-source project by <a href="https://choccy.gay" target="_blank" rel="noopener">choccy</a>. The source, the full change history and every past version live on <a id="aboutRepo" href="https://github.com/choccccy/bsky-catch-up" target="_blank" rel="noopener">GitHub</a> &mdash; you're running <a id="aboutRelease" href="https://github.com/choccccy/bsky-catch-up/releases" target="_blank" rel="noopener">version <span id="aboutVersion"></span></a>. It's free to use, copy and change under the <a href="https://github.com/choccccy/bsky-catch-up/blob/main/LICENSE" target="_blank" rel="noopener">MIT licence</a>. Found a bug, or want something it doesn't do? <a href="https://github.com/choccccy/bsky-catch-up/issues" target="_blank" rel="noopener">Open an issue</a>.</li>
         <li><strong>It runs entirely in your browser.</strong> There's no server behind this page. It connects only to Bluesky's own services (your account's server, Bluesky's public API, and plc.directory to look up which server hosts your account), plus Google Fonts for the typeface and jsDelivr for the video player library. Your password and posts are never sent anywhere else.</li>
         <li><strong>Why a separate app password, then?</strong> Because the page is a file that can be copied and edited, a unique password limits the damage if a copy was ever tampered with or your computer is compromised. App passwords can't change your password or email, or delete your account, and you can revoke each one individually.</li>
         <li><strong>“Stay signed in” stores a sign-in token, not your password,</strong> in this browser's local storage for this file. Settings and your reading position are stored there too. Uncheck it on a shared computer, and use “Sign out” when you're done.</li>
         <li><strong>Likes and reposts are real.</strong> They're posted to your actual account and are public, just as if you'd done them on bsky.app.</li>
-        <li><strong>Only use a copy from someone you trust.</strong> If someone sent you this file, you're trusting them not to have changed it. The code is plain, commented HTML and JavaScript, so anyone technical can open it in a text editor and check it.</li>
+        <li><strong>Only use a copy from someone you trust.</strong> If someone sent you this file, you're trusting them not to have changed it. The code is plain, commented HTML and JavaScript, so anyone technical can open it in a text editor and check it &mdash; and you can always compare it against, or just use, the official copy at <a href="https://bsky-catch-up.choccy.gay/" target="_blank" rel="noopener">bsky-catch-up.choccy.gay</a>.</li>
         <li><strong>Open the file directly in your browser.</strong> Previews (for example, inside a chat app or email) usually block the connections it needs. Recent versions of Chrome, Firefox, Edge and Safari all work.</li>
         <li><strong>This isn't an official Bluesky app.</strong> It's an independent tool using Bluesky's public API, and it isn't affiliated with or endorsed by Bluesky. If something breaks, use bsky.app as usual.</li>
       </ul>
@@ -1133,9 +1170,12 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 
 <script>
 "use strict";
-/* App version (semver). Keep in sync with the file header and the filename;
-   see VERSIONING at the top of the file. */
-const APP_VERSION = "0.11.2";
+/* App version (semver). Keep in sync with the file header and the <title>
+   tag; see VERSIONING at the top of the file. */
+const APP_VERSION = "0.11.3";
+/* Where this page comes from. Used by the provenance links on the sign-in
+   page, which boot() fills in so they always point at the running version. */
+const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
 /* ============================== utilities ============================== */
 /* Small DOM helpers. $ = first match, $$ = all matches as an array. */
 const $ = (s, el = document) => el.querySelector(s);
@@ -3202,7 +3242,7 @@ function show(name) {
   for (const v of ["login", "start", "progress", "feed"]) $("#view" + v[0].toUpperCase() + v.slice(1)).classList.toggle("hidden", v !== name);
   $("#btnNew").classList.toggle("hidden", !(name === "feed"));
   $("#btnSignOut").classList.toggle("hidden", name === "login");
-  if (name !== "feed") { $("#clockTime").textContent = "Catch-up"; $("#clockSub").textContent = `Read your Bluesky Following feed from any point in time · v${APP_VERSION}`; $("#stripFill").style.width = "0"; }
+  if (name !== "feed") { $("#clockTime").textContent = "Catch-up"; $("#clockSub").textContent = "Read your Bluesky Following feed from any point in time"; $("#stripFill").style.width = "0"; }
   if (name === "start") prepareStart();
   if (name === "login") { $("#loginErr").textContent = ""; }
 }
@@ -3383,7 +3423,11 @@ window.addEventListener("unhandledrejection", ev => {
 (async function boot() {
   applyLook();
   document.title = `Catch-up v${APP_VERSION} · Bluesky`;
-  $("#clockSub").textContent = `Read your Bluesky Following feed from any point in time · v${APP_VERSION}`;
+  // Provenance links (top bar + "About" block), pointed at the running version.
+  for (const id of ["aboutVersion", "barVersion"]) $("#" + id).textContent = APP_VERSION;
+  for (const id of ["aboutRelease", "barSrc"]) $("#" + id).href = `${REPO_URL}/releases/tag/v${APP_VERSION}`;
+  $("#aboutRepo").href = REPO_URL;
+  $("#clockSub").textContent = "Read your Bluesky Following feed from any point in time";
   if (inEmbeddedFrame()) showBanner("This page is running inside another window (such as a chat preview), which may block it from reaching Bluesky. If signing in fails, download the file and open it directly in your browser.", { notice: true });
   const s = LS.get("session");
   applyLinkSettings();              // settings carried by the link, if any (temporary)
