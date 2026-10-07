@@ -1,0 +1,14 @@
+{
+  "name": "bluesky-catchup-tests",
+  "private": true,
+  "description": "Automated tests for the single-file Bluesky Catch-up page, run against a simulated Bluesky API in jsdom.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
