@@ -37,7 +37,10 @@ jobs:
   deploy:
     name: Deploy to Pages
     needs: test                        # only runs if the suite passed
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Pushes to main deploy; so does a manual run from the Actions tab
+    # ("Run workflow"), which is how to re-deploy without a new commit.
+    # Pull requests are excluded: they run the tests and stop there.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       pages: write

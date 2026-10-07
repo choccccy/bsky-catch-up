@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 0.11.5
+  Version 0.11.6
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -164,11 +164,11 @@ LOCALSTORAGE KEYS (all prefixed "bcu:")
 KNOWN LIMITATIONS / THINGS TO VERIFY AGAINST THE LIVE API
   - Written and tested against a simulated API (tests/), not live Bluesky
     servers. The response shapes follow the published app.bsky lexicons.
-  - Unverified against the live services:
-      * likes/reposts since 0.10.1 (a report that likes weren't arriving
-        led to the 0.10.1 changes; awaiting confirmation they now do);
-      * the default gallery-link proxy host "xbsky.app" (a search found
-        fxbsky.app, bskx.app and vxbsky.app, but not xbsky.app);
+  - Confirmed against the live services by the owner (0.11.6):
+      * likes and reposts arrive on bsky.app (the 0.10.1 fix holds);
+      * the default gallery-link proxy host "xbsky.app" works, and has
+        for a long time.
+  - Still unverified against the live services:
       * CDN thumbnail URLs built for deeply nested attachments
         (mediaSummaryHtml), and the raw record shape of galleries
         (rawMedia guesses items[].image).
@@ -253,13 +253,13 @@ PROJECT STATUS AND HANDOFF
     - Things that can't be checked without live Bluesky (see KNOWN
       LIMITATIONS) are stated plainly, with what to look for.
 
-  Open items (waiting on real-world feedback):
-    - Likes/reposts: 0.10.1 changed how they're sent after a report that
-      likes weren't arriving on bsky.app. Not yet confirmed fixed. If it
-      recurs, the notice at the top of the page and the browser console
-      ("[catch-up]" lines) show what Bluesky answered.
-    - Gallery link proxy default "xbsky.app" is unverified (see KNOWN
-      LIMITATIONS).
+  Open items:
+    - None. The two that stood here (likes/reposts arriving on bsky.app
+      after the 0.10.1 fix, and the "xbsky.app" gallery proxy) were both
+      confirmed working against live Bluesky by the owner in 0.11.6. If
+      likes ever stop arriving again, the notice at the top of the page
+      and the browser console ("[catch-up]" lines) show what Bluesky
+      answered.
 
   Hosting and license (both settled in 0.11.2):
     - Repository: https://github.com/choccccy/bsky-catch-up
@@ -326,6 +326,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [0.11.6] - 2026-10-07
+
+### Changed
+
+- Maintainer notes only: likes, reposts and the default gallery-link proxy
+  have now been confirmed working against live Bluesky, so they are no
+  longer listed as unverified. Nothing about the page itself changed.
 
 ## [0.11.5] - 2026-10-07
 
@@ -744,7 +752,7 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v0.11.5 · Bluesky</title>
+<title>Catch-up v0.11.6 · Bluesky</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
@@ -1212,7 +1220,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "0.11.5";
+const APP_VERSION = "0.11.6";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
