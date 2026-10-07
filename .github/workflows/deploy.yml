@@ -1,0 +1,57 @@
+# Runs the test suite, and publishes the page to GitHub Pages only if it passes.
+# A failing suite leaves the live site on the last good version.
+#
+# Pages must be set to build from GitHub Actions for the deploy job to work
+# (Settings -> Pages -> Source: GitHub Actions), not from a branch.
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never let two deploys race; queue them instead of cancelling, so the last
+# push always ends up being the one that is live.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'          # tests/package.json requires >=20
+      - run: npm ci
+        working-directory: tests
+      - run: npm test
+        working-directory: tests
+
+  deploy:
+    name: Deploy to Pages
+    needs: test                        # only runs if the suite passed
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # A fresh checkout, so the artifact can't pick up tests/node_modules
+      # from the test job.
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4

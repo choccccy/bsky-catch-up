@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 0.11.4
+  Version 0.11.5
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -226,7 +226,8 @@ PROJECT STATUS AND HANDOFF
   (this header, plus a comment on every section and function) are the
   documentation, including the changelog below. The owner prefers it that
   way: the changelog and all maintainer notes stay in this file; don't add
-  a separate CHANGELOG.md or notes files. The one exception (added in
+  a separate CHANGELOG.md or notes files. (.github/workflows/deploy.yml is
+  infrastructure, not documentation; see "Hosting and license".) The one exception (added in
   0.11.3) is a short README.md, which exists for people arriving at the
   repository on GitHub: it is a signpost only -- what the page is, the two
   ways to use it, and "the real documentation is the comment at the top of
@@ -262,11 +263,21 @@ PROJECT STATUS AND HANDOFF
 
   Hosting and license (both settled in 0.11.2):
     - Repository: https://github.com/choccccy/bsky-catch-up
-    - Published at https://bsky-catch-up.choccy.gay/ by GitHub Pages,
-      serving the root of the main branch. Pushing to main deploys. The
+    - Published at https://bsky-catch-up.choccy.gay/ by GitHub Pages. The
       CNAME file in the repository root holds the custom domain; a DNS
       CNAME record points bsky-catch-up.choccy.gay at choccccy.github.io.
       The .nojekyll file stops GitHub running the page through Jekyll.
+      choccy.gay is a verified domain on the GitHub account, so nobody
+      else can claim a *.choccy.gay name on Pages; the
+      _github-pages-challenge-choccccy TXT record that proves it must stay
+      in DNS.
+    - Pushing to main runs .github/workflows/deploy.yml: the test suite
+      first, and the page is published ONLY if it passes (added in
+      0.11.5). A failing suite leaves the live site on the last good
+      version. Pages is set to build from GitHub Actions, not from a
+      branch -- don't switch it back, or the gate is bypassed and every
+      push goes live untested. Pull requests run the tests but never
+      deploy.
     - The file is always index.html, never renamed per version; see
       VERSIONING for why, and for where versions are recorded instead.
     - Licensed MIT (LICENSE in the repository root; also declared by the
@@ -315,6 +326,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [0.11.5] - 2026-10-07
+
+### Changed
+
+- The hosted page is now published only after its test suite passes, so a
+  broken change can't reach https://bsky-catch-up.choccy.gay/ -- if the
+  tests fail the site stays on the last good version. Nothing about the
+  page itself changed.
 
 ## [0.11.4] - 2026-10-07
 
@@ -724,7 +744,7 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v0.11.4 · Bluesky</title>
+<title>Catch-up v0.11.5 · Bluesky</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
@@ -1192,7 +1212,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "0.11.4";
+const APP_VERSION = "0.11.5";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
