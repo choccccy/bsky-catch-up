@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 0.11.3
+  Version 0.11.4
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -31,6 +31,13 @@ VERSIONING
   tag (vX.Y.Z) and in the GitHub Release; a copy renamed
   bluesky-catchup-vX.Y.Z.html is attached to that Release for people who
   want to download a pinned copy and run it from disk.
+
+  That attachment is load-bearing: the "keep your own copy" link in the
+  sign-in page's About block points at
+    <repo>/releases/download/vX.Y.Z/bluesky-catchup-vX.Y.Z.html
+  built from APP_VERSION, so every release MUST attach a file with exactly
+  that name or the link 404s. The same goes for the tag itself, which the
+  top-bar link points at.
 
 WHAT THIS IS
   A self-contained web page (this one file) that you open straight from disk
@@ -308,6 +315,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [0.11.4] - 2026-10-07
+
+### Added
+
+- "About this page" now says that you can keep your own copy: the page is a
+  single HTML file you can download and open from your disk, with a direct
+  link to this version's file. It also points out that the file documents
+  itself -- how it works, the settings and the full changelog are in a
+  comment at the top -- so a saved copy is self-contained and doesn't
+  depend on this site staying up.
 
 ## [0.11.3] - 2026-10-07
 
@@ -605,7 +623,8 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
 - Provenance. #barSrc in the top bar ("v<version> MIT") is visible in
     every view, signed in or not, and links to this exact release; the
     "About" block on the sign-in page has the fuller version (repository,
-    release, licence, issues). boot() fills both in from APP_VERSION and
+    release, licence, issues, and a direct download of this version's
+    HTML). boot() fills both in from APP_VERSION and
     REPO_URL, so they never need updating by hand.
   - "About this page and your privacy" section on the sign-in page: what the
   page connects to, why a unique app password still matters, what "Stay
@@ -705,7 +724,7 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v0.11.3 · Bluesky</title>
+<title>Catch-up v0.11.4 · Bluesky</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
@@ -1089,6 +1108,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
       <summary>About this page and your privacy</summary>
       <ul>
         <li><strong>Where this page comes from.</strong> It's an open-source project by <a href="https://choccy.gay" target="_blank" rel="noopener">choccy</a>. The source, the full change history and every past version live on <a id="aboutRepo" href="https://github.com/choccccy/bsky-catch-up" target="_blank" rel="noopener">GitHub</a> &mdash; you're running <a id="aboutRelease" href="https://github.com/choccccy/bsky-catch-up/releases" target="_blank" rel="noopener">version <span id="aboutVersion"></span></a>. It's free to use, copy and change under the <a href="https://github.com/choccccy/bsky-catch-up/blob/main/LICENSE" target="_blank" rel="noopener">MIT licence</a>. Found a bug, or want something it doesn't do? <a href="https://github.com/choccccy/bsky-catch-up/issues" target="_blank" rel="noopener">Open an issue</a>.</li>
+        <li><strong>You can keep your own copy.</strong> The whole thing is one HTML file: <a id="aboutDownload" href="https://github.com/choccccy/bsky-catch-up/releases" target="_blank" rel="noopener">download version <span id="aboutDlVersion"></span></a> (or just save this page) and open it straight from your disk. It works exactly the same, needs no server or install, and keeps working even if this site ever goes away. Everything is in that one file, documentation included: how it works, every setting and the full history of changes are written as a comment at the top, so you can open it in any text editor and read it.</li>
         <li><strong>It runs entirely in your browser.</strong> There's no server behind this page. It connects only to Bluesky's own services (your account's server, Bluesky's public API, and plc.directory to look up which server hosts your account), plus Google Fonts for the typeface and jsDelivr for the video player library. Your password and posts are never sent anywhere else.</li>
         <li><strong>Why a separate app password, then?</strong> Because the page is a file that can be copied and edited, a unique password limits the damage if a copy was ever tampered with or your computer is compromised. App passwords can't change your password or email, or delete your account, and you can revoke each one individually.</li>
         <li><strong>“Stay signed in” stores a sign-in token, not your password,</strong> in this browser's local storage for this file. Settings and your reading position are stored there too. Uncheck it on a shared computer, and use “Sign out” when you're done.</li>
@@ -1172,7 +1192,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "0.11.3";
+const APP_VERSION = "0.11.4";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -3424,7 +3444,8 @@ window.addEventListener("unhandledrejection", ev => {
   applyLook();
   document.title = `Catch-up v${APP_VERSION} · Bluesky`;
   // Provenance links (top bar + "About" block), pointed at the running version.
-  for (const id of ["aboutVersion", "barVersion"]) $("#" + id).textContent = APP_VERSION;
+  for (const id of ["aboutVersion", "barVersion", "aboutDlVersion"]) $("#" + id).textContent = APP_VERSION;
+  $("#aboutDownload").href = `${REPO_URL}/releases/download/v${APP_VERSION}/bluesky-catchup-v${APP_VERSION}.html`;
   for (const id of ["aboutRelease", "barSrc"]) $("#" + id).href = `${REPO_URL}/releases/tag/v${APP_VERSION}`;
   $("#aboutRepo").href = REPO_URL;
   $("#clockSub").textContent = "Read your Bluesky Following feed from any point in time";
