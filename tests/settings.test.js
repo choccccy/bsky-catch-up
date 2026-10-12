@@ -134,3 +134,54 @@ test("each setting you've changed is marked, and the marks keep up", async () =>
   assert.equal(badge("Appearance"), "1 changed");
   assert.equal(page.$('[data-row="theme"]').title, "");
 });
+
+test("no JavaScript-style escape sequences leak into the markup", async () => {
+  // A \uXXXX escape means something inside a JS string, and nothing at all in
+  // HTML text or an attribute, where it shows up literally on screen. 0.14.0
+  // shipped one to the start screen ("where “from a date”"), so
+  // guard the markup region: everything before <script> is HTML and CSS.
+  const src = require("fs").readFileSync(h.PAGE_PATH, "utf8");
+  const markup = src.slice(0, src.indexOf('<script>\n"use strict"'));
+  const found = [...markup.matchAll(/\\u[0-9a-fA-F]{4}/g)].map(m => {
+    const line = markup.slice(0, m.index).split("\n").length;
+    return `line ${line}: ${m[0]}`;
+  });
+  assert.deepEqual(found, [], "use the real character in markup, not an escape");
+});
+
+test("the page tells the browser which way it is shaded", async () => {
+  // Without color-scheme, the controls the browser draws itself (number
+  // spinners, the date picker, dropdowns, scrollbars) stay light on a dark
+  // page: a white box with our light text in it, unreadable.
+  const src = require("fs").readFileSync(h.PAGE_PATH, "utf8");
+  const css = src.slice(src.indexOf("<style>"), src.indexOf("</style>"));
+  const darkBlocks = [...css.matchAll(/(:root\[data-theme="dark"\]|:root:not\(\[data-theme="light"\]\))\s*\{([^}]*)\}/g)];
+  assert.ok(darkBlocks.length >= 2, "both ways of being dark are covered");
+  for (const [, sel, body] of darkBlocks) {
+    assert.match(body, /color-scheme\s*:\s*dark/, `${sel} must set color-scheme`);
+  }
+  assert.match(css, /:root\{[^}]*color-scheme\s*:\s*light/s, "the light palette sets it too");
+});
+
+test("every text-like field in the start form is actually styled", async () => {
+  // An input type that no rule matches falls back to the browser's own white
+  // box, which is how the recent-posts count became unreadable in 0.14.0.
+  // Checked against the stylesheet text, not getComputedStyle: jsdom doesn't
+  // resolve var() or the cascade, so a DOM check here passes either way.
+  const page = await h.loadPage({});
+  const src = require("fs").readFileSync(h.PAGE_PATH, "utf8");
+  const css = src.slice(src.indexOf("<style>"), src.indexOf("</style>"));
+  // Only a rule that actually paints a background counts: a .field rule that
+  // just sets a width leaves the browser's own white box showing through.
+  const covered = new Set();
+  for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    if (!/background/.test(body)) continue;
+    for (const m of selector.matchAll(/\.field input\[type=([a-z-]+)\]/g)) covered.add(m[1]);
+  }
+  for (const el of page.$$("#startForm input")) {
+    if (["radio", "checkbox"].includes(el.type)) continue;
+    const inline = /background/.test(el.getAttribute("style") || "");
+    assert.ok(covered.has(el.type) || inline,
+      `#${el.id} is type=${el.type}, which no .field rule covers and which has no inline background`);
+  }
+});

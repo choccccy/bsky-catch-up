@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 0.13.1
+  Version 0.14.0
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -68,7 +68,14 @@ HOW IT WORKS (high-level data flow)
                user's PDS. The PDS proxies app.bsky.* calls to the Bluesky
                AppView. xrpc() handles pacing (requests/minute), retries,
                429 rate-limit pauses, and access-token refresh.
-  3. Fetching  gather() decides how to get posts back to a timestamp:
+  3. Fetching  A catch-up reads one feed: the Following timeline (the
+               default), a custom feed, or a list. All three return the same
+               app.bsky.feed.defs#feedViewPost shape, so only the request
+               differs -- see feedQuery() and fetchFeed(). The start can also
+               be "the newest N posts" instead of a time, which is the only
+               thing that means much on a feed that ranks posts rather than
+               ordering them by time.
+               gather() decides how to get posts back to a timestamp:
                  a) "timeline": page app.bsky.feed.getTimeline backwards.
                     Fast, but the server may stop serving old pages.
                  b) "rebuild": fetch the follow list (getFollows), then page
@@ -113,6 +120,15 @@ CATCH-UP LINKS (URL #fragment)
     #from=<point>&to=<point>      start there, stop at the end point
     #resume                       resume from your saved position
     #resume&to=<point>            ...and stop at an end point
+    #recent=<n>                   read the newest n posts, oldest first
+  Any of these can name a feed to read instead of the Following timeline:
+    &feed=<at-uri>                a custom feed or a list
+  The URI is the at:// form (app.bsky.feed.generator or app.bsky.graph.list);
+  the name shown comes from the account's saved feeds, or from the URI when
+  it isn't one of them. A copy of the page older than 0.14.0 doesn't
+  understand feed=, which is why LINK_FORMAT was bumped to 2: such a copy
+  shows the "made by a newer version" notice rather than quietly reading
+  Following instead.
   Settings can be added to any of these (or used on their own) as
     &s.<setting key>=<value>
   e.g. #from=2026-10-01&s.onlyTypes=gallery,video&s.hourDividers=0
@@ -220,6 +236,14 @@ KNOWN LIMITATIONS / THINGS TO VERIFY AGAINST THE LIVE API
       * CDN thumbnail URLs built for deeply nested attachments
         (mediaSummaryHtml), and the raw record shape of galleries
         (rawMedia guesses items[].image).
+  - Custom feeds: how far back one can be paged is entirely the feed
+    generator's choice, and there is no way to ask in advance. Many keep only
+    a few hundred recent posts, so "from a date" can quietly reach less far
+    than asked; gather() says how far it got. Ranked feeds (Discover, and
+    most "for you" style feeds) aren't in time order at all, so reading them
+    from a date is close to meaningless -- the "newest N posts" start exists
+    for those. Rebuilding from follows can't help here: it only reconstructs
+    the Following feed.
   - Pictures: Bluesky serves only two sizes (feed_thumbnail ~1000px and
     feed_fullsize ~2000px), so the choice imgSrcAttrs() offers the browser is
     coarse. A 2x display will take the big file for any picture wider than
@@ -377,6 +401,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [0.14.0] - 2026-10-12
+
+### Added
+
+- You can now catch up on a custom feed or a list, not just Following. Feeds
+  you've saved on Bluesky appear in a picker on the start screen (pinned ones
+  first), and you can paste a link to any feed or list that isn't saved.
+  Catch-up links remember which feed they were for.
+- A third way to start: **the most recent posts**. Pick how many and they're
+  shown oldest first, like everything else. Feeds that rank posts rather than
+  putting them in time order -- "for you" style feeds -- don't really have a
+  "since Tuesday", so this is the sensible way to read them.
+- When a feed can't reach as far back as you asked, the line above the feed
+  now says so and names the feed. How much history a custom feed keeps is up
+  to whoever made it, and there's no way to know before asking.
+
+### Fixed
+
+- Boxes you type a number into (how many recent posts to read) were drawn by
+  the browser in its own colours, which on a dark page meant pale text in a
+  white box. The page now tells the browser which way it is shaded, so the
+  bits of a form the browser draws for itself -- number spinners, the date
+  picker, dropdowns, scrollbars -- match the rest of it. This was never right
+  in dark mode; the new field just made it obvious.
+
+### Changed
+
+- The start screen only explains the option you've picked. Each of the four
+  ways to start used to show its input and its paragraph of guidance at once,
+  which made the screen twice as tall as it needed to be once the feed picker
+  arrived. "Resume where I left off" still shows which post you'd land on
+  without being picked first, since that's how you decide whether to pick it.
+- The ways to start are now ordered from the most specific to the broadest:
+  resume, then a particular post, then a date and time, then simply the most
+  recent posts.
+- The feed picker lost its "Feed" label; the control's first entry reads
+  "Following", which already says what it is.
+- The list of accounts you follow is now only loaded when something actually
+  needs it -- the "replies to people I follow" setting, or rebuilding the
+  Following feed. Starting a catch-up on a custom feed with another reply
+  setting no longer spends a pile of requests fetching it for nothing.
+
+### Note
+
+- This page only ever *reads* your Bluesky preferences, to find your saved
+  feeds. It never writes them: saving preferences replaces all of them at
+  once, and a mistake there would take your muted words with it.
 
 ## [0.13.1] - 2026-10-07
 
@@ -891,7 +963,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v0.13.1 · Bluesky</title>
+<title>Catch-up v0.14.0 · Bluesky</title>
 <style>
 /* ---------- Atkinson Hyperlegible ----------
    Embedded rather than fetched from Google Fonts, so a copy saved to disk
@@ -931,14 +1003,22 @@ site with this release.
      even the biggest leaves a margin above and below it. */
   --media-cap:calc((100vh - var(--bar-h, 58px)) * 0.9);
   --font:"Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* The parts of a form the browser draws for itself -- number spinners, the
+     date picker, dropdown menus, scrollbars -- follow this, not our colours.
+     Without it they stay light on a dark page: white boxes with our light
+     text in them, which is how the "most recent posts" count ended up
+     unreadable. Every block that sets the dark palette sets this too. */
+  color-scheme:light;
 }
 :root[data-theme="dark"]{
+  color-scheme:dark;
   --bg:#0F141B; --surface:#171E27; --surface-2:#1E2732; --ink:#E3E8EF; --muted:#8E9AAB; --line:#2A3441;
   --accent:#8EA6FF; --accent-ink:#0F141B; --like:#FF6B9A; --repost:#4CC495; --anchor:#3A3312; --anchor-line:#C9A227; --hour-bg:#1C2640;
   --shadow:none;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
+    color-scheme:dark;
     --bg:#0F141B; --surface:#171E27; --surface-2:#1E2732; --ink:#E3E8EF; --muted:#8E9AAB; --line:#2A3441;
     --accent:#8EA6FF; --accent-ink:#0F141B; --like:#FF6B9A; --repost:#4CC495; --anchor:#3A3312; --anchor-line:#C9A227; --hour-bg:#1C2640;
     --shadow:none;
@@ -1003,14 +1083,25 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .panel p{margin:0 0 12px; color:var(--muted)}
 .field{display:flex; flex-direction:column; gap:4px; margin-bottom:12px}
 .field label{font-weight:700; font-size:.9em}
-.field input[type=text], .field input[type=password], .field input[type=datetime-local], .field input[type=url]{
+.field input[type=text], .field input[type=password], .field input[type=datetime-local], .field input[type=url], .field input[type=number]{
   border:1px solid var(--line); background:var(--surface-2); border-radius:8px; padding:9px 10px; width:100%}
+/* A count, not a sentence: it shouldn't stretch the width of the panel. */
+.field input[type=number]{width:7em}
+/* Same for a date: let the browser's control be its natural size. */
+.field input[type=datetime-local]{width:auto; max-width:100%}
 .hint{font-size:.85em; color:var(--muted)}
 .err{color:var(--like); font-size:.9em; margin-top:8px; white-space:pre-wrap}
 .choice{display:block; border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:10px; cursor:pointer}
 .choice:has(input:checked){border-color:var(--accent); background:var(--surface-2)}
 .choice > span{font-weight:700}
 .choice .choice-body{margin-top:8px}
+/* Only the chosen option explains itself. Four open bodies at once made the
+   start screen twice as tall as it needed to be; this is the same "hidden
+   until you want it" idea as .end-box, applied to the radios.
+   #resumeDesc is exempt: it says which post you'd resume to, which is how you
+   decide whether to pick resume at all. Hiding it until you choose would mean
+   choosing blind. */
+.choice:not(:has(input:checked)) .choice-body:not(#resumeDesc){display:none}
 .choice input[type=radio]{margin-right:8px}
 .who{display:flex; align-items:center; gap:10px; margin-bottom:16px}
 .who img{width:36px; height:36px; border-radius:50%}
@@ -1243,6 +1334,11 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 
 /* settings drawer */
 /* ---------- settings drawer (built dynamically from SETTINGS_SCHEMA) ---------- */
+/* Feed picker on the start screen. */
+.feed-pick select{border:1px solid var(--line); background:var(--surface-2); border-radius:8px; padding:8px 10px; width:100%}
+/* An empty hint still costs a flex gap; Following has nothing to warn about. */
+#feedHint:empty{display:none}
+.feed-pick .hint{margin-top:6px}
 .drawer-scrim{position:fixed; inset:0; background:rgba(0,0,0,.3); z-index:40}
 .drawer{position:fixed; top:0; right:0; bottom:0; width:min(380px, 100vw); background:var(--surface); border-left:1px solid var(--line); z-index:41; overflow-y:auto; padding:16px 18px 40px}
 .drawer h2{font-size:1.2em; margin:0 0 4px; display:flex; justify-content:space-between; align-items:center}
@@ -1404,13 +1500,20 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
     <h1>Where do you want to start reading?</h1>
     <p>Posts load oldest first, so you scroll down to move forward in time.</p>
     <form id="startForm">
+      <!-- Which feed to read. Following unless the account has saved feeds
+           or a feed/list link is pasted; see loadSavedFeeds(). No label: the
+           first option reads "Following", which says what the control is. -->
+      <div class="field feed-pick">
+        <select id="inFeed"><option value="">Following</option></select>
+        <div class="field hidden" id="feedUrlBox" style="margin:8px 0 0">
+          <input type="url" id="inFeedUrl" placeholder="https://bsky.app/profile/someone.bsky.social/feed/whats-hot">
+          <span class="hint">Paste a link to a feed or a list.</span>
+        </div>
+        <div class="hint" id="feedHint"></div>
+      </div>
       <label class="choice" id="choiceResume">
         <span><input type="radio" name="kind" value="resume">Resume where I left off</span>
         <div class="choice-body hint" id="resumeDesc"></div>
-      </label>
-      <label class="choice">
-        <span><input type="radio" name="kind" value="date">From a date and time</span>
-        <div class="choice-body"><input type="datetime-local" id="inDate" style="border:1px solid var(--line); background:var(--surface-2); border-radius:8px; padding:8px 10px"></div>
       </label>
       <label class="choice">
         <span><input type="radio" name="kind" value="post">From a specific post</span>
@@ -1419,12 +1522,23 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
           <span class="hint" id="postHint">Paste a post link. The feed starts there, with a few earlier posts above it for context. If you saw it as a repost, it finds the repost.</span>
         </div>
       </label>
+      <label class="choice">
+        <span><input type="radio" name="kind" value="date">From a date and time</span>
+        <div class="choice-body field"><input type="datetime-local" id="inDate"></div>
+      </label>
+      <label class="choice">
+        <span><input type="radio" name="kind" value="recent">The most recent posts</span>
+        <div class="choice-body field" style="margin:8px 0 0">
+          <input type="number" id="inRecent" min="1" max="2000" value="200">
+          <span class="hint">Reads this many of the newest posts and shows them oldest first. Best for feeds that rank posts rather than ordering them by time, where “from a date” doesn’t mean much.</span>
+        </div>
+      </label>
       <!-- Optional end point. Unchecked (the default) means "read up to now". -->
       <label class="end-toggle"><input type="checkbox" id="inUseEnd"> Stop at a specific point instead of now</label>
       <div class="end-box hidden" id="endBox">
         <label class="choice">
           <span><input type="radio" name="endKind" value="date" checked>At a date and time</span>
-          <div class="choice-body"><input type="datetime-local" id="inEndDate" style="border:1px solid var(--line); background:var(--surface-2); border-radius:8px; padding:8px 10px"></div>
+          <div class="choice-body field"><input type="datetime-local" id="inEndDate"></div>
         </label>
         <label class="choice">
           <span><input type="radio" name="endKind" value="post">At a specific post</span>
@@ -1470,7 +1584,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "0.13.1";
+const APP_VERSION = "0.14.0";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -1973,14 +2087,33 @@ async function loadFollows(signal, onProgress) {
    Returns {items, exhausted, oldest}. exhausted=true means the server ran
    out of pages (no cursor / empty page) before reaching `until`, which is the
    signal for "auto" mode to fall back to rebuilding. */
-async function fetchTimeline(until, signal, onProgress) {
+/* Which feed a catch-up reads:
+     {kind:"timeline"}                     the Following feed (the default,
+                                           and all there was before 0.14.0)
+     {kind:"feed",  uri, name}             a custom feed generator
+     {kind:"list",  uri, name}             a list
+   All three return app.bsky.feed.defs#feedViewPost, the same shape, so only
+   the request differs -- everything downstream is untouched. */
+const FOLLOWING = { kind: "timeline", name: "Following" };
+function feedQuery(src) {
+  if (src?.kind === "feed") return ["app.bsky.feed.getFeed", { feed: src.uri }];
+  if (src?.kind === "list") return ["app.bsky.feed.getListFeed", { list: src.uri }];
+  return ["app.bsky.feed.getTimeline", {}];
+}
+/* Pages a feed newest-first until it reaches `until` (a timestamp) or has
+   `max` items, whichever is asked for. "exhausted" means the feed ran out
+   before that -- common on custom feeds, where how far back you can page is
+   entirely the generator's choice and often only a few hundred posts. */
+async function fetchFeed(src, { until = null, max = 0 }, signal, onProgress) {
+  const [method, params] = feedQuery(src);
   const out = []; let cursor; const now = Date.now(); let oldest = now;
   for (let page = 0; page < 3000; page++) {
-    const r = await xrpc("app.bsky.feed.getTimeline", { limit: 100, cursor }, { signal });
+    const r = await xrpc(method, { ...params, limit: 100, cursor }, { signal });
     const feed = r.feed || [];
     for (const fi of feed) { const it = mkItem(fi); out.push(it); if (it.t < oldest) oldest = it.t; }
-    onProgress?.({ oldest, fraction: Math.min(1, (now - oldest) / Math.max(1, now - until)), count: out.length });
-    if (oldest < until) return { items: out, exhausted: false, oldest };
+    const fraction = max ? Math.min(1, out.length / max) : Math.min(1, (now - oldest) / Math.max(1, now - until));
+    onProgress?.({ oldest, fraction, count: out.length });
+    if (max ? out.length >= max : oldest < until) return { items: max ? out.slice(0, max) : out, exhausted: false, oldest };
     if (!r.cursor || !feed.length) return { items: out, exhausted: true, oldest };
     cursor = r.cursor;
   }
@@ -2034,17 +2167,25 @@ async function fetchRebuild(until, signal, onProgress) {
    isn't visible, e.g. during "Load newer posts").
    Returns {items, method: "timeline"|"rebuild", note} where note is a
    human-readable explanation shown in the feed header. */
-async function gather(until, signal, label) {
-  let note = "", method = "timeline";
-  const fm = settings.fetchMethod;
+async function gather(src, until, max, signal, label) {
+  let note = "", method = src.kind === "timeline" ? "timeline" : src.kind;
+  // Rebuilding means paging every account you follow, which only means
+  // anything for the Following feed. A custom feed or list that runs out
+  // just says so.
+  const canRebuild = src.kind === "timeline";
+  const fm = canRebuild ? settings.fetchMethod : "timeline";
   if (fm !== "rebuild") {
-    setProgress({ title: label, stage: "Reading your Following timeline…" });
-    const r = await fetchTimeline(until, signal, p => setProgress({
+    setProgress({ title: label, stage: canRebuild ? "Reading your Following timeline…" : `Reading ${src.name || "the feed"}…` });
+    const r = await fetchFeed(src, { until, max }, signal, p => setProgress({
       fraction: p.fraction,
-      stats: `${p.count.toLocaleString()} posts · back to ${fmtFull(p.oldest)} · ${state.stats.requests.toLocaleString()} requests`,
+      stats: max
+        ? `${p.count.toLocaleString()} of ${max.toLocaleString()} posts · ${state.stats.requests.toLocaleString()} requests`
+        : `${p.count.toLocaleString()} posts · back to ${fmtFull(p.oldest)} · ${state.stats.requests.toLocaleString()} requests`,
     }));
     if (!r.exhausted || fm === "timeline") {
-      if (r.exhausted) note = `The timeline only reached back to ${fmtFull(r.oldest)}.`;
+      if (r.exhausted) note = canRebuild
+        ? `The timeline only reached back to ${fmtFull(r.oldest)}.`
+        : `${src.name || "This feed"} only goes back to ${fmtFull(r.oldest)}. Custom feeds decide for themselves how much history they keep.`;
       return { items: r.items, method, note };
     }
     note = `The timeline stopped at ${fmtFull(r.oldest)}, so the feed was rebuilt from your follows.`;
@@ -2057,6 +2198,65 @@ async function gather(until, signal, label) {
   }));
   if (r.failures.length) note += (note ? " " : "") + `${r.failures.length} account${r.failures.length === 1 ? "" : "s"} couldn't be loaded (deleted, suspended, or blocking you).`;
   return { items: r.items, method, note };
+}
+
+/* ---------- choosing a feed ----------
+   Custom feeds and lists are named by an at:// URI. People paste bsky.app
+   links, so both forms are accepted:
+     https://bsky.app/profile/<handle-or-did>/feed/<rkey>
+     https://bsky.app/profile/<handle-or-did>/lists/<rkey>
+     at://<did>/app.bsky.feed.generator/<rkey>   (or app.bsky.graph.list)
+   feedSourceFromUri() handles the at:// form on its own (it's what links
+   carry); parseFeedInput() resolves a pasted link, which may need a handle
+   lookup first. */
+const MAX_RECENT = 2000;
+function feedSourceFromUri(uri) {
+  let m = String(uri || "").match(/^at:\/\/([^/]+)\/app\.bsky\.feed\.generator\/([^/?#\s]+)/);
+  if (m) return { kind: "feed", uri: `at://${m[1]}/app.bsky.feed.generator/${m[2]}` };
+  m = String(uri || "").match(/^at:\/\/([^/]+)\/app\.bsky\.graph\.list\/([^/?#\s]+)/);
+  if (m) return { kind: "list", uri: `at://${m[1]}/app.bsky.graph.list/${m[2]}` };
+  return null;
+}
+/* Resolves what someone typed into a feed source, looking up the handle if
+   the link uses one. Throws a readable message if it isn't a feed or list. */
+async function parseFeedInput(input, signal) {
+  const text = String(input || "").trim();
+  const direct = feedSourceFromUri(text);
+  if (direct) return direct;
+  const m = text.match(/^(?:https?:\/\/)?(?:[\w.-]*\.)?bsky\.app\/profile\/([^/]+)\/(feed|lists)\/([^/?#\s]+)/i);
+  if (!m) throw new Error("That doesn't look like a feed or list link. It should look like bsky.app/profile/name/feed/abc123.");
+  let did = decodeURIComponent(m[1]);
+  if (!did.startsWith("did:")) did = (await xrpc("com.atproto.identity.resolveHandle", { handle: did }, { signal })).did;
+  return m[2].toLowerCase() === "feed"
+    ? { kind: "feed", uri: `at://${did}/app.bsky.feed.generator/${m[3]}` }
+    : { kind: "list", uri: `at://${did}/app.bsky.graph.list/${m[3]}` };
+}
+/* The feeds saved in the account, for the picker. Read-only: this page never
+   writes preferences, because putPreferences replaces the WHOLE preferences
+   array (muted words, saved feeds, content labels) and getting that wrong
+   would destroy real settings. savedFeedsPrefV2 holds {id, type, value,
+   pinned}; names come from getFeedGenerators (one batched call) and getList
+   (one per list). Anything that fails to resolve still works -- it just
+   shows its URI. */
+async function loadSavedFeeds(signal) {
+  if (state.savedFeeds) return state.savedFeeds;
+  const prefs = (await xrpc("app.bsky.actor.getPreferences", {}, { signal })).preferences || [];
+  const saved = prefs.find(x => x?.$type === "app.bsky.actor.defs#savedFeedsPrefV2");
+  const items = (saved?.items || []).filter(it => it?.type === "feed" || it?.type === "list");
+  const out = items.map(it => ({ ...(feedSourceFromUri(it.value) || { kind: it.type, uri: it.value }), pinned: !!it.pinned, name: "" }));
+  const feedUris = out.filter(f => f.kind === "feed").map(f => f.uri);
+  if (feedUris.length) {
+    const r = await xrpc("app.bsky.feed.getFeedGenerators", { feeds: feedUris }, { signal }).catch(() => null);
+    for (const g of r?.feeds || []) for (const f of out) if (f.uri === g.uri) f.name = g.displayName || "";
+  }
+  for (const f of out.filter(f => f.kind === "list" && !f.name)) {
+    const r = await xrpc("app.bsky.graph.getList", { list: f.uri, limit: 1 }, { signal }).catch(() => null);
+    if (r?.list?.name) f.name = r.list.name;
+  }
+  for (const f of out) if (!f.name) f.name = f.uri.split("/").pop();
+  out.sort((a, b) => (b.pinned - a.pinned) || a.name.localeCompare(b.name));
+  state.savedFeeds = out;
+  return out;
 }
 
 /* ============================== starting points ============================== */
@@ -2130,18 +2330,29 @@ function readHashRequest() {
   const q = new URLSearchParams(h);
   const end = parsePointParam(q.get("to"));
   if (end === undefined) return { error: "The end point in this page's link couldn't be read." };
-  if (q.has("resume")) return { start: { kind: "resume" }, end };
+  // Which feed to read, if the link names one. The name is filled in later
+  // from the saved feeds, or left as the bare URI if it isn't one of yours.
+  const feedUri = q.get("feed");
+  const feed = feedUri ? feedSourceFromUri(feedUri) : null;
+  if (feedUri && !feed) return { error: "The feed in this page's link couldn't be read." };
+  if (q.has("resume")) return { start: { kind: "resume" }, end, feed };
+  if (q.has("recent")) {
+    const n = Number(q.get("recent"));
+    if (!(n > 0)) return { error: "The number of posts in this page's link couldn't be read." };
+    return { start: { kind: "recent", value: Math.min(MAX_RECENT, Math.floor(n)) }, end, feed };
+  }
   if (!q.has("from")) return null;
   const start = parsePointParam(q.get("from"));
   if (!start) return { error: "The start point in this page's link couldn't be read." };
-  return { start, end };
+  return { start, end, feed };
 }
 /* Prefills the start form from a request (so "New catch-up" shows it),
    then starts the catch-up. Errors land on the start screen. */
 function runHashRequest(req) {
   show("start");
   if (req.error) { $("#startErr").textContent = req.error; return; }
-  const { start, end } = req;
+  const { start, end, feed } = req;
+  if (feed) setFeedChoice(feed);
   if (start.kind === "date") { $('input[name="kind"][value="date"]').checked = true; $("#inDate").value = toLocalInput(start.t); }
   if (start.kind === "post") { $('input[name="kind"][value="post"]').checked = true; $("#inPost").value = start.input; }
   $("#inUseEnd").checked = !!end; $("#endBox").classList.toggle("hidden", !end);
@@ -2151,19 +2362,23 @@ function runHashRequest(req) {
     const pos = LS.get("position:" + me());
     if (!pos) { $("#startErr").textContent = "This link asks to resume where you left off, but there's no saved reading position yet."; return; }
     $('input[name="kind"][value="resume"]').checked = true;
-    startCatchup("resume", pos, end);
-  } else startCatchup(start.kind, start.kind === "date" ? start.t : start.input, end);
+    startCatchup("resume", pos, end, feed);
+  } else if (start.kind === "recent") {
+    $('input[name="kind"][value="recent"]').checked = true; $("#inRecent").value = start.value;
+    startCatchup("recent", start.value, end, feed);
+  } else startCatchup(start.kind, start.kind === "date" ? start.t : start.input, end, feed);
 }
 /* Rewrites the fragment to describe the catch-up being started, in a form
    that means the same thing for anyone who opens it (UTC times; post links
    as bsky.app URLs). replaceState: no history entry, no hashchange event. */
-function writeHash(kind, value, end) {
+function writeHash(kind, value, end, src) {
   const point = (k, v) => {
     if (k === "date") return new Date(v).toISOString();
     const ref = parsePostRef(v); return ref ? `https://bsky.app/profile/${ref.actor}/post/${ref.rkey}` : v;
   };
-  let h = kind === "resume" ? "resume" : "from=" + point(kind, value);
+  let h = kind === "resume" ? "resume" : kind === "recent" ? "recent=" + Math.max(1, Number(value) || 0) : "from=" + point(kind, value);
   if (end) h += "&to=" + point(end.kind, end.kind === "date" ? end.t : end.input);
+  if (src && src.kind !== "timeline" && src.uri) h += "&feed=" + encodeURIComponent(src.uri);
   h += `&v=${LINK_FORMAT}` + overlayParams();
   try { history.replaceState(null, "", location.pathname + location.search + "#" + h); } catch {}
 }
@@ -2171,9 +2386,13 @@ function clearHash() { try { history.replaceState(null, "", location.pathname + 
 /* ---- settings in links ---- */
 
 /* Link format number, written into every link as v=<n>. Bump it whenever a
-   linkable setting's DEFAULT changes (see the maintainer notes at the top).
+   linkable setting's DEFAULT changes, or when links gain a part an older
+   copy of the page would silently ignore (see the maintainer notes at the
+   top). An older page opening a newer link shows a notice, which is the only
+   reason bumping is worth anything: 2 marks the links that can carry a feed,
+   so a 0.13.x copy says something instead of quietly reading Following.
    Links without v were made by 0.7.0/0.8.0 and count as format 0. */
-const LINK_FORMAT = 1;
+const LINK_FORMAT = 2;
 /* For each link format: linkable defaults that were DIFFERENT back then,
    as {key: oldDefault}. Links only carry non-default settings, so when a
    link that carries settings is opened, keys it omits are filled from this
@@ -2184,6 +2403,7 @@ const LINK_FORMAT = 1;
 const LINK_FORMAT_DEFAULTS = {
   0: {},
   1: {},
+  2: {},   // 0.14.0: no setting default changed; the bump is for feed= links
 };
 /* Renamed settings and values, so old links keep working. Never rename a
    linkable setting key or option value without adding an entry here.
@@ -2291,8 +2511,9 @@ function endLinkOverlay(keep, revert = false) {
 function catchupFragment() {
   const r = state.run; if (!r) return "";
   const postLink = uri => { const m = uri.match(/^at:\/\/([^/]+)\/app\.bsky\.feed\.post\/([^/]+)$/); return m ? `https://bsky.app/profile/${m[1]}/post/${m[2]}` : uri; };
-  let h = r.kind === "resume" ? "resume" : "from=" + (r.anchor ? postLink(r.anchor.uri) : new Date(r.startT).toISOString());
+  let h = r.kind === "resume" ? "resume" : r.kind === "recent" ? "recent=" + r.max : "from=" + (r.anchor ? postLink(r.anchor.uri) : new Date(r.startT).toISOString());
   if (r.end) h += "&to=" + (r.end.uri ? postLink(r.end.uri) : new Date(r.end.t).toISOString());
+  if (r.feed && r.feed.kind !== "timeline" && r.feed.uri) h += "&feed=" + encodeURIComponent(r.feed.uri);
   return h + `&v=${LINK_FORMAT}`;
 }
 /* While link settings are applied, the address keeps them (as &s.<key>=...)
@@ -2332,37 +2553,46 @@ window.addEventListener("hashchange", () => {
   if (state.session) { state.abort?.abort(); disconnectVideos(); runHashRequest(req); } else pendingHash = req;
 });
 
-async function startCatchup(kind, value, end = null) {
+async function startCatchup(kind, value, end = null, feed = null) {
+  const src = feed || state.run?.feed || FOLLOWING;
   state.abort?.abort();
   const ac = new AbortController(); state.abort = ac; const signal = ac.signal;
   state.stats.requests = 0;
-  writeHash(kind, value, end);   // so the address always matches this catch-up
+  writeHash(kind, value, end, src);   // so the address always matches this catch-up
   show("progress");
   netNote = null; rateNote = null;
   setProgress({ title: "Loading posts", stage: "Getting ready…", fraction: 0, stats: "" });
   try {
     let anchor = null, startT;
-    if (kind === "date") startT = value;
+    // "recent" reads the newest `value` posts instead of everything since a
+    // time, which is the only shape that makes sense on a ranked feed.
+    if (kind === "recent") startT = 0;
+    else if (kind === "date") startT = value;
     else {
       setProgress({ stage: "Finding your start post…" });
       anchor = kind === "resume" ? { uri: value.uri, t: value.t } : await resolvePostAnchor(value, signal);
       startT = anchor.t;
     }
-    if (startT > Date.now()) throw new Error("That start time is in the future.");
+    if (kind !== "recent" && startT > Date.now()) throw new Error("That start time is in the future.");
     let endPoint = null;
     if (end?.kind === "date") endPoint = { t: end.t };
     else if (end?.kind === "post") { setProgress({ stage: "Finding your end post…" }); endPoint = await resolvePostAnchor(end.input, signal); }
     if (endPoint && endPoint.t <= startT) throw new Error("The end point needs to be after the start point.");
-    if (!state.follows.size) {
+    // The follow list is only needed to decide which replies to show, and to
+    // rebuild the Following feed when the timeline runs out. Loading it for a
+    // custom feed with another reply setting is a lot of requests for nothing.
+    const needFollows = settings.replies === "followed" || (src.kind === "timeline" && settings.fetchMethod !== "timeline");
+    if (needFollows && !state.follows.size) {
       setProgress({ stage: "Loading the accounts you follow…" });
       await loadFollows(signal, n => setProgress({ stats: `${n.toLocaleString()} accounts` }));
     }
+    const max = kind === "recent" ? Math.max(1, Number(value) || 0) : 0;
     const until = anchor ? startT - CONTEXT_WINDOW : startT;
     const fetchedAt = Date.now();
-    const g = await gather(until, signal, "Loading posts");
+    const g = await gather(src, until, max, signal, "Loading posts");
     state.items = mergeItems(g.items);
     state.postState = new Map(); hydrateQueue.clear();
-    state.run = { kind, startT, anchor, end: endPoint, fetchedAt, method: g.method, note: g.note };
+    state.run = { kind, startT, anchor, end: endPoint, fetchedAt, method: g.method, note: g.note, feed: src, max };
     state.maxRead = null;
     show("feed");
     buildView({ fresh: true });
@@ -2386,7 +2616,7 @@ async function fetchNewer() {
   try {
     const until = Math.max(state.items[state.items.length - 1].t, state.run.fetchedAt - 5 * 60e3) - 60e3;
     const fetchedAt = Date.now();
-    const g = await gather(until, ac.signal, null);
+    const g = await gather(state.run.feed || FOLLOWING, until, 0, ac.signal, null);
     const before = state.view.length;
     state.items = mergeItems(state.items, g.items);
     state.run.fetchedAt = fetchedAt;
@@ -2715,11 +2945,15 @@ function maybeRenderMore() {
 /* Summary line above the feed: count, start point, method, and any fetch note. */
 function updateFeedHead() {
   const r = state.run; if (!r) return;
-  const where = r.anchor ? "from your start post" : `from ${fmtFull(r.startT)}`;
   const to = r.end ? (r.end.uri ? " to your end post" : ` to ${fmtFull(r.end.t)}`) : "";
-  const how = r.method === "rebuild" ? `rebuilt from ${state.follows.size.toLocaleString()} follows` : "from your timeline";
+  const src = r.feed || FOLLOWING;
+  const how = r.method === "rebuild" ? `rebuilt from ${state.follows.size.toLocaleString()} follows`
+    : src.kind === "timeline" ? "from your timeline" : `from ${src.name || "a custom feed"}`;
   const n = state.view.length;
-  $("#feedHead").innerHTML = esc(`${n.toLocaleString()} post${n === 1 ? "" : "s"} ${where}${to}, ${how}.${r.note ? " " + r.note : ""}`) +
+  const posts = `${n.toLocaleString()} post${n === 1 ? "" : "s"}`;
+  const what = r.kind === "recent" ? `The ${posts === "1 post" ? "most recent post" : `${n.toLocaleString()} most recent posts`}`
+    : `${posts} ${r.anchor ? "from your start post" : `from ${fmtFull(r.startT)}`}`;
+  $("#feedHead").innerHTML = esc(`${what}${to}, ${how}.${r.note ? " " + r.note : ""}`) +
     `<button class="linkbtn" type="button" id="btnCopyCatchup">Copy link</button>` +
     `<button class="linkbtn" type="button" id="btnCopyCatchupSettings">Copy link with my settings</button>`;
   $("#btnCopyCatchup").onclick = () => copyText(buildShareLink(false).url).then(ok => toast(ok ? "Catch-up link copied" : "Couldn't copy the link"));
@@ -3771,8 +4005,44 @@ function toLocalInput(t) { const d = new Date(t - new Date(t).getTimezoneOffset(
 /* Fills the start screen: who's signed in, the Resume option (only if a
    position is saved), a sensible default date (last position, else 24h ago),
    and the context-count hint. */
+/* The feed currently chosen on the start screen. */
+let chosenFeed = null;
+/* Points the picker at a feed, adding an entry for it when it isn't one of
+   the saved ones (a link can name any feed). */
+function setFeedChoice(src) {
+  chosenFeed = src && src.kind !== "timeline" ? src : null;
+  const sel = $("#inFeed"); if (!sel) return;
+  const uri = chosenFeed?.uri || "";
+  if (uri && ![...sel.options].some(o => o.value === uri)) {
+    sel.insertBefore(new Option(chosenFeed.name || uri.split("/").pop(), uri), sel.querySelector('option[value="url"]'));
+  }
+  sel.value = uri;
+  $("#feedUrlBox").classList.add("hidden");
+  updateFeedHint();
+}
+function updateFeedHint() {
+  const h = $("#feedHint"); if (!h) return;
+  h.textContent = chosenFeed
+    ? "Custom feeds decide how much history they keep, so this may not reach as far back as you ask."
+    : "";
+}
+/* Fills the picker from the account's saved feeds. Read-only; a failure just
+   leaves you with Following and the paste box. */
+async function fillFeedPicker() {
+  const sel = $("#inFeed"); if (!sel || sel.dataset.filled) return;
+  sel.dataset.filled = "1";
+  let saved = [];
+  try { saved = await loadSavedFeeds(); } catch { /* offline, or no preferences: Following still works */ }
+  const frag = document.createDocumentFragment();
+  for (const f of saved) frag.appendChild(new Option(`${f.pinned ? "\u2605 " : ""}${f.name}${f.kind === "list" ? " (list)" : ""}`, f.uri));
+  frag.appendChild(new Option("Paste a feed or list link\u2026", "url"));
+  sel.appendChild(frag);
+  if (chosenFeed) setFeedChoice(chosenFeed);
+}
+
 function prepareStart() {
   $("#startErr").textContent = "";
+  fillFeedPicker();
   const p = state.profile;
   $("#whoBox").innerHTML = p ? `${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ""}<div><strong>${esc(p.displayName || p.handle)}</strong><div class="hint">@${esc(p.handle)} · following ${(p.followsCount ?? 0).toLocaleString()}</div></div>` : `<div class="hint">Signed in as @${esc(state.session?.handle)}</div>`;
   const pos = LS.get("position:" + me());
@@ -3823,16 +4093,39 @@ $("#btnLoad").addEventListener("click", ev => {
       end = { kind: "post", input: v };
     }
   }
-  if (kind === "date") {
-    const v = $("#inDate").value; if (!v) { $("#startErr").textContent = "Pick a date and time."; return; }
-    startCatchup("date", new Date(v).getTime(), end);
-  } else if (kind === "post") {
-    const v = $("#inPost").value; if (!parsePostRef(v)) { $("#startErr").textContent = "Paste a Bluesky post link, like bsky.app/profile/name/post/abc123."; return; }
-    startCatchup("post", v, end);
-  } else if (kind === "resume") {
-    const pos = LS.get("position:" + me()); if (pos) startCatchup("resume", pos, end);
-  }
+  // Resolve the chosen feed first: a pasted link may need a handle lookup,
+  // so this is async and any problem belongs under the form, not in a banner.
+  (async () => {
+    let feed = chosenFeed;
+    if ($("#inFeed").value === "url") {
+      try { feed = await parseFeedInput($("#inFeedUrl").value); }
+      catch (e) { $("#startErr").textContent = e.message; return; }
+      feed.name = feed.name || feed.uri.split("/").pop();
+      setFeedChoice(feed);
+    }
+    if (kind === "date") {
+      const v = $("#inDate").value; if (!v) { $("#startErr").textContent = "Pick a date and time."; return; }
+      startCatchup("date", new Date(v).getTime(), end, feed);
+    } else if (kind === "post") {
+      const v = $("#inPost").value; if (!parsePostRef(v)) { $("#startErr").textContent = "Paste a Bluesky post link, like bsky.app/profile/name/post/abc123."; return; }
+      startCatchup("post", v, end, feed);
+    } else if (kind === "recent") {
+      const n = Math.floor(Number($("#inRecent").value));
+      if (!(n > 0)) { $("#startErr").textContent = "Enter how many recent posts to read."; return; }
+      startCatchup("recent", Math.min(MAX_RECENT, n), end, feed);
+    } else if (kind === "resume") {
+      const pos = LS.get("position:" + me()); if (pos) startCatchup("resume", pos, end, feed);
+    }
+  })();
 });
+$("#inFeed").addEventListener("change", () => {
+  const v = $("#inFeed").value;
+  $("#feedUrlBox").classList.toggle("hidden", v !== "url");
+  chosenFeed = v && v !== "url" ? (state.savedFeeds || []).find(f => f.uri === v) || feedSourceFromUri(v) : (v === "url" ? chosenFeed : null);
+  if (v === "") chosenFeed = null;
+  updateFeedHint();
+});
+$("#inRecent").addEventListener("focus", () => ($('input[name="kind"][value="recent"]').checked = true));
 $("#inDate").addEventListener("focus", () => ($('input[name="kind"][value="date"]').checked = true));
 // End point: reveal its options when ticked, defaulting the end time to now.
 $("#inUseEnd").addEventListener("change", () => {

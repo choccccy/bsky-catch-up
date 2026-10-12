@@ -170,6 +170,32 @@ function makeServer(opts, calls) {
     "com.atproto.server.refreshSession": () => ({ accessJwt: "access2", refreshJwt: "refresh2" }),
     "com.atproto.server.deleteSession": () => ({}),
     "app.bsky.actor.getProfile": () => ({ ...ME, followsCount: follows.length }),
+    // Custom feeds and lists. opts.feeds maps an at:// URI to its posts;
+    // opts.savedFeeds is what getPreferences reports as saved.
+    "app.bsky.feed.getFeed": p => {
+      const uri = p.get("feed");
+      const list = opts.feeds?.[uri];
+      if (!list) return { status: 400, error: "UnknownFeed", message: "could not find feed" };
+      return page([...list].sort((a, b) => sortAt(b) - sortAt(a)).slice(0, opts.feedLimit ?? Infinity), p);
+    },
+    "app.bsky.feed.getListFeed": p => {
+      const uri = p.get("list");
+      const list = opts.feeds?.[uri];
+      if (!list) return { status: 400, error: "InvalidRequest", message: "could not find list" };
+      return page([...list].sort((a, b) => sortAt(b) - sortAt(a)), p);
+    },
+    "app.bsky.actor.getPreferences": () => ({
+      preferences: opts.preferences || [
+        { $type: "app.bsky.actor.defs#savedFeedsPrefV2", items: opts.savedFeeds || [] },
+      ],
+    }),
+    "app.bsky.feed.getFeedGenerators": p => ({
+      feeds: p.getAll("feeds").map(uri => ({ uri, displayName: opts.feedNames?.[uri] || "A feed", creator: actor(1), likeCount: 0 })),
+    }),
+    "app.bsky.graph.getList": p => {
+      const uri = p.get("list");
+      return { list: { uri, name: opts.feedNames?.[uri] || "A list", purpose: "app.bsky.graph.defs#curatelist", creator: actor(1) }, items: [] };
+    },
     "app.bsky.graph.getFollows": p => { const s = Number(p.get("cursor") || 0); return { follows: follows.slice(s, s + 100), cursor: s + 100 < follows.length ? String(s + 100) : undefined }; },
     "app.bsky.feed.getTimeline": p => page(timeline().slice(0, served), p),
     "app.bsky.feed.getAuthorFeed": p => page(authorFeeds()[p.get("actor")] || [], p),
@@ -277,14 +303,28 @@ async function loadPage({ url = "https://example.test/", session = true, setting
     /** Waits until the feed (or an error on the start screen) is showing. */
     async settle() { await waitFor(() => visible("viewFeed") || $("#startErr").textContent || visible("viewLogin"), { message: "feed or error" }); await wait(30); },
     /** Uses the start screen: start from a date (ms), optional end {date: ms} or {post: url}. */
-    async startDate(t, end) { return pageObj.start("date", t, end); },
-    async startPost(link, end) { return pageObj.start("post", link, end); },
-    async start(kind, value, end) {
+    async startDate(t, end, opts) { return pageObj.start("date", t, end, opts); },
+    async startPost(link, end, opts) { return pageObj.start("post", link, end, opts); },
+    /** Reads the newest `n` posts (the "most recent posts" start option). */
+    async startRecent(n, opts) { return pageObj.start("recent", n, null, opts); },
+    /**
+     * Drives the start screen. `opts.feed` is a feed or list at:// URI, chosen
+     * from the picker the way a person would (the picker is filled from the
+     * account's saved feeds, so the URI has to be one of them).
+     */
+    async start(kind, value, end, opts) {
       if (!visible("viewStart")) { $("#btnNew")?.click(); await wait(10); }
+      if (opts?.feed) {
+        await waitFor(() => [...$("#inFeed").options].some(o => o.value === opts.feed),
+          { message: `feed ${opts.feed} in the picker` });
+        $("#inFeed").value = opts.feed;
+        $("#inFeed").dispatchEvent(new w.Event("change"));
+      }
       const loc = t => { const x = new Date(t); return new Date(x - x.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
       $(`input[name="kind"][value="${kind}"]`).checked = true;
       if (kind === "date") $("#inDate").value = loc(value);
       if (kind === "post") $("#inPost").value = value;
+      if (kind === "recent") $("#inRecent").value = String(value);
       const useEnd = $("#inUseEnd"); useEnd.checked = !!end; useEnd.dispatchEvent(new w.Event("change"));
       if (end?.date != null) { $('input[name="endKind"][value="date"]').checked = true; $("#inEndDate").value = loc(end.date); }
       if (end?.post) { $('input[name="endKind"][value="post"]').checked = true; $("#inEndPost").value = end.post; }

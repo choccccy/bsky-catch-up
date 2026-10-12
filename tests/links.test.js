@@ -17,7 +17,9 @@ test("a #from link opens straight into that catch-up", async () => {
   const page = await h.loadPage({ url: url(`from=${from}`), server });
   await page.settle();
   assert.deepEqual(page.ids(), ["A", "G", "B"]);
-  assert.match(page.window.location.hash, /v=1/, "address rewritten with the link format");
+  // Tracks the page's own LINK_FORMAT, so bumping it doesn't need this edited.
+  const fmt = page.eval("LINK_FORMAT");
+  assert.match(page.window.location.hash, new RegExp(`v=${fmt}\\b`), "address rewritten with the link format");
 });
 
 test("from/to accept dates, unix time and post links", async () => {
@@ -77,7 +79,7 @@ test("copied links use the current address and include changed shareable setting
   page.$("#btnCopyCatchupSettings").click(); await h.wait(20);
   const copied = page.clip.at(-1);
   assert.ok(copied.startsWith("https://site.example/catchup/index.html#from="));
-  assert.match(copied, /&v=1/);
+  assert.match(copied, new RegExp(`&v=${page.eval("LINK_FORMAT")}\\b`));
   assert.match(copied, /s\.replyContext=moveUp/);
   assert.match(copied, /s\.fetchMethod=timeline/);
   assert.ok(!copied.includes("rpm"), "request tuning is never shared");
