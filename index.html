@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 0.14.0
+  Version 0.14.1
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -104,6 +104,9 @@ HOW IT WORKS (high-level data flow)
   7. Position  On scroll, updateClock() finds the top-most visible post,
                updates the header clock/progress strip, and remembers the
                furthest-read post in localStorage ("Resume where I left off").
+               "From the last post I liked" asks Bluesky instead, reading one
+               record from your own repo, so it works on a device this page
+               has never run on before.
 
 ERROR HANDLING
   Failures must always be visible. netFetch() converts "can't reach the
@@ -401,6 +404,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [0.14.1] - 2026-10-13
+
+### Added
+
+- A new way to start: **from the last post you liked**. Your likes live in
+  your Bluesky account rather than in this page's storage, so this is a
+  "where did I leave off" that works on a device you've never opened this
+  page on -- a phone, someone else's browser, a fresh profile. It reads one
+  record and starts you at that post, with the usual handful above it for
+  context.
+
+### Changed
+
+- "Resume where I left off" and "From the last post I liked" now sit side by
+  side. They answer the same question in two different ways -- this page's
+  memory of your reading, and your account's memory of your likes -- so you
+  pick between them rather than scrolling past one to find the other. On a
+  narrow screen they stack as before. Both keep a short line of explanation
+  visible whether or not they're picked, since that line is how you choose
+  between them.
 
 ## [0.14.0] - 2026-10-12
 
@@ -963,7 +987,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v0.14.0 · Bluesky</title>
+<title>Catch-up v0.14.1 · Bluesky</title>
 <style>
 /* ---------- Atkinson Hyperlegible ----------
    Embedded rather than fetched from Google Fonts, so a copy saved to disk
@@ -1098,11 +1122,18 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 /* Only the chosen option explains itself. Four open bodies at once made the
    start screen twice as tall as it needed to be; this is the same "hidden
    until you want it" idea as .end-box, applied to the radios.
-   #resumeDesc is exempt: it says which post you'd resume to, which is how you
-   decide whether to pick resume at all. Hiding it until you choose would mean
-   choosing blind. */
-.choice:not(:has(input:checked)) .choice-body:not(#resumeDesc){display:none}
+   .always is the exception, for a body that tells you what picking the option
+   would actually do -- which post you'd resume to, which account the like
+   comes from. Hiding those until you choose would mean choosing blind, so
+   they stay, and they're kept to a line or two to earn the room. */
+.choice:not(:has(input:checked)) .choice-body:not(.always){display:none}
 .choice input[type=radio]{margin-right:8px}
+/* The two "where did I leave off" options share a row. They wrap to a stack
+   below ~500px, and a hidden one (no saved position yet) leaves the other to
+   fill the row on its own. */
+.choice-pair{display:flex; gap:10px; flex-wrap:wrap}
+.choice-pair > .choice{flex:1 1 230px; margin-bottom:10px}
+.choice-pair > .choice.hidden{display:none}
 .who{display:flex; align-items:center; gap:10px; margin-bottom:16px}
 .who img{width:36px; height:36px; border-radius:50%}
 
@@ -1511,10 +1542,20 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
         </div>
         <div class="hint" id="feedHint"></div>
       </div>
-      <label class="choice" id="choiceResume">
-        <span><input type="radio" name="kind" value="resume">Resume where I left off</span>
-        <div class="choice-body hint" id="resumeDesc"></div>
-      </label>
+      <!-- The two answers to "where did I leave off?": this page's memory of
+           your reading, and your Bluesky account's memory of your likes. They
+           sit together because you're choosing between them, not scrolling
+           past one to reach the other. -->
+      <div class="choice-pair">
+        <label class="choice" id="choiceResume">
+          <span><input type="radio" name="kind" value="resume">Resume where I left off</span>
+          <div class="choice-body hint always" id="resumeDesc"></div>
+        </label>
+        <label class="choice">
+          <span><input type="radio" name="kind" value="like">From the last post I liked</span>
+          <div class="choice-body hint always">Kept by Bluesky, not by this page, so it works on any device.</div>
+        </label>
+      </div>
       <label class="choice">
         <span><input type="radio" name="kind" value="post">From a specific post</span>
         <div class="choice-body field" style="margin:8px 0 0">
@@ -1584,7 +1625,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "0.14.0";
+const APP_VERSION = "0.14.1";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -2287,6 +2328,19 @@ async function resolvePostAnchor(input, signal) {
   return { uri, t: sortAtOf({ post: p }) };
 }
 
+/* The post your most recent like points at. Likes are records in your own
+   repo, and listRecords orders by record key descending unless asked to
+   reverse -- record keys are TIDs, so descending is newest first and one
+   record is all we need. Checked against the PDS implementation, because the
+   lexicon itself doesn't say which way round the default is. */
+async function latestLikedPostUri(signal) {
+  const r = await xrpc("com.atproto.repo.listRecords",
+    { repo: me(), collection: "app.bsky.feed.like", limit: 1 }, { signal });
+  const uri = r.records?.[0]?.value?.subject?.uri;
+  if (!uri) throw new Error("You haven't liked anything yet, so there's no post to start from.");
+  return uri;
+}
+
 /* In post/resume mode we fetch some time BEFORE the anchor so the N context
    posts exist. 12 hours is ample for a dozen posts with ~700 follows; if a
    very quiet feed yields fewer, the feed simply shows what it has. */
@@ -2296,6 +2350,8 @@ const CONTEXT_WINDOW = 12 * 3600e3; // fetch this far before a start post so the
    kind:  "date"   value = start time in ms
           "post"   value = pasted post link
           "resume" value = saved position {uri, t}
+          "like"   value = unused; the most recent like names the post, and
+                   this becomes a "post" start before anything else happens
    end:   null = read up to now (default); {kind:"date", t} or
           {kind:"post", input} = stop there. The fetch still runs from now
           backwards (Bluesky only pages newest-first), and the end point is
@@ -2558,11 +2614,21 @@ async function startCatchup(kind, value, end = null, feed = null) {
   state.abort?.abort();
   const ac = new AbortController(); state.abort = ac; const signal = ac.signal;
   state.stats.requests = 0;
-  writeHash(kind, value, end, src);   // so the address always matches this catch-up
   show("progress");
   netNote = null; rateNote = null;
   setProgress({ title: "Loading posts", stage: "Getting ready…", fraction: 0, stats: "" });
   try {
+    // "like" is a way of naming a post, not a kind of start: resolve it now so
+    // everything downstream -- including the link written below -- sees a
+    // concrete post. A link saying "wherever I last left a like" would mean
+    // something different to every person who opened it, and would change
+    // under its own author the moment they liked something else.
+    if (kind === "like") {
+      setProgress({ stage: "Finding the last post you liked…" });
+      value = await latestLikedPostUri(signal);
+      kind = "post";
+    }
+    writeHash(kind, value, end, src);   // so the address always matches this catch-up
     let anchor = null, startT;
     // "recent" reads the newest `value` posts instead of everything since a
     // time, which is the only shape that makes sense on a ranked feed.
@@ -4115,6 +4181,8 @@ $("#btnLoad").addEventListener("click", ev => {
       startCatchup("recent", Math.min(MAX_RECENT, n), end, feed);
     } else if (kind === "resume") {
       const pos = LS.get("position:" + me()); if (pos) startCatchup("resume", pos, end, feed);
+    } else if (kind === "like") {
+      startCatchup("like", null, end, feed);
     }
   })();
 });

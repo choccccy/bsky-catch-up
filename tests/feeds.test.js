@@ -126,8 +126,8 @@ test("only the chosen start option explains itself", async () => {
   // doesn't do the cascade, so this reads the stylesheet.
   const src = require("fs").readFileSync(h.PAGE_PATH, "utf8");
   const css = src.slice(src.indexOf("<style>"), src.indexOf("</style>"));
-  assert.match(css, /\.choice:not\(:has\(input:checked\)\)\s*\.choice-body:not\(#resumeDesc\)\s*\{[^}]*display\s*:\s*none/,
-    "an unchosen option's body must be hidden, except the one that says what resuming means");
+  assert.match(css, /\.choice:not\(:has\(input:checked\)\)\s*\.choice-body:not\(\.always\)\s*\{[^}]*display\s*:\s*none/,
+    "an unchosen option's body must be hidden, unless it's marked .always");
   // Every option must have a body for that rule to act on, and a radio to
   // open it with.
   const page = await h.loadPage({});
@@ -158,19 +158,104 @@ test("the start options read specific to broad", async () => {
   // a time you can name, then "just give me the recent ones".
   const page = await h.loadPage({});
   assert.deepEqual(page.$$('#startForm input[name="kind"]').map(el => el.value),
-    ["resume", "post", "date", "recent"]);
+    ["resume", "like", "post", "date", "recent"]);
 });
 
-test("you can see what resuming would mean before choosing it", async () => {
-  // The resume line names the post you'd land on. Collapsing it with the
-  // other option bodies would make you pick resume to find out what resume
-  // means, so it is exempt from the collapse rule.
+test("you can see what the two resume-ish options would do before choosing", async () => {
+  // One names the post you'd land on, the other says where the like is kept.
+  // Collapsing those would make you pick an option to find out what it means.
+  const page = await h.loadPage({});
+  const always = page.$$("#startForm .choice-body.always");
+  assert.equal(always.length, 2, "both of them stay open");
+  assert.deepEqual(always.map(el => el.closest(".choice").querySelector("input").value),
+    ["resume", "like"]);
+  // They earn the room by being short: a paragraph here makes the row tall.
+  for (const el of always) {
+    const words = el.textContent.trim().split(/\s+/).filter(Boolean).length;
+    assert.ok(words <= 20, `always-visible blurbs stay to a line or two, got ${words} words: ${el.textContent}`);
+  }
   const src = require("fs").readFileSync(h.PAGE_PATH, "utf8");
   const css = src.slice(src.indexOf("<style>"), src.indexOf("</style>"));
   const hides = [...css.matchAll(/([^{}]*\.choice-body[^{}]*)\{([^}]*)\}/g)]
     .filter(([, , body]) => /display\s*:\s*none/.test(body));
   assert.ok(hides.length, "something collapses the option bodies");
   for (const [, selector] of hides) {
-    assert.match(selector, /:not\(#resumeDesc\)/, `${selector.trim()} must spare #resumeDesc`);
+    assert.match(selector, /:not\(\.always\)/, `${selector.trim()} must spare .always`);
   }
+});
+
+/* ---- starting from the last post you liked ---- */
+
+test("the last post you liked is where the catch-up starts", async () => {
+  const posts = [h.post("OLD", a, 100), h.post("LIKED", b, 60), h.post("AFTER", a, 20)];
+  const page = await h.loadPage({ server: {
+    timeline: posts.map(h.item),
+    likes: [posts[1].uri],            // newest like first
+  } });
+  await page.start("like");
+  assert.ok(page.article("LIKED").classList.contains("anchor"),
+    `the liked post is the one you're put at: ${page.ids().join(",")}`);
+  assert.ok(page.ids().includes("AFTER"), "and it carries on to what came after it");
+  // "OLD" is above it on purpose: a post start shows a few earlier posts for
+  // context, which is exactly what you want when picking up where you left off.
+});
+
+test("only the newest like is asked for", async () => {
+  // listRecords orders by record key descending by default, so the first
+  // record is the most recent like: asking for one is enough, and asking for
+  // more would be a bigger response for nothing.
+  const posts = [h.post("NEW", a, 30), h.post("OLDER", b, 90)];
+  const server = { timeline: posts.map(h.item), likes: [posts[0].uri, posts[1].uri] };
+  const page = await h.loadPage({ server });
+  await page.start("like");
+  const q = (server.listRecordsQueries || []).join(" ");
+  assert.ok(q, "the page read its own likes");
+  assert.match(q, /limit=1/, "one record is all it needs");
+  assert.ok(!/reverse=true/.test(q), "and it must not reverse: that would fetch the oldest like");
+  assert.ok(page.article("NEW").classList.contains("anchor"),
+    "started at the newest like, not the first one ever");
+});
+
+test("a like start writes a link that names the post, not the like", async () => {
+  // "wherever I last left a like" would mean something different for every
+  // person who opened the link, and would change under its own author the
+  // moment they liked something else.
+  // The id deliberately contains no "like": the point is that the word is
+  // absent from the link, so it mustn't be smuggled in by the post's name.
+  const liked = h.post("TARGET", b, 60);
+  const page = await h.loadPage({ server: { timeline: [h.item(liked), h.item(h.post("AFTER", a, 20))], likes: [liked.uri] } });
+  await page.start("like");
+  const hash = page.window.location.hash;
+  assert.ok(!/like/i.test(hash), `the link shouldn't mention likes: ${hash}`);
+  assert.match(hash, /from=[^&]*\/post\/TARGET/, `it names the post itself: ${hash}`);
+});
+
+test("liking nothing yet is explained, not a crash", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("A", a, 10))], likes: [] } });
+  await page.start("like");
+  assert.ok(page.visible("viewStart"), "you're left on the start screen, not a blank one");
+  assert.match(page.$("#startErr").textContent, /haven't liked anything/i);
+});
+
+test("the two ways to pick up where you left off sit together", async () => {
+  const page = await h.loadPage({});
+  const pair = page.$("#startForm .choice-pair");
+  assert.ok(pair, "there's a row for them");
+  assert.deepEqual([...pair.querySelectorAll('input[name="kind"]')].map(el => el.value),
+    ["resume", "like"], "and it holds exactly those two");
+  // A row that can't wrap would push past the edge on a phone.
+  const src = require("fs").readFileSync(h.PAGE_PATH, "utf8");
+  const css = src.slice(src.indexOf("<style>"), src.indexOf("</style>"));
+  assert.match(css, /\.choice-pair\{[^}]*flex-wrap\s*:\s*wrap/, "the row stacks when narrow");
+});
+
+test("with nothing read yet, the like option still fills the row", async () => {
+  // No saved position hides "Resume where I left off" entirely; the option
+  // beside it mustn't be left sitting in half a row.
+  const page = await h.loadPage({ storage: {} });
+  assert.ok(page.$("#choiceResume").classList.contains("hidden"), "nothing to resume to");
+  const src = require("fs").readFileSync(h.PAGE_PATH, "utf8");
+  const css = src.slice(src.indexOf("<style>"), src.indexOf("</style>"));
+  assert.match(css, /\.choice-pair\s*>\s*\.choice\.hidden\{[^}]*display\s*:\s*none/,
+    "a hidden option in the row must take no space");
 });

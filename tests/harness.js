@@ -200,6 +200,19 @@ function makeServer(opts, calls) {
     "app.bsky.feed.getTimeline": p => page(timeline().slice(0, served), p),
     "app.bsky.feed.getAuthorFeed": p => page(authorFeeds()[p.get("actor")] || [], p),
     "app.bsky.feed.getPosts": p => { const all = posts(); return { posts: p.getAll("uris").map(u => all[u]).filter(Boolean) }; },
+    // The user's own likes, newest first (which is how a PDS orders records by
+    // default: by record key, descending). opts.likes lists post URIs, most
+    // recently liked first.
+    "com.atproto.repo.listRecords": p => {
+      // Which records were asked for matters here (one, newest first), and
+      // `calls` only keeps method names: record the query on the server object
+      // the test passed in, so the test can read it back.
+      (opts.listRecordsQueries ||= []).push(p.toString());
+      if (p.get("collection") !== "app.bsky.feed.like") return { records: [] };
+      const uris = p.get("reverse") === "true" ? [...(opts.likes || [])].reverse() : (opts.likes || []);
+      const n = Number(p.get("limit") || 50);
+      return { records: uris.slice(0, n).map((uri, i) => ({ uri: `at://${ME.did}/app.bsky.feed.like/like${i}`, cid: "c", value: { subject: { uri, cid: "c" }, createdAt: iso(0) } })) };
+    },
     "com.atproto.repo.createRecord": (p, body) => { const uri = `at://${ME.did}/${body.collection}/rec${records.length}`; records.push({ uri, ...body }); return { uri, cid: "c" }; },
     "com.atproto.repo.deleteRecord": (p, body) => {
       const i = records.findIndex(r => r.uri === `at://${body.repo}/${body.collection}/${body.rkey}`);
