@@ -1,9 +1,10 @@
-# Runs the test suite, and publishes the page to GitHub Pages only if it passes.
+# Runs the test suite, publishes the page to GitHub Pages only if it passes,
+# and then cuts the GitHub Release for the version in the file.
 # A failing suite leaves the live site on the last good version.
 #
 # Pages must be set to build from GitHub Actions for the deploy job to work
 # (Settings -> Pages -> Source: GitHub Actions), not from a branch.
-name: Test and deploy
+name: Test, deploy and release
 
 on:
   push:
@@ -58,3 +59,54 @@ jobs:
           path: .
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  release:
+    name: Release
+    needs: deploy                      # only after the page is actually live
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write                  # create the tag and the release
+    steps:
+      - uses: actions/checkout@v4
+      # APP_VERSION is the single source of truth. The test job has already
+      # checked that the header comment, the <title> and the changelog
+      # heading all agree with it, so by here the version is trustworthy.
+      - id: v
+        run: |
+          set -euo pipefail
+          V=$(sed -n 's/^const APP_VERSION = "\(.*\)";$/\1/p' index.html)
+          [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::no usable APP_VERSION (got '$V')"; exit 1; }
+          echo "v=$V" >> "$GITHUB_OUTPUT"
+      # A push that didn't bump the version (a docs tweak, or a re-run from
+      # the Actions tab) has nothing to release. Not an error; just stop.
+      - id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "v${{ steps.v.outputs.v }}" >/dev/null 2>&1; then
+            echo "v${{ steps.v.outputs.v }} is already released; nothing to do"
+            echo "todo=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "todo=yes" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.check.outputs.todo == 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          V: ${{ steps.v.outputs.v }}
+        run: |
+          set -euo pipefail
+          TMP=$(mktemp -d)
+          # The release notes ARE the changelog section for this version:
+          # everything between its heading and the next one.
+          awk -v v="## [$V]" 'index($0,v)==1{f=1;next} /^## \[/{f=0} f' index.html > "$TMP/notes.md"
+          # --notes-file, never --notes: changelog bodies contain backticks.
+          grep -q '[^[:space:]]' "$TMP/notes.md" || { echo "::error::changelog section for $V is empty"; exit 1; }
+          # The pinned copy the "keep your own copy" link points at. Named
+          # exactly this or that link 404s (see VERSIONING in index.html).
+          # Built in a temp dir, never in the repo root, which Pages uploads.
+          cp index.html "$TMP/bluesky-catchup-v$V.html"
+          # Creates the tag (lightweight, like every other tag here) at this
+          # commit; no push, so this can't retrigger the workflow.
+          gh release create "v$V" "$TMP/bluesky-catchup-v$V.html" \
+            --title "$V" --notes-file "$TMP/notes.md" --target "$GITHUB_SHA"

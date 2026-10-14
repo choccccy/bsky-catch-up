@@ -56,4 +56,17 @@ test("the version shown matches APP_VERSION and the filename", async () => {
   const raw = require("node:fs").readFileSync(h.PAGE_PATH, "utf8");
   assert.match(raw, new RegExp(`Version ${v.replace(/\./g, "\\.")}`), "header comment version");
   assert.match(raw, new RegExp(`## \\[${v.replace(/\./g, "\\.")}\\]`), "changelog entry for this version");
+  // The release workflow publishes this version's changelog section verbatim
+  // as the release notes, so an empty section would ship an empty release.
+  const after = raw.split(new RegExp(`^## \\[${v.replace(/\./g, "\\.")}\\][^\\n]*$`, "m"))[1] || "";
+  const section = after.split(/^## \[/m)[0];
+  assert.match(section, /^### \w/m, "changelog entry has a group heading and a body");
+  // The About links are built from APP_VERSION, and the release workflow
+  // builds the tag and the asset name from that same version. If the two
+  // ever drift, these links 404 with nothing on the page to show it.
+  const repo = page.eval("REPO_URL");
+  assert.equal(page.$("#aboutDownload").getAttribute("href"),
+    `${repo}/releases/download/v${v}/bluesky-catchup-v${v}.html`, "download link matches the released asset name");
+  assert.equal(page.$("#aboutRelease").getAttribute("href"),
+    `${repo}/releases/tag/v${v}`, "version link matches the release tag");
 });

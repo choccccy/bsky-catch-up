@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 0.14.2
+  Version 0.14.3
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -41,6 +41,22 @@ VERSIONING
   "About" fold on the sign-in page only; the top-bar link, which is on every
   screen, deliberately points at the repository instead, so the link people
   actually see can't rot.
+
+  CUTTING A RELEASE (automated since 0.14.3). There is nothing to do by
+  hand: bump the three version spots, write the changelog entry, commit and
+  push to main. The release job in .github/workflows/deploy.yml then reads
+  APP_VERSION out of the file and, if no release exists for it yet, tags
+  that commit vX.Y.Z, attaches the renamed copy under the exact name above,
+  and publishes this version's changelog section as the release notes. A
+  push that doesn't change APP_VERSION finds the release already there and
+  stops; nothing is ever republished or overwritten.
+
+  Which is why the version and the changelog must be right in the file
+  before the push: they are not just documentation any more, they are what
+  the release is built from. Both are checked by the test suite, which
+  gates the whole workflow -- the version sync across all three spots, and
+  that this version's changelog section actually has a body (an empty one
+  would publish an empty release).
 
 WHAT THIS IS
   A self-contained web page (this one file) that you open straight from disk
@@ -355,7 +371,10 @@ PROJECT STATUS AND HANDOFF
       version. Pages is set to build from GitHub Actions, not from a
       branch -- don't switch it back, or the gate is bypassed and every
       push goes live untested. Pull requests run the tests but never
-      deploy.
+      deploy. A third job cuts the GitHub Release once the page is live
+      (added in 0.14.3); see CUTTING A RELEASE under VERSIONING. It needs
+      contents: write, which is granted on that job alone -- the rest of
+      the workflow, and the repository default, stay read-only.
     - The file is always index.html, never renamed per version; see
       VERSIONING for why, and for where versions are recorded instead.
     - Licensed MIT (LICENSE in the repository root; also declared by the
@@ -404,6 +423,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [0.14.3] - 2026-10-14
+
+### Changed
+
+- Releases are now cut by the project's own machinery instead of by hand.
+  Pushing a version bump tags it, attaches the downloadable copy of the page
+  under the name the "keep your own copy" link expects, and uses that
+  version's changelog entry as the release notes. This is housekeeping -- the
+  page itself is unchanged -- but it closes a gap that could only ever hurt
+  readers: the download link is built from the version inside the file, so a
+  release that was forgotten, delayed or named wrongly left that link broken
+  with nothing on the page to show it.
 
 ## [0.14.2] - 2026-10-14
 
@@ -998,7 +1030,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v0.14.2 · Bluesky</title>
+<title>Catch-up v0.14.3 · Bluesky</title>
 <style>
 /* ---------- Atkinson Hyperlegible ----------
    Embedded rather than fetched from Google Fonts, so a copy saved to disk
@@ -1636,7 +1668,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "0.14.2";
+const APP_VERSION = "0.14.3";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
