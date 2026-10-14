@@ -60,7 +60,17 @@ test("rich text facets become links", async () => {
   const page = await h.loadPage({ server: { timeline: [h.item(h.post("A", a, 10, { text, facets }))] } });
   await page.startDate(h.BASE);
   const links = page.$$("#feed .pv-text a").map(x => x.getAttribute("href"));
-  assert.deepEqual(links, [`https://bsky.app/profile/${encodeURIComponent(b.did)}`, "https://bsky.app/hashtag/tag"]);
+  // the did's colons must stay literal: bsky.app can't load profile/did%3Aplc%3A…
+  assert.ok(b.did.includes(":"), "fixture did needs colons for this to mean anything");
+  assert.deepEqual(links, [`https://bsky.app/profile/${b.did}`, "https://bsky.app/hashtag/tag"]);
+});
+
+test("a post link falls back to the did in the uri when the author is missing", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("A", a, 10))] } });
+  await page.startDate(h.BASE);
+  const url = page.window.postUrl({ uri: "at://did:plc:u8/app.bsky.feed.post/X" });
+  // bsky.app answers profile/undefined with "Unable to fulfill XRPC request".
+  assert.equal(url, "https://bsky.app/profile/did:plc:u8/post/X");
 });
 
 test("post text is escaped, never injected as HTML", async () => {

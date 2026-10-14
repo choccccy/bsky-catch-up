@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 0.14.1
+  Version 0.14.2
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -404,6 +404,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [0.14.2] - 2026-10-14
+
+### Fixed
+
+- Tapping someone's @name inside a post took you to an error page on
+  bsky.app ("Unable to fulfill XRPC request") instead of their profile. The
+  link was built with the account's internal id escaped in a way bsky.app
+  doesn't unpick, so it went looking for somebody whose name was the escaped
+  text. Every other link to a profile -- the avatar, the name above a post --
+  was always fine; it was only names written in the text of a post.
 
 ## [0.14.1] - 2026-10-13
 
@@ -987,7 +998,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v0.14.1 · Bluesky</title>
+<title>Catch-up v0.14.2 · Bluesky</title>
 <style>
 /* ---------- Atkinson Hyperlegible ----------
    Embedded rather than fetched from Google Fonts, so a copy saved to disk
@@ -1625,7 +1636,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "0.14.1";
+const APP_VERSION = "0.14.2";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -3092,10 +3103,12 @@ function fmtPostTime(t, feedT = t) {
 
 /* ---------- post rendering ---------- */
 /* bsky.app link for a post (prefers the handle for readable share links,
-   falls back to the DID when the handle is invalid). */
+   falls back to the DID when the handle is invalid, and to the DID in the
+   at:// URI when there's no author at all -- bsky.app shows its XRPC error
+   page for profile/undefined). */
 function postUrl(p) {
   const rkey = p.uri.split("/").pop();
-  const who = p.author?.handle && p.author.handle !== "handle.invalid" ? p.author.handle : p.author?.did;
+  const who = p.author?.handle && p.author.handle !== "handle.invalid" ? p.author.handle : (p.author?.did || p.uri.split("/")[2]);
   return `https://bsky.app/profile/${who}/post/${rkey}`;
 }
 /* The link "Copy link" puts on the clipboard. Normally the bsky.app link,
@@ -3132,7 +3145,7 @@ function richText(text, facets) {
     const seg = esc(dec.decode(bytes.slice(s, e)));
     const feat = f.features[0]; let href = null;
     if (feat.$type === "app.bsky.richtext.facet#link") href = safeUrl(feat.uri);
-    else if (feat.$type === "app.bsky.richtext.facet#mention") href = `https://bsky.app/profile/${encodeURIComponent(feat.did)}`;
+    else if (feat.$type === "app.bsky.richtext.facet#mention") href = `https://bsky.app/profile/${encodeURIComponent(feat.did).replace(/%3A/gi, ":")}`;  // bsky.app 404s on a percent-encoded did
     else if (feat.$type === "app.bsky.richtext.facet#tag") href = `https://bsky.app/hashtag/${encodeURIComponent(feat.tag)}`;
     out += href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${seg}</a>` : seg;
     pos = e;
