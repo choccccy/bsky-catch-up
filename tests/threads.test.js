@@ -92,17 +92,88 @@ test("the thread's first post becomes a reminder once it's on screen", async () 
   assert.equal(page.article("R3").querySelector(".pv.parent .pv-text").textContent, "post S", "expands to the root");
 });
 
+/* A thread whose middle is missing from the feed: S (root) <- M <- N <- P,
+   and the feed only carries Q, a reply to P. gapServer knows every post, so
+   getPostThread can fill the gap in; `missing` names posts to hide from it,
+   which is what a deleted or blocked post in the chain looks like. */
+const M = h.post("M", s, 31, { replyTo: S });
+const N = h.post("N", s, 32, { replyTo: M });
+const P = h.post("P", u1, 33, { replyTo: N });
+const Q = h.post("Q", u1, 34, { replyTo: P });
+function gapServer({ missing = [], handlers } = {}) {
+  const known = [S, M, N, P].filter(x => !missing.includes(x));
+  return {
+    follows: [u1], handlers,
+    posts: Object.fromEntries(known.map(x => [x.uri, x])),
+    timeline: [h.item(Q, { parent: P, root: S }), h.item(h.post("OLD", u1, -300))],
+  };
+}
+const gapOpts = opts => ({ settings: { dayDividers: false, hourDividers: false }, server: gapServer(opts) });
+const parentTexts = card => [...card.querySelectorAll(".pv.parent .pv-text")].map(x => x.textContent);
+
 test("a gap between the thread's first post and the parent links to the full thread", async () => {
-  const M = h.post("M", s, 31, { replyTo: S });
-  const P = h.post("P", u1, 33, { replyTo: M });
-  const Q = h.post("Q", u1, 34, { replyTo: P });
-  const page = await h.loadPage({ settings: { dayDividers: false, hourDividers: false }, server: { follows: [u1], timeline: [
-    h.item(Q, { parent: P, root: S }), h.item(h.post("OLD", u1, -300)),
-  ] } });
+  const page = await h.loadPage(gapOpts());
   await page.startDate(h.BASE);
   const card = page.article("Q");
-  assert.deepEqual([...card.querySelectorAll(".pv.parent .pv-text")].map(x => x.textContent), ["post S", "post P"]);
-  assert.match(card.querySelector(".thread-gap").getAttribute("href"), /\/post\/P$/);
+  assert.deepEqual(parentTexts(card), ["post S", "post P"]);
+  assert.match(card.querySelector(".thread-gap a").getAttribute("href"), /\/post\/P$/);
+});
+
+test("the gap expands in place, oldest first", async () => {
+  const page = await h.loadPage(gapOpts());
+  await page.startDate(h.BASE);
+  const card = page.article("Q");
+  card.querySelector('.thread-gap [data-act="expand-gap"]').click();
+  await h.waitFor(() => !card.querySelector(".thread-gap"), { message: "the gap to fill" });
+  assert.deepEqual(parentTexts(card), ["post S", "post M", "post N", "post P"], "the missing middle, in reading order");
+  assert.equal(page.calls.filter(c => c === "app.bsky.feed.getPostThread").length, 1);
+});
+
+test("a gap that can't be filled completely keeps the way out to bsky.app", async () => {
+  // M is gone, so the chain stops after N and the marker stays.
+  const page = await h.loadPage(gapOpts({ missing: [M] }));
+  await page.startDate(h.BASE);
+  const card = page.article("Q");
+  card.querySelector('.thread-gap [data-act="expand-gap"]').click();
+  await h.waitFor(() => parentTexts(card).length > 2, { message: "what could be fetched" });
+  assert.deepEqual(parentTexts(card), ["post S", "post N", "post P"]);
+  const gap = card.querySelector(".thread-gap");
+  assert.ok(gap, "the marker stays");
+  assert.match(gap.querySelector("a").getAttribute("href"), /\/post\/P$/);
+  assert.equal(gap.querySelector("button").disabled, false, "and can be tried again");
+});
+
+test("a video in an expanded gap is registered for preloading", async () => {
+  const V = h.post("V", s, 31, { replyTo: S, embed: h.embeds.video() });
+  const P2 = h.post("P2", u1, 33, { replyTo: V });
+  const Q2 = h.post("Q2", u1, 34, { replyTo: P2 });
+  const page = await h.loadPage({ settings: { dayDividers: false, hourDividers: false }, server: {
+    follows: [u1], posts: Object.fromEntries([S, V, P2].map(x => [x.uri, x])),
+    timeline: [h.item(Q2, { parent: P2, root: S }), h.item(h.post("OLD", u1, -300))],
+  } });
+  await page.startDate(h.BASE);
+  const card = page.article("Q2");
+  assert.equal(page.observers.filter(o => o.opts.rootMargin).length, 0, "no video on screen yet");
+  card.querySelector('.thread-gap [data-act="expand-gap"]').click();
+  await h.waitFor(() => !card.querySelector(".thread-gap"), { message: "the gap to fill" });
+  const po = page.observers.find(o => o.opts.rootMargin);
+  assert.equal(po?.targets.length, 1, "the fetched post's video is watched");
+  assert.ok(card.querySelector(".pv.parent .video"), "and it's there to watch");
+});
+
+test("a gap that fails to load says so and stays a link", async () => {
+  const page = await h.loadPage(gapOpts({ handlers: { "app.bsky.feed.getPostThread": () => ({ status: 400, error: "InvalidRequest", message: "nope" }) } }));
+  await page.startDate(h.BASE);
+  const card = page.article("Q");
+  const btn = card.querySelector('.thread-gap [data-act="expand-gap"]');
+  const label = btn.textContent;
+  btn.click();
+  await h.waitFor(() => page.toast(), { message: "the failure toast" });
+  assert.match(page.toast(), /Couldn't load/);
+  assert.deepEqual(parentTexts(card), ["post S", "post P"], "nothing was inserted");
+  assert.equal(btn.disabled, false);
+  assert.equal(btn.textContent, label, "the button goes back to its label");
+  assert.match(card.querySelector(".thread-gap a").getAttribute("href"), /\/post\/P$/);
 });
 
 test("'Just Replying to @name' doesn't add thread context", async () => {

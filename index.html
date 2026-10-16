@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 0.14.4
+  Version 0.14.5
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -114,7 +114,9 @@ HOW IT WORKS (high-level data flow)
                as HTML strings; every interpolated value goes through esc().
      Reply threads: a reply right after its parent is joined to it;
      otherwise the "Context for replies" setting decides (arrangeThreads()
-     can also reorder whole threads, see its comment).
+     can also reorder whole threads, see its comment). Posts missing between
+     a thread's first post and the parent are marked with a gap that fetches
+     them on click (expandThreadGap).
      Day, hour (optional) and start-post markers are full-window-width colour
      bands (CSS class .bleed) so they're easy to spot while scrolling.
   7. Position  On scroll, updateClock() finds the top-most visible post,
@@ -423,6 +425,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [0.14.5] - 2026-10-16
+
+### Changed
+
+- The "More replies in between" marker now fills the gap in place. When a
+  reply's parent isn't a direct reply to the thread's first post, the posts
+  between them were only reachable by opening the whole thread on bsky.app;
+  clicking "Show them" now fetches that stretch of the conversation and
+  shows it here, in order, as ordinary posts you can like and repost. If the
+  chain can't be fetched in full -- a deleted or blocked post in the middle,
+  or a very long one -- whatever could be fetched is shown and the link to
+  bsky.app stays for the rest.
 
 ## [0.14.4] - 2026-10-16
 
@@ -1040,7 +1055,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v0.14.4 · Bluesky</title>
+<title>Catch-up v0.14.5 · Bluesky</title>
 <style>
 /* ---------- Atkinson Hyperlegible ----------
    Embedded rather than fetched from Google Fonts, so a copy saved to disk
@@ -1285,10 +1300,16 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .parent-mini .pm-label{white-space:nowrap}
 .parent-mini .pm-name{font-weight:700; color:var(--ink); white-space:nowrap}
 .parent-mini .pm-text{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-/* "More replies in between" link, between a thread's first post and the
-   parent of a reply deep in the thread. Sits on the thread line. */
-.thread-gap{display:block; margin:-2px 0 10px 50px; font-size:.85em; color:var(--muted)}
-.thread-gap:hover{color:var(--accent)}
+/* "More replies in between", between a thread's first post and the parent
+   of a reply deep in the thread. Sits on the thread line. The button fetches
+   the missing posts and puts them here; the link beside it is the way out to
+   bsky.app, for when that fetch can't get the whole chain. */
+.thread-gap{display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; margin:-2px 0 10px 50px; font-size:.85em; color:var(--muted)}
+.thread-gap button{background:0; border:0; padding:0; font:inherit; color:inherit; text-align:left; cursor:pointer}
+.thread-gap button:hover:not(:disabled){color:var(--accent)}
+.thread-gap button:disabled{cursor:default; opacity:.7}
+.thread-gap a{color:inherit; white-space:nowrap}
+.thread-gap a:hover{color:var(--accent)}
 .avatar{width:40px; height:40px; border-radius:50%; flex:none; background:var(--surface-2); object-fit:cover}
 /* The link around a post's avatar is a flex item of .pv, and flex items
    stretch to the row's full height by default, which made the whole empty
@@ -1681,7 +1702,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "0.14.4";
+const APP_VERSION = "0.14.5";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -3049,13 +3070,7 @@ function renderMore() {
   }
   feedEl().append(frag);
   state.rendered = end;
-  // Every new video box is watched for preloading (cheap; it only tracks
-  // position), and additionally for autoplay when that mode is on.
-  $$(".video:not([data-observed])", feedEl()).forEach(v => {
-    v.dataset.observed = "1";
-    preloadObserver().observe(v);
-    if (settings.videoMode === "autoplay" || (v.dataset.gif && gifAutoplay())) videoObserver().observe(v);
-  });
+  observeVideos(feedEl());
   updateEndcap();
 }
 /* Infinite scroll: render another batch when the bottom sentinel is within ~2000px. */
@@ -3265,6 +3280,17 @@ async function hydratePosts() {
     }
   } finally { hydrateRunning = false; }
 }
+/* Every video box inside `root` that isn't watched yet is watched for
+   preloading (cheap; it only tracks position), and additionally for autoplay
+   when that mode is on. Called for each render batch and for posts added
+   later, when a parent or a thread gap is expanded. */
+function observeVideos(root) {
+  $$(".video:not([data-observed])", root).forEach(v => {
+    v.dataset.observed = "1";
+    preloadObserver().observe(v);
+    if (settings.videoMode === "autoplay" || (v.dataset.gif && gifAutoplay())) videoObserver().observe(v);
+  });
+}
 /* Action bar markup. Reply opens bsky.app (no in-page composer by design). */
 function actionsHtml(p) {
   const s = ps(p); const c = n => settings.showCounts && n ? `<span>${fmtNum(n)}</span>` : "";
@@ -3345,7 +3371,6 @@ function renderItem(it, i, ctx = "none") {
     // it.t for a repost is when it was reposted (fi.reason.indexedAt).
     html += `<div class="post-meta-line">${ICON.repost}<span>Reposted by ${byLink}</span><span class="repost-time" title="Reposted ${esc(new Date(it.t).toLocaleString())}">${esc(fmtPostTime(it.t, feedT))}</span></div>`;
   }
-  const isPV = x => x?.$type === "app.bsky.feed.defs#postView";
   const parent = fi.reply?.parent, root = fi.reply?.root;
   const parentOk = isPV(parent);
   let replyTo = null;
@@ -3358,7 +3383,7 @@ function renderItem(it, i, ctx = "none") {
         html += rootFull ? postViewHtml(root, { extraClass: "parent", feedT }) : parentMiniHtml(root, "root");
         if (rootFull) state.shownUris.add(root.uri);
         if (parent.record?.reply?.parent?.uri && parent.record.reply.parent.uri !== root.uri) {
-          html += `<a class="thread-gap" href="${esc(postUrl(parent))}" target="_blank" rel="noopener">⋯ More replies in between. View the full thread on bsky.app</a>`;
+          html += threadGapHtml(parent);
         }
       }
       html += ctx === "full" ? postViewHtml(parent, { extraClass: "parent", feedT }) : parentMiniHtml(parent, "parent");
@@ -3369,6 +3394,65 @@ function renderItem(it, i, ctx = "none") {
   html += postViewHtml(p, { replyTo, t: isRepost(fi) ? null : it.t, feedT });
   el.innerHTML = html;
   return el;
+}
+
+/* Is this one of the thread shapes the API uses where a post might instead be
+   a #notFoundPost or #blockedPost stub? */
+const isPV = x => x?.$type === "app.bsky.feed.defs#postView";
+/* A thread node's own `post` isn't a union member, so the API leaves its
+   $type off: check it has a uri rather than asking what it is. */
+const isTVP = x => x?.$type === "app.bsky.feed.defs#threadViewPost" && !!x.post?.uri;
+
+/* The marker for posts missing between a thread's first post and the parent
+   shown above a reply. The feed doesn't send those posts, so the button goes
+   and asks for them (expandThreadGap); the link next to it is the fallback,
+   and stays if the chain can't be fetched in full. */
+function threadGapHtml(parent) {
+  return `<div class="thread-gap" data-gap-uri="${esc(parent.uri)}">
+    <button type="button" data-act="expand-gap">⋯ More replies in between. Show them</button>
+    <a href="${esc(postUrl(parent))}" target="_blank" rel="noopener" title="View the full thread on bsky.app">bsky.app</a>
+  </div>`;
+}
+/* Fills a thread gap in place: asks for the parent's ancestors and renders
+   the ones between the thread's first post and the parent as full parent
+   cards. The chain can come back incomplete -- a deleted or blocked post
+   stops it, and so does a chain longer than PARENT_HEIGHT -- in which case
+   the posts we did get are inserted and the gap marker stays above them,
+   still offering bsky.app for the rest. */
+const GAP_PARENT_HEIGHT = 50;
+async function expandThreadGap(btn) {
+  const gap = btn.closest(".thread-gap"); const card = btn.closest(".post");
+  const it = state.itemByKey.get(card?.dataset.key);
+  const parent = it?.fi.reply?.parent, root = it?.fi.reply?.root;
+  if (btn.disabled || !isPV(parent) || !isPV(root)) return;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Loading the rest of the thread…";
+  let chain, complete;
+  try {
+    const res = await xrpc("app.bsky.feed.getPostThread", { uri: parent.uri, depth: 0, parentHeight: GAP_PARENT_HEIGHT }, { retries: 2 });
+    if (!isTVP(res.thread)) throw new Error("no thread");
+    // Walk up from the parent, newest first, stopping at the thread's first
+    // post (which is already on screen above the gap).
+    chain = []; complete = false;
+    for (let node = res.thread.parent; isTVP(node); node = node.parent) {
+      if (node.post.uri === root.uri) { complete = true; break; }
+      chain.push(node.post);
+    }
+    chain.reverse();   // oldest first, the order they're read in
+  } catch (e) {
+    btn.disabled = false; btn.textContent = label;
+    toast("Couldn't load the rest of the thread");
+    return;
+  }
+  const feedT = Number(card.dataset.t);
+  const tmp = document.createElement("div");
+  tmp.innerHTML = chain.map(p => postViewHtml(p, { extraClass: "parent", feedT })).join("");
+  const added = [...tmp.children];
+  gap.after(...added);
+  if (complete) gap.remove();
+  else { btn.disabled = false; btn.textContent = chain.length ? "⋯ Still more replies in between" : label; }
+  added.forEach(el => observeVideos(el));
+  schedulePreload();
 }
 
 /* One-line reminder of a parent post: "Replying to [avatar] Name: text…",
@@ -3970,7 +4054,7 @@ function showRepostMenu(btn, uri) {
 /* One delegated click handler for every interactive element inside the feed
    (elements are re-created often, so per-element listeners would leak).
    Elements declare their action with
-   data-act="like|repost|copy|zoom|gscroll|reveal|play|expand-parent". */
+   data-act="like|repost|copy|zoom|gscroll|reveal|play|expand-parent|expand-gap". */
 document.addEventListener("click", ev => {
   if (openMenu && !openMenu.contains(ev.target) && !ev.target.closest('[data-act="repost"]')) closeMenu();
   const btn = ev.target.closest("[data-act]"); if (!btn || !btn.closest("#feed")) return;
@@ -3999,9 +4083,12 @@ document.addEventListener("click", ev => {
     const parent = it?.fi.reply?.[btn.dataset.which === "root" ? "root" : "parent"];
     if (parent) {
       const tmp = document.createElement("div"); tmp.innerHTML = postViewHtml(parent, { extraClass: "parent", feedT: Number(btn.closest(".post").dataset.t) });
-      btn.replaceWith(tmp.firstElementChild);
+      const el = tmp.firstElementChild;
+      btn.replaceWith(el);
+      observeVideos(el); schedulePreload();
     }
   }
+  else if (act === "expand-gap") expandThreadGap(btn);
   else if (act === "play") {
     // Resolves immediately when HLS is native or hls.js is already in; only a
     // video clicked before it arrived ever actually waits.

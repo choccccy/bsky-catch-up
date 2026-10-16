@@ -200,6 +200,29 @@ function makeServer(opts, calls) {
     "app.bsky.feed.getTimeline": p => page(timeline().slice(0, served), p),
     "app.bsky.feed.getAuthorFeed": p => page(authorFeeds()[p.get("actor")] || [], p),
     "app.bsky.feed.getPosts": p => { const all = posts(); return { posts: p.getAll("uris").map(u => all[u]).filter(Boolean) }; },
+    // Ancestors only (the page asks with depth 0): walks record.reply.parent
+    // upward through the known posts. A post that isn't known ends the chain
+    // as a #notFoundPost, which is what a deleted (or blocked) post in the
+    // middle of a chain looks like.
+    "app.bsky.feed.getPostThread": p => {
+      const all = posts();
+      const top = all[p.get("uri")];
+      if (!top) return { status: 400, error: "NotFound", message: "Post not found" };
+      const node = post => {
+        const up = post.record?.reply?.parent?.uri;
+        const tvp = { $type: "app.bsky.feed.defs#threadViewPost", post };
+        if (up) tvp.parent = all[up] ? null : { $type: "app.bsky.feed.defs#notFoundPost", uri: up, notFound: true };
+        return { tvp, up };
+      };
+      const root = node(top);
+      let cur = root, depth = Number(p.get("parentHeight") || 50);
+      while (cur.up && all[cur.up] && depth-- > 0) {
+        const next = node(all[cur.up]);
+        cur.tvp.parent = next.tvp;
+        cur = next;
+      }
+      return { thread: root.tvp };
+    },
     // The user's own likes, newest first (which is how a PDS orders records by
     // default: by record key, descending). opts.likes lists post URIs, most
     // recently liked first.
