@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 0.14.3
+  Version 0.14.4
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -423,6 +423,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [0.14.4] - 2026-10-16
+
+### Changed
+
+- The name on a "Reposted by" line is now a link to that person's profile.
+  If someone's reposts are filling your feed with things you didn't ask for,
+  you can go straight from the repost to their profile and turn their
+  reposts off there -- before, the only clickable name on the card belonged
+  to the author of the post you didn't want.
 
 ## [0.14.3] - 2026-10-14
 
@@ -1030,7 +1040,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v0.14.3 · Bluesky</title>
+<title>Catch-up v0.14.4 · Bluesky</title>
 <style>
 /* ---------- Atkinson Hyperlegible ----------
    Embedded rather than fetched from Google Fonts, so a copy saved to disk
@@ -1245,6 +1255,9 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .post-meta-line{font-size:.82em; color:var(--muted); margin:0 0 6px 50px; display:flex; align-items:center; gap:6px}
 .post-meta-line svg{width:14px; height:14px}
 /* When the repost happened, right-aligned above the original post's time. */
+/* The reposter's name is a link to their profile; it keeps the muted colour
+   of the line it sits in rather than .pv-name's full-contrast ink. */
+.post-meta-line .pv-name{color:inherit; font-weight:600}
 .post-meta-line .repost-time{margin-left:auto; font-variant-numeric:tabular-nums; white-space:nowrap}
 .pv{display:flex; gap:10px}
 .pv + .pv{margin-top:10px}
@@ -1668,7 +1681,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "0.14.3";
+const APP_VERSION = "0.14.4";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -3324,8 +3337,13 @@ function renderItem(it, i, ctx = "none") {
   let html = "";
   if (isRepost(fi)) {
     const by = fi.reason.by || {};
+    // The reposter's name links to their profile, so you can go and turn
+    // their reposts off if they're flooding your feed. Falls back to plain
+    // text if the feed didn't say who (no handle and no did to link to).
+    const byName = esc(by.displayName || by.handle || "someone");
+    const byLink = by.handle || by.did ? `<a class="pv-name" href="${esc(profileUrl(by))}" target="_blank" rel="noopener">${byName}</a>` : byName;
     // it.t for a repost is when it was reposted (fi.reason.indexedAt).
-    html += `<div class="post-meta-line">${ICON.repost}<span>Reposted by ${esc(by.displayName || by.handle)}</span><span class="repost-time" title="Reposted ${esc(new Date(it.t).toLocaleString())}">${esc(fmtPostTime(it.t, feedT))}</span></div>`;
+    html += `<div class="post-meta-line">${ICON.repost}<span>Reposted by ${byLink}</span><span class="repost-time" title="Reposted ${esc(new Date(it.t).toLocaleString())}">${esc(fmtPostTime(it.t, feedT))}</span></div>`;
   }
   const isPV = x => x?.$type === "app.bsky.feed.defs#postView";
   const parent = fi.reply?.parent, root = fi.reply?.root;

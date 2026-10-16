@@ -116,6 +116,15 @@ test("reading position is saved and offered for resume", async () => {
   assert.ok(!page.$("#choiceResume").classList.contains("hidden"));
 });
 
+test("the reposter's name links to their profile", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("A", h.actor(8), 10), { repostBy: b, repostMin: 20 })] } });
+  await page.startDate(h.BASE);
+  const link = page.article("A").querySelector(".post-meta-line a");
+  assert.ok(link, "the reposter's name is a link");
+  assert.equal(link.textContent, "User 2");
+  assert.equal(link.getAttribute("href"), "https://bsky.app/profile/u2.test");
+});
+
 test("only the avatar itself links to the profile, not the column below it", async () => {
   // Regression test for 0.8.2. jsdom does no layout, so check the styles
   // that keep the link from stretching to the post's full height.
