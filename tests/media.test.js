@@ -416,6 +416,10 @@ test("the page fetches nothing at all when it loads", async () => {
   const src = require("fs").readFileSync(h.PAGE_PATH, "utf8");
   const head = src.slice(0, src.indexOf("</head>"));
   assert.equal(head.match(/<script\s+src=/g), null, "no external script in the head");
-  assert.equal(head.match(/<link\s/g), null, "no stylesheet or preconnect in the head");
+  // The tab icon lives in a <link>, so <link> can't be banned outright any
+  // more -- but it is a data: URI and costs no request. Anything else in a
+  // <link> (a stylesheet, a preconnect, a favicon file) would.
+  for (const tag of head.match(/<link\s[^>]*>/g) || [])
+    assert.match(tag, /\shref="data:/, `head <link> must be inline: ${tag.slice(0, 60)}`);
   assert.equal(src.match(/fonts\.(googleapis|gstatic)\.com/g), null, "no Google Fonts reference anywhere");
 });

@@ -70,3 +70,26 @@ test("the version shown matches APP_VERSION and the filename", async () => {
   assert.equal(page.$("#aboutRelease").getAttribute("href"),
     `${repo}/releases/tag/v${v}`, "version link matches the release tag");
 });
+
+test("the tab icon is carried inside the file, not fetched", async () => {
+  // Read the FILE, not the loaded DOM: loadPage strips <link> so tests never
+  // touch the network, which would hide the very thing this checks.
+  const src = require("node:fs").readFileSync(h.PAGE_PATH, "utf8");
+  const head = src.slice(0, src.indexOf("</head>"));
+  const icons = (head.match(/<link\s[^>]*rel="(?:icon|alternate icon)"[^>]*>/g) || []);
+  assert.ok(icons.length, "the page has a tab icon at all");
+  // The whole point of an inline icon: a copy opened from file:// keeps it,
+  // and the page still fetches nothing but Bluesky. An href pointing at a
+  // favicon file next to the page would fail silently -- the hosted copy
+  // would look fine while every saved copy lost its icon.
+  for (const tag of icons)
+    assert.match(tag, /\shref="data:/, `icon must be inline: ${tag.slice(0, 60)}`);
+  // The SVG is the real icon; the PNG is only Safari's fallback. Check the
+  // SVG is actually the artwork, not an empty or truncated document.
+  const svg = icons.find(t => t.includes('type="image/svg+xml"'));
+  assert.ok(svg, "there is an SVG icon");
+  const uri = svg.match(/\shref="([^"]*)"/)[1];
+  const markup = decodeURIComponent(uri.replace(/^data:image\/svg\+xml,/, ""));
+  assert.match(markup, /^<svg[^>]*viewBox=/, "the SVG has a viewBox");
+  assert.match(markup, /<\/svg>$/, "the SVG is not truncated");
+});

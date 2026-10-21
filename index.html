@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 0.14.5
+  Version 1.0.0
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -66,7 +66,8 @@ WHAT THIS IS
   links, and watch videos inline. No server, no build step, no install.
 
   Opening the page fetches NOTHING but Bluesky's own services. The typeface
-  is embedded in the file, so a copy saved to disk looks the same offline.
+  is embedded in the file, and so is the tab icon, so a copy saved to disk
+  looks the same offline.
   The one thing still fetched from elsewhere is optional and on demand:
     - hls.js from jsDelivr, for inline video in browsers that can't play HLS
       natively (Chrome/Firefox). Safari and iOS never fetch it. Elsewhere it
@@ -425,6 +426,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-10-21
+
+### Added
+
+- A tab icon. The page now carries the brick heart in its own `<head>`, as a
+  `data:` URI, so a tab, a bookmark or a pinned shortcut shows the heart
+  instead of the browser's blank-page glyph. It is inline rather than a
+  favicon file next to the page for the same reason the typeface is: a copy
+  saved to disk has to look like the hosted one, and the page still fetches
+  nothing but Bluesky. There is a small PNG alongside the SVG purely for
+  Safari, which ignores SVG icons.
+
+### Changed
+
+- Version 1.0.0. Nothing here breaks saved settings, sessions or positions --
+  the usual reason for a major bump. This one says the page is finished: it
+  does what it set out to do, it is documented, and the suite covers it. 0.x
+  was the long "still figuring out the shape of it" stretch, and that is over.
 
 ## [0.14.5] - 2026-10-16
 
@@ -1055,7 +1075,25 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v0.14.5 · Bluesky</title>
+<title>Catch-up v1.0.0 · Bluesky</title>
+<!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
+     An external favicon.svg would reach only the hosted copy, would be the one
+     thing this page fetches that isn't Bluesky, and would leave every copy
+     saved to disk without an icon. The SVG is the real one; the PNG below it is
+     only for Safari, which ignores SVG favicons entirely. A test asserts both
+     hrefs start with data:.
+       Colours come from the artwork read THROUGH its colour profile. The
+     source PNG is tagged linear sRGB, so its raw bytes are much darker and
+     more saturated than the picture it describes; using them directly gives
+     a muddy icon. The sRGB values are purple #C19DFF, cyan #98F8FF.
+       Geometry, on a 256 viewBox: two r74.25 lobes centred (75,86) and
+     (180,86), over a 148.5 square rotated 45 degrees about (127.5,138.5). The
+     cyan is not a separate shape -- it is the right lobe showing past the
+     square's upper-right edge, which is why the split is exactly 45 degrees.
+     The mask punches the two anti-stud holes through everything, so the tab
+     bar shows through them the way it should. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cmask id='h'%3E%3Crect width='256' height='256' fill='%23fff'/%3E%3Ccircle cx='49' cy='60' r='23'/%3E%3Ccircle cx='206' cy='60' r='23'/%3E%3C/mask%3E%3Cg mask='url(%23h)'%3E%3Ccircle cx='180' cy='86' r='74.25' fill='%2398F8FF'/%3E%3Ccircle cx='75' cy='86' r='74.25' fill='%23C19DFF'/%3E%3Crect x='53.25' y='64.25' width='148.5' height='148.5' fill='%23C19DFF' transform='rotate(45 127.5 138.5)'/%3E%3Cg fill='none' stroke='%23B793F9' stroke-width='2'%3E%3Ccircle cx='127.5' cy='86' r='23.5'/%3E%3Ccircle cx='75' cy='138.5' r='23.5'/%3E%3Ccircle cx='180' cy='138.5' r='23.5'/%3E%3Ccircle cx='127.5' cy='191' r='23.5'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E">
+<link rel="alternate icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAEl0lEQVR4AcRUW4hVVRj+/j3WGGhkOFgRKPQURTckH6IMQ6tRKCGlooThFBMEQYkhQUSFSnR5Sx2bI1iUMEQUdDVI5/ISgVgWEeODIROEMDHVMHPGmfP7fevM2rPPnH3OmTM+uFnfXv/9//baa60El/mpS2Co6Dcc7/XHB4r+an/R95047C//0Oubh7/29nqc97uvOFTyrT0T/kpPyfdpli57vZwaAseLvnbgsPfNACOJ4agDbzB5tzneajN8OfIXxuh/b/BjX0F7GD2TftPBSe9NShgtOz5zwx537NYsXXb5FRcSMq8qAvzSnTT8xORtmZgq0Qzt9L9YnsTv/R9458Ep30GSfzCoQDQaBcUpPhuUROUEl5ryOwTg+MKAozD8E/T81yok+KrjJI7Q3UbkDtb5k6Q/ovNbog1lHDkw4c9SDiMQYPOtDNRSj9Jwx/pn7NH7Cvbk38vQAcP3IbLOa+VvwDVn8p1q3L3U1nS3247nltrD7PGgImk/dGDK75bMfmAP7AEf/rPX7y3YzxTD2L7dZhLHrqA0eF3/I7D8XG3AkivxfNZKMsf4G96Vzcp4U3PCDfUYhZsJ+Ax+0ZxFllDW7twIZe4wgSJuHKghcbZg9l82J8iOX8MMbOqZ8nWJl7Fl1gBrw21RjvNg0W+PcpxjUzODmUFkhHkk1hTdl8ecdDbcGmWfQWcCw13RwKP2WrZhX5+3lQ1vR79m5xpqTnhG2RuC5GjPkpiewvuKjeAx3GTAzqjDcGdCpYOI49oycKq/1z/nBfTJqv9xHo6N0VmZHcYqFbn6rVWQJZIgqafZ9CwvpQ95D3zjwHfypzB0JDBMpYYoGB5h8BNsnl420dV4nmOWkgBWiwjzHiKqBle8lPA1XGVtopjpn/OqIMMYGr+crmgKcyQRlJwXS5xJaO8nWhpmIuHQZhT4hdA+yCvSiAQP0WAyDfTlJcqmL1ODCOmys39oqKYRsguKifGapdchMT4+hk+TDQXTPb5fyVkoMX5ZbCJdyMZl5fo5XnNP8Nfv3XWdjesXYHwcL7HQaSIdaqTGqYGCWWXpKeaOvBzVkF0JmZU41n2V7ZUtEOh8wUqeQNdm7YlQ1CzYf1Za/LTyNMaWtWNbrBAISLm/ywaXJFhH+V8ijMg8KHxpiZuRUAxD05HVL1yNkeQ8Vj9llvZICSjjni47hQRrKZ8zqyy3CohInM2M7vxhphwdUcf8HL8CJ30Ut2zstrFsdhUBOdZ32TBJPGCGYbO5gvLpf2oW5hrwNMtAMBwxRoRpCjpv7aELE9gwv3nw6zUfsyQ2s+CwCgpmc1+u4kLMi8ct6mYWGpsZDBgqTWNLXnPwqVkB2sKIJKhU3ZSVL8dcAzYRQdkZWzWsSXMF1yUgZz4JB3vKXYPsqiykuQo0JKCAfBLy5IFtaea74bIzJB1NCSgyS8KssjFlj4jLTxdaaa78BRFQYDUJQBsvQktvZi03V90FE1BwJGFm4XRwhqBNqKPWaLcrPw8tEVCBSIIy7wmQALGA3Y46T8sEVKeKxCU0V61FEVBiJLGYZVd+xKIJqIBI1Lvh5Bea4SIAAAD//xlnIT0AAAAGSURBVAMA6aE4XynkohUAAAAASUVORK5CYII=">
 <style>
 /* ---------- Atkinson Hyperlegible ----------
    Embedded rather than fetched from Google Fonts, so a copy saved to disk
@@ -1702,7 +1740,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "0.14.5";
+const APP_VERSION = "1.0.0";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
