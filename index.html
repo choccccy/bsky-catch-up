@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.0.0
+  Version 1.0.3
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -426,6 +426,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.0.3] - 2026-10-23
+
+### Fixed
+
+- The one-line "Replying to" reminder no longer runs out past the edge of the
+  post. When the post being replied to had nothing but a link attached, the
+  reminder ended with a chip naming it -- "Link: " and the page's title -- and
+  a long title pushed the line out of the card. Long names did it too. Both
+  are now shortened with an ellipsis to whatever room the line has.
+- Nothing else an account can set its own text to runs out of a post either.
+  A display name, the name of a quoted feed, list or starter pack, and the
+  title of the feed you're reading were each able to leave the card if they
+  arrived as one long run of characters with no spaces in it, which is a
+  thing people do on purpose. They now wrap like any other text.
+
+## [1.0.2] - 2026-10-23
+
+1.0.1 was never published: the icon it added was slimmed down before it went
+out. Everything listed under 1.0.1 below reaches the site with this release.
+
+### Changed
+
+- The home-screen icon is around 2KB smaller and looks exactly the same. The
+  picture it was exported from carried a block of camera metadata and a
+  transparency channel it never used -- the icon is drawn right to its edges
+  -- and both rode along inside every copy of this page saved to disk. They
+  are gone; every pixel is unchanged.
+
+## [1.0.1] - 2026-10-23
+
+### Added
+
+- A home-screen icon. Adding the page to an iPhone or iPad home screen now
+  shows the brick heart instead of a screenshot of the page. Like the tab
+  icon it is a `data:` URI in the `<head>`, so saved copies get it too.
 
 ## [1.0.0] - 2026-10-21
 
@@ -1075,13 +1111,20 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v1.0.0 · Bluesky</title>
+<title>Catch-up v1.0.3 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
      saved to disk without an icon. The SVG is the real one; the PNG below it is
-     only for Safari, which ignores SVG favicons entirely. A test asserts both
-     hrefs start with data:.
+     only for Safari, which ignores SVG favicons entirely. The third, a 180px
+     apple-touch-icon, is what iOS shows on the home screen; it is the same
+     heart at 80% size on an opaque dark-theme --bg (#0F141B), because iOS
+     fills a transparent touch icon with black. It stores no alpha channel at
+     all, so there is nothing left for iOS to fill, and it carries none of the
+     EXIF block the exporter leaves behind -- together that is 2KB of base64
+     that rode along in every saved copy for nothing. Two tests cover the
+     three: one asserts the tab icons' hrefs start with data:, the other that
+     the touch icon is an inline 180x180 PNG.
        Colours come from the artwork read THROUGH its colour profile. The
      source PNG is tagged linear sRGB, so its raw bytes are much darker and
      more saturated than the picture it describes; using them directly gives
@@ -1094,6 +1137,7 @@ site with this release.
      bar shows through them the way it should. -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cmask id='h'%3E%3Crect width='256' height='256' fill='%23fff'/%3E%3Ccircle cx='49' cy='60' r='23'/%3E%3Ccircle cx='206' cy='60' r='23'/%3E%3C/mask%3E%3Cg mask='url(%23h)'%3E%3Ccircle cx='180' cy='86' r='74.25' fill='%2398F8FF'/%3E%3Ccircle cx='75' cy='86' r='74.25' fill='%23C19DFF'/%3E%3Crect x='53.25' y='64.25' width='148.5' height='148.5' fill='%23C19DFF' transform='rotate(45 127.5 138.5)'/%3E%3Cg fill='none' stroke='%23B793F9' stroke-width='2'%3E%3Ccircle cx='127.5' cy='86' r='23.5'/%3E%3Ccircle cx='75' cy='138.5' r='23.5'/%3E%3Ccircle cx='180' cy='138.5' r='23.5'/%3E%3Ccircle cx='127.5' cy='191' r='23.5'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E">
 <link rel="alternate icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAEl0lEQVR4AcRUW4hVVRj+/j3WGGhkOFgRKPQURTckH6IMQ6tRKCGlooThFBMEQYkhQUSFSnR5Sx2bI1iUMEQUdDVI5/ISgVgWEeODIROEMDHVMHPGmfP7fevM2rPPnH3OmTM+uFnfXv/9//baa60El/mpS2Co6Dcc7/XHB4r+an/R95047C//0Oubh7/29nqc97uvOFTyrT0T/kpPyfdpli57vZwaAseLvnbgsPfNACOJ4agDbzB5tzneajN8OfIXxuh/b/BjX0F7GD2TftPBSe9NShgtOz5zwx537NYsXXb5FRcSMq8qAvzSnTT8xORtmZgq0Qzt9L9YnsTv/R9458Ep30GSfzCoQDQaBcUpPhuUROUEl5ryOwTg+MKAozD8E/T81yok+KrjJI7Q3UbkDtb5k6Q/ovNbog1lHDkw4c9SDiMQYPOtDNRSj9Jwx/pn7NH7Cvbk38vQAcP3IbLOa+VvwDVn8p1q3L3U1nS3247nltrD7PGgImk/dGDK75bMfmAP7AEf/rPX7y3YzxTD2L7dZhLHrqA0eF3/I7D8XG3AkivxfNZKMsf4G96Vzcp4U3PCDfUYhZsJ+Ax+0ZxFllDW7twIZe4wgSJuHKghcbZg9l82J8iOX8MMbOqZ8nWJl7Fl1gBrw21RjvNg0W+PcpxjUzODmUFkhHkk1hTdl8ecdDbcGmWfQWcCw13RwKP2WrZhX5+3lQ1vR79m5xpqTnhG2RuC5GjPkpiewvuKjeAx3GTAzqjDcGdCpYOI49oycKq/1z/nBfTJqv9xHo6N0VmZHcYqFbn6rVWQJZIgqafZ9CwvpQ95D3zjwHfypzB0JDBMpYYoGB5h8BNsnl420dV4nmOWkgBWiwjzHiKqBle8lPA1XGVtopjpn/OqIMMYGr+crmgKcyQRlJwXS5xJaO8nWhpmIuHQZhT4hdA+yCvSiAQP0WAyDfTlJcqmL1ODCOmys39oqKYRsguKifGapdchMT4+hk+TDQXTPb5fyVkoMX5ZbCJdyMZl5fo5XnNP8Nfv3XWdjesXYHwcL7HQaSIdaqTGqYGCWWXpKeaOvBzVkF0JmZU41n2V7ZUtEOh8wUqeQNdm7YlQ1CzYf1Za/LTyNMaWtWNbrBAISLm/ywaXJFhH+V8ijMg8KHxpiZuRUAxD05HVL1yNkeQ8Vj9llvZICSjjni47hQRrKZ8zqyy3CohInM2M7vxhphwdUcf8HL8CJ30Ut2zstrFsdhUBOdZ32TBJPGCGYbO5gvLpf2oW5hrwNMtAMBwxRoRpCjpv7aELE9gwv3nw6zUfsyQ2s+CwCgpmc1+u4kLMi8ct6mYWGpsZDBgqTWNLXnPwqVkB2sKIJKhU3ZSVL8dcAzYRQdkZWzWsSXMF1yUgZz4JB3vKXYPsqiykuQo0JKCAfBLy5IFtaea74bIzJB1NCSgyS8KssjFlj4jLTxdaaa78BRFQYDUJQBsvQktvZi03V90FE1BwJGFm4XRwhqBNqKPWaLcrPw8tEVCBSIIy7wmQALGA3Y46T8sEVKeKxCU0V61FEVBiJLGYZVd+xKIJqIBI1Lvh5Bea4SIAAAD//xlnIT0AAAAGSURBVAMA6aE4XynkohUAAAAASUVORK5CYII=">
+<link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAAAAAXNSR0IArs4c6QAAFh9JREFUeNrtnXl4FUW2wKuqu+8SkpCFSAIx7FuAsAQEAz7ZnScCCm6IM6gs4ijP+Zz5vnEcXF789D0dR33u4gwOLrgAMvJ8fG5PGbYBZSeGnYQtYckekntvdy3vj4I8Psnt9O2uu+XW+fJf6vY9Xf27p06dOuc07NipK5AipTVBcgqkSDikSDikSDikSDikSDikSDikSDikSDikSDikSDikSJFwSJFwSJFwSJFwSJFwSJFwSJFwSJFwSJFwSJFwSJEi4ZAi4ZBiX9Q44BeizI45GamdU5LSk9zJqqpBiDA2dOxvaKptaKo+V3sqYPhiR2EIYWp2dmrnzkkZGZ7kZNXlgghhw8CBQHNtbVN1de3p03pTk4TDJg29c4cM7lXUJ7egW/aA7Iw8RWlDz7oLVcfPHCirKP2pbGvJsa1N/oYI05AzcGDvMWNyhw7N7t+/U/fuiqaZf6SppubswYMVpaVl27Yd27Klua4uBh8EjJ2Kt2Rv2nVDphX2nziox6gkT4rt61BKj1WU7D6yccPuz8srS8OnsCclZfDUqQMmTeoxenRSWprt6zDGKktLj2zatGft2lN79kg4/l8UpI4cMGn88Fkj+k/UVJfYi5dVln6/c/X6nZ/VXTgvbMoQ6jd+/PBZs/KnTNE8HrEKnztyZOfq1TtXraqvrExoODTVPXnknbOu/3VWenh1MLD+vzs+Xb3+jbM1Jxytd6paeOut4x58sFOPHmFVmGC8e82a71977fzRowkHh6poNxXde8v1i9JTrorYlxJKNuxes+KbF20gghRl1N13j3vwwbQuXSKmMKW0ZN26b1544dyRI4kCx9A+190/45muWT2jcsO64V+1/vVV37+OiW7xI91Hjrz52WdzBgyIisLEMDYuXfrtyy8bPl97hiMtOWvB9OLrhkyL+mpaUVX21t8f2314o/kwb1raTU88UXjbbRDC6CpcV1Hx+ZIlpV9/HVF30JOUGplvGtJ7bPH8j/rlDYsFPzwlKX3csFluzbvv2BbGWKtjuhUWLvjkk56jR0edDL4zGjpjRnJm5uFNmxgh7cdyIIjunPTI7RP+DaGYC8juL9/+pxUPVNX/fGtw/QMP3PD73ytqzMWBTpeUfLhoUXV5eXuAw615//DLd4b3GwdiVRqaaovf/dWhk7su2lKXa/arrw6eOjVmFfY3Nr43f/7RzZvje1lJSUovnr9iUK9rQQyL2+W9fugtRytKKqvL3cnJ9y5f3n/ixFhWWHW7h8yYcf7o0XOHDsUrHJ3Sujx7/6oeXfJBzIuqaNcVTG/ADTe8VtytsDD2FUaKMujGG5uqqk7t3Rt/cHTskPkfi1ZHa79qZ7oRGtFnXFrKVU1x0kAPQjhg0qS606crfvopnuDwujoUL/ioW3Z/K4MNHGhoqr3gq9cNHwBAeAQ9hOkG0FMDIAbNOdGJZ/gbGnz19f7GRkqI4nJZ2SUNmDSpoqSk6tix+HBIFaQ+Ne+DIb3Hmg9rbK7dtPeLtRvfOV117GcmZ9rYeZNHzk5L7hSVPSQDoGoQqBoSoa/DgUD1iRPfvvhiybp19LI9qub19hs/fsLixZ379lXdbrNfl8/3zuzZx7dvjwM45t30xIzrFpoMCOi+V1b9duOetebX6XP10EfnvB3uY5dgfJwZAer6hf2LNrz99lfPP48DAfNhCz/5pGdRkclPpfHcuZenTLlQVRXTcIzKn/LHuctMBnz63Ssrv3vVYm4Ogmjc8JkP3/ZS5E0IA6ByNKjvFa7r+xoa/uuGG2pPnrQ4vsvAgXPffdfkZOfwxo1/veuuYAG96PscWWldn7rvA5cW9BR73T/fe+/L/zRwwPITYuVn9us4UNBrTIT5gAAknwJGBxDIEH/xptrat2bOrCors/6RxvPnS7/+umDqVHdycqsDMrt1o4SUbdsm0kkXeK3Ft76QnJQW7L+V1eVLP19i/bjrIh+MrV7/+t6jm0HEBQKQsxV0FH1mHmhqWrFo0dnQQxQ1x4+/OWsW1oNO4KRHHsnJz49FyzG2YNqscb8O9t+6C1X3Pz+GUJuHAv/YtaZf3vCczO6R50O4/Vj1u9/ZPj/z1dc319T0mzChVTsKEcrJz//x449jy3J4XR3mTXvSZMCyL57GxLB9fcro258vidL+VqT92Pzuu3vWrnVyha3vv2+SStitsHDknXfGFhx3TPpNZmp20Pv56csNu9c4/IqKqrLl656Ndz42vPkmxdjhRb75858Nvz/Yf//1sceC+SVRgCMlKf3Ga+eaDPhq2wrKqPMv+n7natsLUyzw0VRb23DunHNlDm/YcO7w4WD/7ZCRUXTPPbECx4yxCzyuJJMBZYJSwBuaa6NYn+Kcj/Wvv+7cbAAAGKVbP/jAzP9bsEBI5rNTOJI8KVOLzDjVDX9NwxkhjwcT/fDJ3SB64pCP7eJcxZO7dtHgKT/JmZnXzJkTfTgmFt7ewWu23zlwYofAx1NybCuIqtjmg2BsBAKi1PDV15sbobHz5kUfjgmFt5oPqGsUGdNtaKoG0RabfDAmMHxJMDa/WkZeXvdrrokmHHmd+/bqOth8jKqIzLRTkPi8PcYYIRRjwv8IoZSycPAhMMRrJV48fNasaMIxbnjbX5/TSWT9T5dOPQUygTHx+w2fzwgEMMaU/+k69vsNn0/XdWxCSah8QEWB4lJoNY+nzasVTJtmfpwbXjhG59/Q5pgeOfma6hY1KSP6TxDj22Li9xuGQRQFeTxaUpLL49H4n9fr8no1TVMZA36/EQgENeAh8YEQyuzeXdQ8JGdmtlmr7U1N7Tl6dHTgSE+5Kveq3lZGZqWJqRLzuJLSU69ybjACAazrRNMUj0fTNAUheKXRVlXkdqsej8YY8/kMQqhzPsbOny8KjgGTJ1tZWXoVFUUHjsG9rH5xn9yhQmYkMzVbU9zOyWCMeTyaqiptzi9CkAPE1x2HfAyZPt2hnW9ZUwpuusnKyF5jxkQHjoJeVr/4nhsfE7KyLJzxtJPKF04GAMDtVq+0FmYPQ1NcLlXXsUP7oXk8Wb0EZIhct3BhWm6ulZFdBw/2pKREAQ7rtWuZHXN+c/tLDmdk3LCZw/pe7+QKhkEYA263aiM1RFURtx8O/Y+5y5Y5eVpcrp0712K1FVKU3IKCSMOhKlrXrBB+BEWDbhzeb7xtLXMyuy+cXuwoMEAoxtQeGS32Q1GgrhMn+5f03NzpxcXIQSHdg2vXpnbubH18toMMD5twdM7IUxUthPiEov72zldSgqcCmYLoevze5cm2Pnu52VBVFNJq0hofKiGUUuqEj6E33zzx4YftKTDq7rtzh4bmwGX17BkFOEL9SEpS+ssPf93BE1pukaa6n17wUW6Wo6WaUkYp0zTFaVAIQUVBwTxTi3womjZ+8eJQi+oghD2LimY8HbLXlZGXF2k4TLI3zPe0f1uyY2R/q/PSqWPO8j/uGNhjlMOHSghVFCgkC1VVEcbUPHTdNh+qeu/y5TOfe87i+gIRuuOVVxZ8/HGbsY0rJTU72/7N2vtYalK6vQ+6Ne9jc5edrTn+1y+Kf9z/bbBhfa8etujmZ/I69zVJVw4RDjHRSb4wMcbMUeN8AGCWvz5qzpz8KVNKv/rqi+Jivbm59a9T1enFxcNuucWdnGwP7g7p6bZv1mZpwq9+8eit4x9yZuppdX1lRXXZ6fNHj5850ORr8LqTszO75XXu2zWrZ3ZGd4H9GpqbdbdbFcWH32+oKlLVthcpi/UNht9/9tChswcPnj106ML58wyA1M6duwwalJmXl9W7tyspyYnNM/z+Jb17R9RyOC9aRAhlpXfNSu86uGcRZYT/FiFEClKAUOFLgMDKBgiBxeNVK/aDxz9yCwq6DBrEKGWU8nVEVGsQJ2E31e6jFXY6ihBC4e+yLbTqBYY01AoffB5AGJrbQAghhPayBWxq4ySVPCoitBKMhYpSOOpfrC7fhNjOI7EJh2EE4gULCCGEQGCiDaUhL1JR5AM7SD+zCccFX10cmQ2EYJv5O9Y9GMaYjWBatPhw0lXdJhz1TTVxBQcKdmYW+q6YQQjsRVqjwkdTTU2k4aiqq4gjOFQV8SCpACuNiZMtceT5qDt9OtJwnK09EUdwQAgVBRkGcWw2qPMwfIT5qDlxItJwnKs95deb44gPTVMIoU4WF8YYzx9zHjKJJB8mtXHhggMAUF65P758UpdLCQSw7cWFH9arqphQRMT4qNy/Pwpw7D++HcSVqKqiqigQMELlgzHG08CcpINEhQ/d56soKYkCHHuPbAbxJpqmKAry+w3r6wtPLiSEejyaw3SQyPNR/uOPxLAfrrQfBS8t20YIVhQ1juCAELpcKoQkEMCKglpNPb8cC0KoYRAIocejhanvlPX4ug1x2ALbvuXw6U2HT+0BcSi8KAEA4Pcbfr+BMaH0YooGY4xSRgjVdezzGYZxsYIhrB3Jwmc/HMLh6He/ae8X/bsVxiMfCEG3W+UcYPzz+kcIAUKIJ6lHplFdOOxHzcmTJ3fvjo7lAABs2L0mWt1URCHCDYPXq3m9LRVvmtfr4vkfkWxhKNx+7PrsM6fz4+TDdReqdh1aD+Jf+Lk2QjBipiICfOxctcrp/s7h57/bsXJE/7C/gIL7hjwE3pK8wx+nosAYfMfPlQoDABECCCFzhUWtL8d37Aipz2lY4Niyb11ldXn4mkBSygyDEEIhhIoCVfWiqWesZTfBEII8hhELWJgrTCk1DAYh1DQUbNkSwsf6N95wfi9O+5AywHTDf03+5HD8+AyD6DrhzqPLpSgKQghx48+rBFqY4M8DIRTFRYExxjs4IATdbsXlUk0UxpgQwoIp7LD/6ZkDB/77yScF+GTOL/HdjpXCD2kvCz2p5qWtEEJNU7xeDUIYUnQrHApjTNxurjAyV5iH1Px+w3l99pXy/WuvCbkpAR2MKaN+vVmg8WCM+f0YQuDxaBb9Cd40AQDALY3wUKYVMgAITWFFQRACXSfceRJlP84cOPD5kiVC8iLFtLc+VlEyot+EzI7ZoiYaQjsVzzzTQtdJhHehuk4YAx5PyAojdJGPYDVXNvh4f+HCulOnxGz1Rf103ljzB5MiUuvC68lsH3FpmqKqSNex2JdLmCpMnJzJXToOFNM/aPvKleU//CDq1oQ1xq9tPJfaIaOvs3cKc7NhvmZbCW1hzG112PcvXGHuLDtTmLVYPtv2o7m2dvl99wl8q7nI6fvbumeOnzno0Gxwr95hREvTFOd5XxYVhhBaqX5rU2GMzWoIrNiPTx95pKlaZCtOkXDo2P/ch/c7yRDDmDic6BbngzEQgZ0LIVTTkAiFIY+RmDFkysfGpUv3f/ON2LsT/HbIhqaa6obK0QN/YS98hDF1uUTk4UHIQ5Oi6mNNIjEulypEYV70YK5wsPXlxK5dHz30EKM0puEAAJRVlmqaO7/7NTZ+hYwB5100Wp4dIUyIHQquMKOUapoqCDWAMW3z9q/ko+bkyb/Mnh1obBR+g2F5r+yeI5uy0nN7dhkY6voNABQVBefLijjUWqeZbzdE0WwFjp/xcaG6+u3bbnNSfxBpOAAAPx74tu/Vw3I6dQ9priEE4hYCq3PtDA6RNGNMW85irPDhUwOvLrr97MGDYbrBcC3JlJLnPry/tvEckBKmGVbYyucfP71vX/i+Ioz+mi/QtOC5ovN1Vi0ehFBg4IoxEO4Yqe3WBsHcW2C5jwhB9PnPFv/j2xVhvcHwhol0w7/oT/9SUXXM2lwDUeXOfO8T7gg6QoLhsHgkhBF55qOF/9zy93Abp7DHEA0cWPzS5MMn91iYa8TEvZSEUhrWfewlOIQBTYglOAxmPLH0ru07v4zAyhWJBBkDBx59a+a+o1vanGuEoHkjR+u/QkJYuOHgp6lCQm08calNhQPE//hbd5QcjlDFULh2K1f6pxv3rO1z9ZA2c8YwJhY99rZ2xSCsW5UWQkQpzBhwucxCJn69+am/zCkt/wFESiIEB+dj877/6ZM7xGR/CyHkpxXOG+C7XGoEsjogBOZnZqEorJjctS/Q9O/LfhlJMiIKhxU+uKE2yW+wONEIQVGBSysri5MMI16Iy0vxYoqMSMNhhQ++BeCtym3wYRiEUuZ2axFL9mlR2F6GkWEQQphJUV20yIgCHBb54DncIU03758RpopnK9sWjEMzeBwpjKnHEzR/JYpkRAeONvng+ZWM8fxKYMX/oJTx7K/Ik3FJYcgV5qy0iQhXmFIWs2REDQ6LfEAIec0BuFTF1Fp4gBoG4WYm1FcwieYDIQQNg2DMIAyqMKX0UskFMsl5izoZ0YTD4vrSUuVhGLSlhqylANowME8ec7tVK+9si8D6cklhyrFuVWEIodutmHSQigUyogyHxf0Lb6ShKJD3lealYwBAXujmcimxgEVrCiPeJT1UhWOEjOjDYTH+0TLpioL4GwtUFXEzHjtYtLbLDVnh2CEjJuCwzkeYhJ/ntNh/xi56DJHXJKbIiBU4osIHP38xDKzrBGPKm/sQwlreW25x39FeyYghOCLMByE0EMCUUoSQpikul6JpqqoqmqZwdwGhi/sgfpIebkRikIzYgiMyfPBYGW/25XKpqqpc+ey5u6CqiqJAjCnG4a2/jU0yYg6OcPNx6XXlwOPRrITnW8JxhhEuPmKWjFiEI3x8XFYLH0Ks7PJyeOF8xDIZMQpHmPjgZ3L2+kbyOKbt48B4JCN24RDOB6VU14nJQYYFPiAhjFImpBYh9smIaTjE8sFbFjspQOJequ2j+bgjI9bhEMUHTwBw3tZeSAluvJARB3AI4UNgSimEjjyPOCIjPuBwzgdfC4Qko0MYQtFiXJMRN3A45IO/YUnILhRCyHuMhurYxh0Z8QSHbT54e1Ahr9/icqkBLWrfZMQZHLb5EA0HCwmOOCUj/uCwxwfGVGBCECHEOhzxS0ZcwhEqHxBC/jJYUZFvw6AWrxbXZMQrHKHyYcNLMPFg+Ilum3Yo3smIYzhC4oO3gBLSn4n3ATMvam0fZMQ3HCCU/FMhYW8AgGFgnhna7smIeziA5fpsnh/q8MyMUmoY1Ly3ZLshoz3AYZEPXm7kJCGDp5CZn961JzLaCRzAWv0LcPZChUsl2mqMVyJJOOzwoSiIN0m2wceliueghbjtj4x2BYc1Pi7W71tfX/hqEsu18BIOMXzwcngIoa63XXPAy1h0HQMA3G4t0choh3BY4wPxmgPuRvzML7n8jeW8QbbLpSTUatKe4bDon/KyFH5mizHhrHDfgjfaVtWLb3hMHA80IeCwHv/gFfG81llRkKahy4qdUILEMxIODhBKfL3l/dbBOq4kIBntHA4QnvqXBCGj/cMhnI/EISMh4BDIR0KRkShwCOEj0chIIDgc8pGAZCQWHLb5SEwyEg4OG3wkLBmJCEdIfCQyGQkKh0U+EpwMAADs2KkrSGBxa15FaSVbmDEWMHyUkkSeHBUktgQMHzCAlFYFySmQIuGQIuGQIuGQIuGQIuGQIuGQIuGQIuGQIuGQIuGQIkXCIUXCIUXCIUXCIUXCIUXCIUXCIUXCIUXCIUXCIUWKhEOKhEOKhEOKhEOKhEOKhEOKhENKnMr/ARfxaJHYqGBYAAAAAElFTkSuQmCC">
 <style>
 /* ---------- Atkinson Hyperlegible ----------
    Embedded rather than fetched from Google Fonts, so a copy saved to disk
@@ -1268,7 +1312,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
    .day dividers stick under the top bar (--bar-h is measured in JS).
    .post uses content-visibility:auto so off-screen posts skip rendering work;
    this is what keeps very long feeds smooth. */
-.feed-head{font-size:.9em; color:var(--muted); margin:0 4px 12px}
+.feed-head{font-size:.9em; color:var(--muted); margin:0 4px 12px; overflow-wrap:anywhere}
 .feed-head .linkbtn{background:none; border:0; padding:0; margin-left:6px; color:var(--accent); cursor:pointer; font:inherit; text-decoration:underline}
 /* ---------- full-width bands ----------
    .bleed paints a band behind an element that spans the whole window width,
@@ -1336,8 +1380,16 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .parent-mini:hover{color:var(--ink)}
 .parent-mini .avatar{width:18px; height:18px}
 .parent-mini .pm-label{white-space:nowrap}
-.parent-mini .pm-name{font-weight:700; color:var(--ink); white-space:nowrap}
-.parent-mini .pm-text{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+/* Everything on this line is nowrap, and a flex item won't shrink below its
+   own content unless it's told it may (min-width defaults to auto), so any
+   child holding text from the network has to be allowed to truncate or the
+   whole row runs out past the card. .pm-label is exempt: it's a fixed string.
+   The name is capped rather than shrunk -- as a share of the row, so it keeps
+   scaling with the column -- because letting it shrink freely squeezed
+   ordinary names down to a few characters to make room for a long link title. */
+.parent-mini .pm-name{font-weight:700; color:var(--ink); white-space:nowrap;
+  flex-shrink:0; max-width:40%; overflow:hidden; text-overflow:ellipsis}
+.parent-mini .pm-text{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 /* "More replies in between", between a thread's first post and the parent
    of a reply deep in the thread. Sits on the thread line. The button fetches
    the missing posts and puts them here; the link beside it is the way out to
@@ -1355,7 +1407,14 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .avatar-link{flex:none; align-self:flex-start; display:block; width:40px; height:40px; border-radius:50%}
 .pv-body{flex:1; min-width:0}
 .pv-head{display:flex; gap:6px; align-items:baseline; flex-wrap:wrap; font-size:.95em}
-.pv-name{font-weight:700; color:var(--ink); text-decoration:none}
+/* A display name is whatever the account set it to, so it can be one
+   unbroken 300-character token. It's a flex item in .pv-head, so it needs
+   both the licence to break mid-token and min-width:0 to shrink far enough
+   for the break to happen; without them the name ran straight out of the
+   card. Handles are capped and ellipsised above; post text wraps via
+   .pv-text. Same licence on .quote covers a quoted feed, list or starter
+   pack, whose name is network text sitting in a bare <strong>. */
+.pv-name{font-weight:700; color:var(--ink); text-decoration:none; min-width:0; overflow-wrap:anywhere}
 .pv-name:hover{text-decoration:underline}
 .pv-handle{color:var(--muted); overflow:hidden; text-overflow:ellipsis; max-width:220px; white-space:nowrap}
 .pv-time{color:var(--muted); text-decoration:none; margin-left:auto; font-size:.9em; white-space:nowrap; font-variant-numeric:tabular-nums}
@@ -1434,7 +1493,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .ext-desc{font-size:.88em; color:var(--muted); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
 .ext-domain{font-size:.8em; color:var(--muted); margin-top:4px; border-top:1px solid var(--line); padding-top:4px}
 .gif{max-width:100%; border-radius:10px; display:block}
-.quote{border:1px solid var(--line); border-radius:10px; padding:8px 10px}
+.quote{border:1px solid var(--line); border-radius:10px; padding:8px 10px; overflow-wrap:anywhere}
 .quote .pv-head{font-size:.88em}
 .quote .avatar{width:20px; height:20px}
 .quote .pv-text{font-size:.95em}
@@ -1451,7 +1510,8 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .mini-thumb.vid::after{content:"▶"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:16px; text-shadow:0 0 4px rgba(0,0,0,.8)}
 .media-summary a.ms-label{font-size:.85em; color:var(--muted); text-decoration:none}
 .media-summary a.ms-label:hover{color:var(--accent); text-decoration:underline}
-.pm-media{white-space:nowrap; font-size:.9em; color:var(--muted); border:1px solid var(--line); border-radius:6px; padding:0 5px}
+.pm-media{white-space:nowrap; font-size:.9em; color:var(--muted); border:1px solid var(--line); border-radius:6px; padding:0 5px;
+  min-width:0; overflow:hidden; text-overflow:ellipsis}
 .quote-missing{border:1px dashed var(--line); border-radius:10px; padding:8px 10px; color:var(--muted); font-size:.9em}
 .video{position:relative; border-radius:10px; overflow:hidden; background:#000; max-height:560px; display:flex; align-items:center; justify-content:center}
 .video img{width:100%; height:100%; object-fit:contain; display:block}
@@ -1740,7 +1800,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.0.3";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";

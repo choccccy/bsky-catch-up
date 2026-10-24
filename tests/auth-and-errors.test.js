@@ -55,6 +55,12 @@ test("the version shown matches APP_VERSION and the filename", async () => {
   assert.ok(h.PAGE_PATH.includes(`v${v}`) || !/v\d+\.\d+\.\d+/.test(h.PAGE_PATH), "filename carries the same version");
   const raw = require("node:fs").readFileSync(h.PAGE_PATH, "utf8");
   assert.match(raw, new RegExp(`Version ${v.replace(/\./g, "\\.")}`), "header comment version");
+  // boot() overwrites document.title from APP_VERSION, so the assertion on
+  // page.document.title above passes even when the tag in <head> is stale --
+  // it only looks like coverage. That tag is what shows before the script
+  // runs, and VERSIONING counts it as one of the three spots that must stay
+  // in sync, so check the source as well as the running page.
+  assert.match(raw, new RegExp(`<title>[^<]*v${v.replace(/\./g, "\\.")}\\b`), "<title> in <head> matches APP_VERSION");
   assert.match(raw, new RegExp(`## \\[${v.replace(/\./g, "\\.")}\\]`), "changelog entry for this version");
   // The release workflow publishes this version's changelog section verbatim
   // as the release notes, so an empty section would ship an empty release.
@@ -92,4 +98,20 @@ test("the tab icon is carried inside the file, not fetched", async () => {
   const markup = decodeURIComponent(uri.replace(/^data:image\/svg\+xml,/, ""));
   assert.match(markup, /^<svg[^>]*viewBox=/, "the SVG has a viewBox");
   assert.match(markup, /<\/svg>$/, "the SVG is not truncated");
+});
+
+test("the home-screen icon is an inline 180px PNG", async () => {
+  // Same file-not-DOM reading as the tab icon test above. iOS wants a
+  // 180x180 apple-touch-icon; any other size gets rescaled and goes soft.
+  const src = require("node:fs").readFileSync(h.PAGE_PATH, "utf8");
+  const head = src.slice(0, src.indexOf("</head>"));
+  const tag = (head.match(/<link\s[^>]*rel="apple-touch-icon"[^>]*>/) || [])[0];
+  assert.ok(tag, "the page has an apple-touch-icon");
+  const uri = tag.match(/\shref="([^"]*)"/)[1];
+  assert.match(uri, /^data:image\/png;base64,/, "the touch icon is an inline PNG");
+  const png = Buffer.from(uri.replace(/^data:image\/png;base64,/, ""), "base64");
+  assert.equal(png.toString("latin1", 1, 4), "PNG", "it decodes to a PNG");
+  // IHDR is always the first chunk: width and height are big-endian at 16 and 20.
+  assert.equal(png.readUInt32BE(16), 180, "180px wide");
+  assert.equal(png.readUInt32BE(20), 180, "180px tall");
 });

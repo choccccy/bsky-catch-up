@@ -189,6 +189,66 @@ test("reply reminders say what the parent has attached", async () => {
   assert.equal(page.article("R").querySelector(".parent-mini .pm-media").textContent, "3 images");
 });
 
+test("the reply reminder's parts can truncate instead of running past the card", async () => {
+  // Every child of .parent-mini is nowrap, and a flex item won't shrink below
+  // its own content unless min-width says it may. So a parent post whose only
+  // attachment was a link with a long title -- the chip reads "Link: <title>"
+  // -- pushed the row 130px out past the card edge, and a long display name
+  // did the same. Checked against the stylesheet, not by measuring: jsdom has
+  // no layout engine, so the widths were verified in a real browser instead.
+  const src = require("fs").readFileSync(h.PAGE_PATH, "utf8");
+  // Comments stripped first: one sitting above a rule would otherwise be
+  // swallowed into that rule's selector and hide it from this scan.
+  const css = src.slice(src.indexOf("<style>"), src.indexOf("</style>"))
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  const declsFor = sel => {
+    const bodies = [];
+    for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^}]*)\}/g))
+      if (selector.split(",").some(one => one.trim().endsWith(sel))) bodies.push(body);
+    return bodies.join(";");
+  };
+  for (const sel of [".pm-name", ".pm-media"]) {
+    const decls = declsFor(sel);
+    assert.ok(decls, `${sel} has a rule at all`);
+    assert.match(decls, /overflow\s*:\s*hidden/, `${sel} must clip what doesn't fit`);
+    assert.match(decls, /text-overflow\s*:\s*ellipsis/, `${sel} must ellipsize`);
+    assert.match(decls, /(min-width\s*:\s*0|max-width\s*:)/,
+      `${sel} must be allowed to shrink (min-width:0) or be capped (max-width)`);
+  }
+});
+
+test("text from the network can't run out of its card", async () => {
+  // A display name, a quoted feed/list/starter-pack name and a feed title are
+  // all whatever the account set them to, so any of them can arrive as one
+  // unbroken 300-character token with nothing for the browser to break on.
+  // Post text and handles were already covered (.pv-text wraps anywhere, the
+  // handle is capped and ellipsised); these three were not, and each ran
+  // around 2,500-3,000px out past the edge of the card. Stylesheet check
+  // again -- jsdom has no layout -- verified by measuring in a real browser.
+  const src = require("fs").readFileSync(h.PAGE_PATH, "utf8");
+  // Comments stripped first: one sitting above a rule would otherwise be
+  // swallowed into that rule's selector and hide it from this scan.
+  const css = src.slice(src.indexOf("<style>"), src.indexOf("</style>"))
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  const declsFor = sel => {
+    const bodies = [];
+    for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^}]*)\}/g))
+      if (selector.split(",").some(one => one.trim() === sel)) bodies.push(body);
+    return bodies.join(";");
+  };
+  // Letting the token break is what keeps it in: anywhere/break-word both do.
+  for (const sel of [".pv-name", ".pv-text", ".quote", ".feed-head"]) {
+    const decls = declsFor(sel);
+    assert.ok(decls, `${sel} has a rule at all`);
+    assert.match(decls, /overflow-wrap\s*:\s*(anywhere|break-word)/,
+      `${sel} carries text from the network, so it must be able to break a long token`);
+  }
+  // .pv-name is a flex item in .pv-head: without min-width:0 it refuses to
+  // shrink to where the break would happen, and wrapping alone doesn't save it.
+  assert.match(declsFor(".pv-name"), /min-width\s*:\s*0/,
+    ".pv-name must also be allowed to shrink below its content");
+});
+
 // ---------------------------------------------------------------------------
 // "Show images whole" (settings.wholeImages) and its sub-settings.
 // ---------------------------------------------------------------------------
