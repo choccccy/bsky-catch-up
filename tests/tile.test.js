@@ -15,7 +15,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const h = require("./harness");
 
-const TILED = { tile: true, columnWidth: 480 };
+const TILED = { tile: true, tileMax: 4, columnWidth: 480 };
 const NARROW = { tile: true, columnWidth: 960 };
 
 const a = h.actor(1), b = h.actor(2);
@@ -256,4 +256,68 @@ test("the scroll handler is what records the reading spot", async () => {
   const spot = page.json("readingSpot()");
   assert.equal(spot.key, page.eval("state.view[2].key"), "the post straddling the top of the screen");
   assert.equal(spot.offset, -50, "and where its top edge was");
+});
+
+/* ---- the width cap and the column count have to agree ----
+   The CSS caps the feed at --tile-width and lets auto-fill divide that up;
+   tileCols() decides, from the same numbers, how many columns that is. If
+   the cap is even a pixel short of the count, auto-fill lays out one column
+   fewer than the setting asks for -- which is what "Most columns: 2" did in
+   1.1.0, where the cap counted a gap after the last column and forgot the
+   page's padding. */
+test("the width cap fits exactly as many columns as the count promises", async () => {
+  const page = await h.loadPage({ settings: { tile: true, columnWidth: 640 } });
+  for (const [max, width] of [[2, 1320], [3, 1976], [4, 2632], [6, 3944]]) {
+    page.eval(`settings.tileMax = ${max}`);
+    assert.equal(page.eval("tileWidth()"), width, `cap for ${max} columns`);
+    // At exactly the cap, that many columns fit; one pixel less and they don't.
+    await page.resizeTo(width);
+    assert.equal(page.eval("tileCols()"), max, `${width}px fits ${max} columns`);
+    await page.resizeTo(width - 1);
+    assert.equal(page.eval("tileCols()"), max - 1, `${width - 1}px fits one fewer`);
+  }
+});
+
+test("two columns is the default, and two columns is what you get", async () => {
+  const page = await h.loadPage({ settings: { tile: true }, server });   // tileMax untouched
+  assert.equal(page.eval("settings.tileMax"), 2, "the default cap");
+  await page.resizeTo(page.eval("tileWidth()"));      // a window exactly wide enough
+  await page.startDate(start);
+  assert.equal(page.eval("tileCols()"), 2);
+  assert.equal(page.eval("tileOn()"), true, "so the feed really does tile");
+  assert.ok(page.$$("#feed > .band").length >= 1);
+});
+
+test("the cap the CSS uses is the one the count was worked out from", async () => {
+  const page = await h.loadPage({ settings: { tile: true, tileMax: 3, columnWidth: 500 } });
+  await page.resizeTo(3000);
+  assert.equal(page.eval("tileCols()"), 3);
+  assert.equal(page.document.documentElement.style.getPropertyValue("--tile-width"), page.eval("tileWidth()") + "px");
+});
+
+test("a 1.1.0 link still shows what its author saw", async () => {
+  // Links carry only non-default settings, so one made by 1.1.0 with tiling
+  // on says nothing about a cap of 4 -- the format number has to fill it in.
+  const page = await h.loadPage({ url: "https://example.test/#recent=50&v=2&s.tile=1" });
+  assert.equal(page.eval("settings.tile"), true);
+  assert.equal(page.eval("settings.tileMax"), 4, "1.1.0's default, not today's");
+  const now = await h.loadPage({ url: "https://example.test/#recent=50&v=3&s.tile=1" });
+  assert.equal(now.eval("settings.tileMax"), 2, "a link from this version uses today's");
+});
+
+test("only the feed is allowed the tiled width", async () => {
+  // main holds the start screen as well, so the width cap is scoped to the
+  // screen that's up (data-view, set by show()).
+  const page = await h.loadPage({ settings: TILED, server });
+  const root = page.document.documentElement;
+  assert.equal(root.dataset.view, "start", "the start screen is up at first");
+  await page.startDate(start);
+  assert.equal(root.dataset.view, "feed", "and the feed once it's loaded");
+  page.$("#btnNew").click();
+  assert.equal(root.dataset.view, "start", "and back again for a new catch-up");
+
+  const css = require("node:fs").readFileSync(h.PAGE_PATH, "utf8");
+  const widened = css.match(/^:root\[data-tile\][^\n]*main[\s\S]*?\}/m)[0];
+  assert.match(widened, /data-view="feed"/, "the cap only applies on the feed");
+  assert.ok(!/\[data-tile\][^\n]*\.bar-inner/.test(css), "and the top bar is not widened at all");
 });

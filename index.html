@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.1.0
+  Version 1.1.1
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -244,6 +244,9 @@ TILED MODE ("Tile posts side by side", settings.tile)
       with each item's row span measured in JS (setSpan, one ResizeObserver
       for everything that changes height later). Non-dense flow never
       backtracks, which is what keeps chronology descending.
+    - Only the feed gets the extra width: main carries the login, start and
+      progress screens too, so the cap is scoped to data-view="feed" (set by
+      show()). The top bar keeps its own measure at every width.
     - Posts lose content-visibility:auto while tiled: an unpainted post
       reports its contain-intrinsic-size, so every span in a batch would be
       measured wrong and then jump as you reached it.
@@ -339,8 +342,10 @@ COMPATIBILITY RULES (saved settings and shared links outlive any version)
     the settings migrations block near DEFAULTS, for saved settings, and
     (b) an entry in LINK_ALIASES, if the setting is linkable.
   - Changing a linkable setting's default: bump LINK_FORMAT, add the OLD
-    default to every existing entry of LINK_FORMAT_DEFAULTS, and add an
-    empty entry for the new format. Saved settings need nothing (only
+    default to every existing entry of LINK_FORMAT_DEFAULTS in which the
+    setting EXISTED (a format older than the setting itself is left alone:
+    a link from back then says nothing about it, so the reader's own value
+    is the right one), and add an empty entry for the new format. Saved settings need nothing (only
     non-default values are saved, so users who never touched it get the
     new default).
   - Removing a setting: old links will list it as ignored, which is fine;
@@ -462,6 +467,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.1.1] - 2026-10-29
+
+### Fixed
+
+- "Most columns" set to 2 laid the feed out in ONE column, however wide the
+  window. The cap on the feed's width was worked out as *columns x (column
+  width + gap)*, which counts a gap after the last column that isn't there,
+  and left out the page's own side padding -- so the feed was capped a few
+  pixels narrower than the columns it was supposed to fit, and one of them
+  dropped off. Low caps suffered most: at 2 it meant no tiling at all.
+  The arithmetic now lives in one place (`tileWidth`, beside the function
+  that counts the columns) and the CSS reads the answer, so the two can't
+  disagree again.
+- Tiling widened the whole page, not just the feed: the start screen spread
+  across the window and the top bar's contents went with it. Only the feed
+  is tiled, so only the feed is allowed the extra width now. The start,
+  login and progress screens, and the top bar, keep the measure they have
+  always had.
+
+### Changed
+
+- "Most columns" now starts at 2 rather than 4. Two columns of a readable
+  width is what most windows have room for, and it's the easiest to read
+  down; raise it if your screen is big enough to want more. Your own value
+  is kept if you've set one, and links made by 1.1.0 still show what their
+  author saw.
 
 ## [1.1.0] - 2026-10-28
 
@@ -1181,7 +1213,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v1.1.0 · Bluesky</title>
+<title>Catch-up v1.1.1 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -1336,10 +1368,16 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
    dense flow never backtracks, so no post starts above an earlier one:
    chronology descends in a staircase, which is the brick look. The column
    count is auto-fill's business, not ours. */
-:root{--tile-gap:16px}
-:root[data-tile] main,
-:root[data-whole][data-tile] main{max-width:min(100%, calc(var(--tile-max, 4) * (var(--col) + var(--tile-gap))))}
-:root[data-tile] .bar-inner{max-width:min(100%, calc(var(--tile-max, 4) * (var(--col) + var(--tile-gap)) + 420px))}
+:root{--tile-gap:16px}   /* = TILE_GAP in the script; keep the two in step */
+/* --tile-width is the "most columns" cap in pixels, worked out by tileWidth()
+   so that it and tileCols() can't disagree (see there).
+   Only the FEED is allowed to be that wide: main holds the login, start and
+   progress screens too, and a start screen stretched across a wide monitor
+   is nobody's idea of better. data-view (set by show()) says which screen is
+   up. The top bar is left alone for the same reason -- it reads the same at
+   every width, so it keeps the measure it has always had. */
+:root[data-tile][data-view="feed"] main,
+:root[data-whole][data-tile][data-view="feed"] main{max-width:min(100%, var(--tile-width))}
 :root[data-tile] .band{display:grid; grid-template-columns:repeat(auto-fill, var(--col)); grid-auto-rows:2px; row-gap:0;
   column-gap:var(--tile-gap); justify-content:center; align-items:start}
 :root[data-tile] .band > .day,
@@ -1915,7 +1953,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -1976,7 +2014,7 @@ function defaultPreloadVideos() {
 /* Default values for every setting. Saved settings are merged over these at
    load time, so adding a new key here is backwards-compatible. */
 const DEFAULTS = {
-  theme: "system", fontSize: 16, columnWidth: 640, tile: false, tileMax: 4, timeFormat: "absolute", dayDividers: true, hourDividers: true, showCounts: true,
+  theme: "system", fontSize: 16, columnWidth: 640, tile: false, tileMax: 2, timeFormat: "absolute", dayDividers: true, hourDividers: true, showCounts: true,
   showReposts: true, replies: "followed", showQuotes: true, onlyTypes: [], replyContext: "reminder", collapseRepeats: true, showOwn: true,
   sensitive: "blur", videoMode: "click", gifMode: "auto", preloadVideos: defaultPreloadVideos(), confirmRepost: true, galleryProxy: true, galleryProxyHost: "xbsky.app",
   wholeImages: "app", mediaWidth: 1, wholeAlt: true, wholeVideo: true, wholeLinkThumbs: true,
@@ -2064,7 +2102,7 @@ const SETTINGS_SCHEMA = [
   { key: "fontSize", link: true, label: "Text size", type: "range", min: 13, max: 21, step: 1, unit: "px", apply: "look" },
   { key: "columnWidth", link: true, label: "Column width", type: "range", min: 480, max: 960, step: 20, unit: "px", apply: "look" },
   { key: "tile", link: true, label: "Tile posts side by side", sub: "On a wide window, fill it with as many columns of the width above as fit. Posts still run oldest to newest down the page, and day and hour dividers still span the whole width. A window too narrow for two columns is left exactly as it is.", type: "bool", apply: "both" },
-  { key: "tileMax", when: { key: "tile", value: true }, link: true, label: "Most columns", sub: "Even a very wide screen won't use more than this.", type: "range", min: 2, max: 6, step: 1, apply: "look" },
+  { key: "tileMax", when: { key: "tile", value: true }, link: true, label: "Most columns", sub: "Even a very wide screen won't use more than this. Two columns are easiest to read down; more fit more in.", type: "range", min: 2, max: 6, step: 1, apply: "look" },
   { key: "timeFormat", link: true, label: "Timestamps", type: "select", options: [["absolute", "Clock time"], ["relative", "Time ago"], ["both", "Both"]], apply: "render" },
   { key: "dayDividers", link: true, label: "Day dividers", type: "bool", apply: "render" },
   { key: "hourDividers", link: true, label: "Hour dividers", type: "bool", apply: "render" },
@@ -2142,7 +2180,7 @@ function applyLook() {
   r.style.setProperty("--media-mult", String(settings.mediaWidth));
   // Tiling: data-tile is set ONLY while the window really fits two or more
   // columns, so one column stays on the untiled path (see tileOn).
-  r.style.setProperty("--tile-max", String(settings.tileMax));
+  r.style.setProperty("--tile-width", tileWidth() + "px");
   const tiling = tileOn();
   r.toggleAttribute("data-tile", tiling);
   wasTiled = tiling; wasCols = tiling ? tileCols() : 1;
@@ -2762,7 +2800,7 @@ function clearHash() { try { history.replaceState(null, "", location.pathname + 
    reason bumping is worth anything: 2 marks the links that can carry a feed,
    so a 0.13.x copy says something instead of quietly reading Following.
    Links without v were made by 0.7.0/0.8.0 and count as format 0. */
-const LINK_FORMAT = 2;
+const LINK_FORMAT = 3;
 /* For each link format: linkable defaults that were DIFFERENT back then,
    as {key: oldDefault}. Links only carry non-default settings, so when a
    link that carries settings is opened, keys it omits are filled from this
@@ -2773,7 +2811,8 @@ const LINK_FORMAT = 2;
 const LINK_FORMAT_DEFAULTS = {
   0: {},
   1: {},
-  2: {},   // 0.14.0: no setting default changed; the bump is for feed= links
+  2: { tileMax: 4 },   // 1.1.0 shipped "Most columns" at 4; 1.1.1 made it 2
+  3: {},               // 0.14.0's bump (to 2) was for feed= links, not a default
 };
 /* Renamed settings and values, so old links keep working. Never rename a
    linkable setting key or option value without adding an entry here.
@@ -3099,13 +3138,23 @@ const feedEl = () => $("#feed");
    works out what the .band grid's auto-fill works out for itself (main's
    content box is the window less its 12px padding each side), so JS and CSS
    agree on the count without reading back layout. */
+const TILE_GAP = 16;    // the gap between columns, as --tile-gap in the CSS
+const MAIN_PAD = 24;    // main's own side padding, which box-sizing includes
 function tileCols() {
-  const gap = 16;                               // --tile-gap
   // clientWidth leaves out the scrollbar, which is the width the grid gets;
   // innerWidth is the fallback for anything that doesn't lay out (jsdom).
-  const avail = (document.documentElement.clientWidth || window.innerWidth) - 24;
-  const n = Math.floor((avail + gap) / (settings.columnWidth + gap));
+  const avail = (document.documentElement.clientWidth || window.innerWidth) - MAIN_PAD;
+  const n = Math.floor((avail + TILE_GAP) / (settings.columnWidth + TILE_GAP));
   return Math.max(1, Math.min(Number(settings.tileMax) || 4, n));
+}
+/* How wide the feed may get: n columns and the n-1 gaps BETWEEN them, plus
+   main's side padding (box-sizing:border-box, so max-width has to cover it).
+   The CSS reads this as --tile-width rather than working it out again: it
+   has to come to exactly the same number as tileCols, and when it doesn't,
+   the cap is a gap too narrow and auto-fill lays out one column fewer than
+   the cap allows -- which is what "Most columns: 2" did in 1.1.0. */
+function tileWidth(n = Number(settings.tileMax) || 4) {
+  return n * Number(settings.columnWidth) + (n - 1) * TILE_GAP + MAIN_PAD;
 }
 /* Whether the feed is tiled RIGHT NOW. Tiling is purely additive: with one
    column there is nothing to tile, so the page keeps the untiled markup and
@@ -4554,6 +4603,9 @@ window.addEventListener("resize", () => {
 /* ---------- views and forms ----------
    Switches between the four screens and resets the header when leaving the feed. */
 function show(name) {
+  // Which screen is up, for the CSS: only the feed may be as wide as a tiled
+  // layout needs (see --tile-width).
+  document.documentElement.setAttribute("data-view", name);
   for (const v of ["login", "start", "progress", "feed"]) $("#view" + v[0].toUpperCase() + v.slice(1)).classList.toggle("hidden", v !== name);
   $("#btnNew").classList.toggle("hidden", !(name === "feed"));
   $("#btnSignOut").classList.toggle("hidden", name === "login");
