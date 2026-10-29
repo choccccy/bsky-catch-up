@@ -321,3 +321,58 @@ test("only the feed is allowed the tiled width", async () => {
   assert.match(widened, /data-view="feed"/, "the cap only applies on the feed");
   assert.ok(!/\[data-tile\][^\n]*\.bar-inner/.test(css), "and the top bar is not widened at all");
 });
+
+test("the start post's highlight band stays inside its own column while tiled", async () => {
+  // The band is a .bleed, which reaches the viewport edges by measuring out
+  // from its own centre -- right only for a box that is itself centred. The
+  // dividers still are (they span the whole row); an anchor post is one grid
+  // item in one column, so its band painted across the window and, because
+  // .bleed isolates its own stacking context, OVER the column beside it.
+  const timeline = Array.from({ length: 30 }, (_, i) => h.item(h.post("P" + i, a, 10 + i)));
+  const page = await h.loadPage({ settings: TILED, server: { timeline } });
+  await page.startPost("https://bsky.app/profile/u1.test/post/P20");
+
+  const anchor = page.article("P20");
+  assert.ok(anchor.classList.contains("bleed"), "the start post still carries the band");
+  assert.ok(anchor.closest(".tile"), "and it really is a grid item, which is what makes the band wrong");
+
+  const css = require("node:fs").readFileSync(h.PAGE_PATH, "utf8");
+  const scoped = css.match(/^:root\[data-tile\][^\n]*\.post\.anchor::before\s*\{[^}]*\}/m);
+  assert.ok(scoped, "tiled, the anchor's band must be scoped back to its column");
+  assert.match(scoped[0], /left:\s*0/, "its left edge is the column's, not the window's");
+  assert.match(scoped[0], /right:\s*0/, "and so is its right");
+});
+
+test("a junk column cap falls back to the default, not to a number written twice", async () => {
+  // 1.1.0 shipped "Most columns" at 4 and 1.1.1 changed it to 2, but two
+  // `Number(settings.tileMax) || 4` fallbacks were left behind. Both now read
+  // DEFAULTS, so the default can only ever be stated in one place.
+  const page = await h.loadPage({ settings: TILED, server });
+  assert.equal(page.eval("DEFAULTS.tileMax"), 2, "the default this test is about");
+  // 2 columns of 480 + one 16px gap + main's 24px of padding.
+  assert.equal(page.eval("settings.tileMax = 0; tileWidth()"), 2 * 480 + 16 + 24,
+    "an unusable value falls back to DEFAULTS.tileMax, not to a stale literal");
+  assert.equal(page.eval("tileCols()"), 2, "and the column count agrees with it");
+});
+
+test("a divider's row span covers its margins, not just its box", async () => {
+  // Tiles have no margin of their own (flow-root keeps the post's inside), but
+  // the day and hour dividers do. Measuring only offsetHeight made their band
+  // too short to hold them, so a divider painted over the foot of the posts
+  // above it and the head of the posts below -- the overlap you can see in a
+  // tiled feed with hour dividers on. jsdom does no layout, so this drives
+  // setSpan directly with a known height.
+  const page = await h.loadPage({ settings: TILED, server });
+  const span = page.eval(`(() => {
+    const el = document.createElement("div");
+    el.style.marginTop = "18px"; el.style.marginBottom = "8px";
+    Object.defineProperty(el, "offsetHeight", { value: 100 });
+    document.body.append(el);
+    setSpan(el);
+    const got = el.style.gridRow;
+    el.remove();
+    return got;
+  })()`);
+  // (100 + 18 + 8) / 2px rows = 63, not the 50 the border box alone gives.
+  assert.equal(span, "span 63", "the margins have to be in the span");
+});

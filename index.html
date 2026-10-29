@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.1.1
+  Version 1.1.2
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -120,6 +120,13 @@ HOW IT WORKS (high-level data flow)
      them on click (expandThreadGap).
      Day, hour (optional) and start-post markers are full-window-width colour
      bands (CSS class .bleed) so they're easy to spot while scrolling.
+     A .bleed reaches the two viewport edges by measuring outwards from its
+     OWN centre, so it only lands right on a box that is itself centred in the
+     window. That holds for anything in the one-column layout, and for the
+     dividers while tiled (they span the whole row). It does NOT hold for a
+     post sitting in one tile, which is why the start post's band has to be
+     scoped back to its column there. Before putting .bleed on anything new,
+     ask whether the thing is centred.
   7. Position  On scroll, updateClock() finds the top-most visible post,
                updates the header clock/progress strip, and remembers the
                furthest-read post in localStorage ("Resume where I left off").
@@ -244,6 +251,11 @@ TILED MODE ("Tile posts side by side", settings.tile)
       with each item's row span measured in JS (setSpan, one ResizeObserver
       for everything that changes height later). Non-dense flow never
       backtracks, which is what keeps chronology descending.
+      A span must cover the item's MARGIN box: the tiles have no margins of
+      their own (flow-root keeps the posts' inside), but the dividers do, and
+      measuring only their border box made their band too short to hold them,
+      so they overlapped the posts either side. Anything given to a band
+      that carries a margin has to be measured the same way.
     - Only the feed gets the extra width: main carries the login, start and
       progress screens too, so the cap is scoped to data-view="feed" (set by
       show()). The top bar keeps its own measure at every width.
@@ -332,6 +344,19 @@ EXTENDING
     rawMedia()/mediaLabels() so deeply nested posts can summarize it.
   - New post action: add a button in actionsHtml() with data-act="...", then
     handle it in the delegated document click listener.
+  - NEVER write a setting's default value a second time. A fallback belongs in
+    DEFAULTS and nowhere else: read numbers through numSetting("key"), which
+    takes the fallback from DEFAULTS, rather than writing
+    `Number(settings.key) || 640`. The two exceptions are contextCount and
+    preloadVideos, where 0 is a real value and junk clamps to 0 instead.
+    The same goes for a CSS fallback: `var(--media-mult, 1)` has to match
+    DEFAULTS.mediaWidth, because applyLook is the only thing that sets it.
+    This is not hypothetical -- 1.1.0 shipped "Most columns" with a default of
+    4, 1.1.1 changed it to 2, and two `|| 4` fallbacks were left behind.
+  - Reach for the shared helpers instead of writing the idiom again: plural()
+    for "1 post"/"2 posts", isHidden()/viewing() for the .hidden class,
+    sameJson()/isDefaultValue() for comparing settings, numSetting() for
+    numbers, schemaFor() for a SETTINGS_SCHEMA row.
 
 COMPATIBILITY RULES (saved settings and shared links outlive any version)
   - Change settings from user actions ONLY via setSetting(key, value).
@@ -388,6 +413,11 @@ PROJECT STATUS AND HANDOFF
     - Edit by producing the new version and checking it (syntax + tests)
       BEFORE removing the old one. (A previous version was once deleted
       by a failed edit and had to be recovered.)
+    - Every function has its comment directly above it. When inserting code,
+      move the comment WITH the function it belongs to: three had drifted
+      apart by 1.1.1, each left describing whatever had been pushed under it.
+      Likewise, don't leave a bare `/* section */` line above the real
+      commented heading when adding one; there were three of those too.
     - Things that can't be checked without live Bluesky (see KNOWN
       LIMITATIONS) are stated plainly, with what to look for.
 
@@ -468,7 +498,41 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
 
-## [1.1.1] - 2026-10-29
+## [1.1.2] - 2026-10-28
+
+### Fixed
+
+- With tiling on, the highlighted start post painted its band straight across
+  the window and over the posts in the column beside it, hiding them. The band
+  is drawn by measuring out to both edges of the window from the middle of the
+  thing it sits behind, which is only the same distance each way when that
+  thing is itself centred. Day and hour dividers still are, because they span
+  the whole width; a post in one of several columns isn't. Tiled, the start
+  post's band is now its own column's width. The dividers are unchanged, and so
+  is everything about a single column.
+- Tiled, the day and hour bars overlapped the posts: a bar covered the bottom
+  of the posts above it and the top of those below. The columns are laid out by
+  telling the grid how tall each thing is, and a bar's height was measured
+  without the space it reserves above and below itself, so the row it sat in
+  was that much too short for it. Measured properly now.
+- "Most columns" kept a leftover 4 as its fallback after 1.1.1 made the default
+  2, so a saved value the page couldn't read would have given you four columns
+  rather than two. Every numeric setting now takes its fallback from one place,
+  which is what stops this happening again.
+- The "About this page and your privacy" notes said the page fetches the
+  typeface from Google Fonts. It doesn't, and hasn't for a long time: the
+  typeface is built into the file, like the icon. The only thing fetched from
+  outside Bluesky is the video player, and only when you play a video.
+
+### Changed
+
+- Housekeeping, with nothing to see: repeated bits of code replaced by one
+  shared version, comments reunited with the functions they describe, a few
+  duplicated headings and one dead line removed. The page behaves exactly as
+  1.1.1 did. The notes at the top of the file now spell out the two traps
+  behind the fixes above, so the next change doesn't fall into them.
+
+## [1.1.1] - 2026-10-28
 
 ### Fixed
 
@@ -1213,7 +1277,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v1.1.1 · Bluesky</title>
+<title>Catch-up v1.1.2 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -1268,7 +1332,9 @@ site with this release.
 /* ---------- design tokens ----------
    Light palette by default. Dark palette is applied either when the OS prefers
    dark (unless the user forced light), or when the user forced dark via
-   settings (data-theme="dark" on <html>). Keep the three blocks in sync.
+   settings (data-theme="dark" on <html>). The palette is therefore written
+   TWICE, identically: a selector list can't straddle a media query, so the
+   two blocks below have to repeat each other. Change one, change the other.
    --fs and --col are driven by the "Text size" and "Column width" settings. */
 :root{
   --bg:#EDF0F4; --surface:#FFFFFF; --surface-2:#F5F7FA; --ink:#1B2430; --muted:#5F6B7A; --line:#D9DFE7;
@@ -1341,12 +1407,12 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
    where they were. Media can't overflow its post: .post sets
    content-visibility:auto, which implies paint containment and would clip it
    (same reason .post.anchor has to turn it off). So the post itself grows. */
-:root[data-whole] main{max-width:min(calc(var(--col) * var(--media-mult, 1.75)), 100%)}
+:root[data-whole] main{max-width:min(calc(var(--col) * var(--media-mult, 1)), 100%)}
 :root[data-whole] .post,
 :root[data-whole] .feed-head,
 :root[data-whole] .day,
 :root[data-whole] .hour{max-width:var(--col); margin-inline:auto}
-:root[data-whole] .post.has-media{max-width:min(calc(var(--col) * var(--media-mult, 1.75)), 100%)}
+:root[data-whole] .post.has-media{max-width:min(calc(var(--col) * var(--media-mult, 1)), 100%)}
 /* Text in a widened post must come out the same measure as text in an
    ordinary one, so the cap is the column minus what the post's own box eats:
    14px padding each side plus the 1px borders. */
@@ -1402,6 +1468,16 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 :root[data-whole][data-tile] .post.has-media,
 :root[data-whole][data-tile] .day,
 :root[data-whole][data-tile] .hour{max-width:100%; margin-inline:0}
+/* The start post's highlight band is a .bleed, which reaches both viewport
+   edges by measuring outwards from its OWN centre. That only lands right on a
+   box that is itself centred in the window -- the day and hour dividers, which
+   span the whole row (grid-column:1/-1) and so still are. An anchor post is
+   one grid item in one column, half a column off centre, so the same rule
+   painted its band clear across the window; and isolation:isolate keeps the
+   z-index:-1 inside the post's own stacking context, so it covered the posts
+   in the column beside it instead of sliding behind them. Tiled, the band is
+   its own column's width. */
+:root[data-tile] .tile .post.anchor::before{left:0; right:0}
 :root[data-tile-wide] .tile.wide{grid-column:span 2}
 /* ---------- panels and forms (login, start, progress screens) ---------- */
 .panel{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:20px; box-shadow:var(--shadow)}
@@ -1691,7 +1767,6 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .endcap .btn{margin-top:10px}
 .sentinel{height:1px}
 
-/* settings drawer */
 /* ---------- settings drawer (built dynamically from SETTINGS_SCHEMA) ---------- */
 /* Feed picker on the start screen. */
 .feed-pick select{border:1px solid var(--line); background:var(--surface-2); border-radius:8px; padding:8px 10px; width:100%}
@@ -1837,12 +1912,18 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
       <div style="margin-top:14px"><button class="btn primary" type="submit" id="btnLogin">Sign in</button></div>
       <div class="err" id="loginErr"></div>
     </form>
+    <!-- These are privacy CLAIMS, not prose: people decide whether to type an
+         app password on the strength of them. Re-read the whole list whenever
+         the page's network behaviour, storage or permissions change, and keep
+         it in step with "WHAT THIS IS" at the top of the file. It told people
+         the typeface came from Google Fonts for several versions after the
+         font was embedded in this file. -->
     <details class="about">
       <summary>About this page and your privacy</summary>
       <ul>
         <li><strong>Where this page comes from.</strong> It's an open-source project by <a href="https://choccy.gay" target="_blank" rel="noopener">choccy</a>. The source, the full change history and every past version live on <a id="aboutRepo" href="https://github.com/choccccy/bsky-catch-up" target="_blank" rel="noopener">GitHub</a> &mdash; you're running <a id="aboutRelease" href="https://github.com/choccccy/bsky-catch-up/releases" target="_blank" rel="noopener">version <span id="aboutVersion"></span></a>. It's free to use, copy and change under the <a href="https://github.com/choccccy/bsky-catch-up/blob/main/LICENSE" target="_blank" rel="noopener">MIT licence</a>. Found a bug, or want something it doesn't do? <a href="https://github.com/choccccy/bsky-catch-up/issues" target="_blank" rel="noopener">Open an issue</a>.</li>
         <li><strong>You can keep your own copy.</strong> The whole thing is one HTML file: <a id="aboutDownload" href="https://github.com/choccccy/bsky-catch-up/releases" target="_blank" rel="noopener">download version <span id="aboutDlVersion"></span></a> (or just save this page) and open it straight from your disk. It works exactly the same, needs no server or install, and keeps working even if this site ever goes away. Everything is in that one file, documentation included: how it works, every setting and the full history of changes are written as a comment at the top, so you can open it in any text editor and read it.</li>
-        <li><strong>It runs entirely in your browser.</strong> There's no server behind this page. It connects only to Bluesky's own services (your account's server, Bluesky's public API, and plc.directory to look up which server hosts your account), plus Google Fonts for the typeface and jsDelivr for the video player library. Your password and posts are never sent anywhere else.</li>
+        <li><strong>It runs entirely in your browser.</strong> There's no server behind this page. It connects only to Bluesky's own services (your account's server, Bluesky's public API, and plc.directory to look up which server hosts your account), and, only when you play a video, jsDelivr for the video player library. The typeface and the icon are built into the file, so nothing else is ever fetched. Your password and posts are never sent anywhere else.</li>
         <li><strong>Why a separate app password, then?</strong> Because the page is a file that can be copied and edited, a unique password limits the damage if a copy was ever tampered with or your computer is compromised. App passwords can't change your password or email, or delete your account, and you can revoke each one individually.</li>
         <li><strong>“Stay signed in” stores a sign-in token, not your password,</strong> in this browser's local storage for this file. Settings and your reading position are stored there too. Uncheck it on a shared computer, and use “Sign out” when you're done.</li>
         <li><strong>Likes and reposts are real.</strong> They're posted to your actual account and are public, just as if you'd done them on bsky.app.</li>
@@ -1953,7 +2034,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.1.2";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -1983,6 +2064,13 @@ const sleep = (ms, signal) => new Promise((res, rej) => {
 const isAbort = e => e?.name === "AbortError";
 /* Compact counts: 950 -> "950", 12345 -> "12.3k", 250000 -> "250k". */
 const fmtNum = n => n == null ? "" : n >= 10000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, "") + "k" : String(n);
+/* "1 post" / "2 posts". English plurals only, which is all this page writes. */
+const plural = (n, word) => `${word}${n === 1 ? "" : "s"}`;
+/* Is an element hidden (the .hidden class is how every screen and overlay is
+   toggled)? viewing() is the same question about one of the four views, which
+   is what most callers actually mean. */
+const isHidden = sel => $(sel).classList.contains("hidden");
+const viewing = name => !isHidden("#view" + name[0].toUpperCase() + name.slice(1));
 /* Brief message at the bottom of the screen (e.g. "Link copied"). */
 let toastTimer;
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.remove("hidden"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add("hidden"), 2200); }
@@ -2021,6 +2109,23 @@ const DEFAULTS = {
   contextCount: 12, scrollTo: "anchor", trackPosition: true, fetchMethod: "auto",
   concurrency: 6, rpm: 500, batchSize: 150,
 };
+/* Settings are compared by their JSON, so array settings (multi) compare by
+   content rather than by identity. isDefaultValue is the one definition of
+   "unchanged": saveSettings uses it to decide what to store, and the drawer
+   uses it to decide what to mark, so the dot beside a setting's name means
+   exactly "this would be saved".
+   These live here, above the settings load below, for the same reason
+   linkOverrides does: that load already calls saveSettings(), and a const
+   declared further down would still be in its temporal dead zone. */
+const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const isDefaultValue = (key, value) => sameJson(value, DEFAULTS[key]);
+/* A numeric setting, with its own default as the fallback for a value that
+   isn't a usable number. Taking the fallback from DEFAULTS rather than writing
+   the number again at each call site is what stops the two drifting apart --
+   "Most columns" spent 1.1.1 falling back to 4 after its default became 2.
+   Only for settings where 0 isn't a usable value: contextCount and
+   preloadVideos can legitimately be 0 and clamp junk to 0 themselves. */
+function numSetting(key) { return Number(settings[key]) || DEFAULTS[key]; }
 /* Live settings object; mutated by the drawer and persisted by saveSettings(). */
 /* Saved settings hold only values that differ from DEFAULTS (see
    saveSettings), plus a format marker _v. Up to 0.2.1 the WHOLE settings
@@ -2141,6 +2246,10 @@ const SETTINGS_SCHEMA = [
   { key: "rpm", label: "Max requests per minute", sub: "Bluesky rate-limits around 3,000 per 5 minutes", type: "number", min: 60, max: 3000 },
   { key: "batchSize", label: "Posts added per scroll batch", type: "number", min: 25, max: 1000 },
 ];
+/* Schema row by setting key. Indexed once: the drawer's input handler looks a
+   row up on every keystroke, and link parsing does it per parameter. */
+const SCHEMA_BY_KEY = new Map(SETTINGS_SCHEMA.filter(x => x.key).map(x => [x.key, x]));
+const schemaFor = key => SCHEMA_BY_KEY.get(key) || null;
 /* Persists only settings that differ from DEFAULTS, so changing a default in
    a future version reaches everyone who hasn't changed that setting. */
 function saveSettings() {
@@ -2148,8 +2257,7 @@ function saveSettings() {
   // the visitor's own settings (baseSettings), not the temporary overlay.
   const src = linkOverrides ? baseSettings : settings;
   const diff = { _v: SETTINGS_FORMAT };
-  // JSON comparison so array settings (multi) compare by content.
-  for (const k of Object.keys(src)) if (JSON.stringify(src[k]) !== JSON.stringify(DEFAULTS[k])) diff[k] = src[k];
+  for (const k of Object.keys(src)) if (!isDefaultValue(k, src[k])) diff[k] = src[k];
   LS.set("settings", diff);
 }
 /* The one way user actions change a setting. If a link had overridden this
@@ -2240,7 +2348,9 @@ const state = {
   clockKey: null,
   clockTop: 0,         // which post the header is currently describing
   anchorKey: null,
+  anchorViewIdx: -1,
   contextStartKey: null,
+  savedFeeds: null,       // the account's saved feeds, once loaded (loadSavedFeeds)
   run: null,              // {kind, startT, anchor, fetchedAt, method, note}
   abort: null,
   postState: new Map(),   // uri -> {post, like, repost, likeCount, repostCount}
@@ -2289,7 +2399,7 @@ let netNote = null;
 const pacer = {
   next: 0, pauseUntil: 0,
   async wait(signal) {
-    const interval = 60000 / Math.max(30, Number(settings.rpm) || 500);
+    const interval = 60000 / Math.max(30, numSetting("rpm"));
     const now = Date.now();
     const t = Math.max(now, this.next, this.pauseUntil);
     this.next = t + interval;
@@ -2476,10 +2586,6 @@ async function loadFollows(signal, onProgress) {
   state.follows = m;
 }
 
-/* Strategy (a): page the Following timeline backwards until we pass `until`.
-   Returns {items, exhausted, oldest}. exhausted=true means the server ran
-   out of pages (no cursor / empty page) before reaching `until`, which is the
-   signal for "auto" mode to fall back to rebuilding. */
 /* Which feed a catch-up reads:
      {kind:"timeline"}                     the Following feed (the default,
                                            and all there was before 0.14.0)
@@ -2493,10 +2599,13 @@ function feedQuery(src) {
   if (src?.kind === "list") return ["app.bsky.feed.getListFeed", { list: src.uri }];
   return ["app.bsky.feed.getTimeline", {}];
 }
-/* Pages a feed newest-first until it reaches `until` (a timestamp) or has
-   `max` items, whichever is asked for. "exhausted" means the feed ran out
-   before that -- common on custom feeds, where how far back you can page is
-   entirely the generator's choice and often only a few hundred posts. */
+/* Strategy (a): page a feed newest-first until it reaches `until` (a
+   timestamp) or has `max` items, whichever is asked for.
+   Returns {items, exhausted, oldest}. exhausted=true means the feed ran out
+   of pages (no cursor / empty page) before that -- which is the signal for
+   "auto" mode to fall back to rebuilding, and is common on custom feeds,
+   where how far back you can page is entirely the generator's choice and
+   often only a few hundred posts. */
 async function fetchFeed(src, { until = null, max = 0 }, signal, onProgress) {
   const [method, params] = feedQuery(src);
   const out = []; let cursor; const now = Date.now(); let oldest = now;
@@ -2550,7 +2659,7 @@ async function fetchRebuild(until, signal, onProgress) {
       done++; onProgress?.({ done, total: actors.length, count: out.length });
     }
   }
-  const n = Math.max(1, Math.min(16, Number(settings.concurrency) || 6));
+  const n = Math.max(1, Math.min(16, numSetting("concurrency")));
   await Promise.all(Array.from({ length: n }, worker));
   return { items: out, failures };
 }
@@ -2573,15 +2682,15 @@ async function gather(src, until, max, signal, label) {
       fraction: p.fraction,
       stats: max
         ? `${p.count.toLocaleString()} of ${max.toLocaleString()} posts · ${state.stats.requests.toLocaleString()} requests`
-        : `${p.count.toLocaleString()} posts · back to ${fmtFull(p.oldest)} · ${state.stats.requests.toLocaleString()} requests`,
+        : `${p.count.toLocaleString()} posts · back to ${fmtClock(p.oldest)} · ${state.stats.requests.toLocaleString()} requests`,
     }));
     if (!r.exhausted || fm === "timeline") {
       if (r.exhausted) note = canRebuild
-        ? `The timeline only reached back to ${fmtFull(r.oldest)}.`
-        : `${src.name || "This feed"} only goes back to ${fmtFull(r.oldest)}. Custom feeds decide for themselves how much history they keep.`;
+        ? `The timeline only reached back to ${fmtClock(r.oldest)}.`
+        : `${src.name || "This feed"} only goes back to ${fmtClock(r.oldest)}. Custom feeds decide for themselves how much history they keep.`;
       return { items: r.items, method, note };
     }
-    note = `The timeline stopped at ${fmtFull(r.oldest)}, so the feed was rebuilt from your follows.`;
+    note = `The timeline stopped at ${fmtClock(r.oldest)}, so the feed was rebuilt from your follows.`;
   }
   method = "rebuild";
   setProgress({ title: label, stage: `Rebuilding from ${state.follows.size.toLocaleString()} accounts you follow…`, fraction: 0 });
@@ -2589,7 +2698,7 @@ async function gather(src, until, max, signal, label) {
     fraction: p.done / p.total,
     stats: `${p.done.toLocaleString()} of ${p.total.toLocaleString()} accounts · ${p.count.toLocaleString()} posts · ${state.stats.requests.toLocaleString()} requests`,
   }));
-  if (r.failures.length) note += (note ? " " : "") + `${r.failures.length} account${r.failures.length === 1 ? "" : "s"} couldn't be loaded (deleted, suspended, or blocking you).`;
+  if (r.failures.length) note += (note ? " " : "") + `${r.failures.length} ${plural(r.failures.length, "account")} couldn't be loaded (deleted, suspended, or blocking you).`;
   return { items: r.items, method, note };
 }
 
@@ -2602,7 +2711,6 @@ async function gather(src, until, max, signal, label) {
    feedSourceFromUri() handles the at:// form on its own (it's what links
    carry); parseFeedInput() resolves a pasted link, which may need a handle
    lookup first. */
-const MAX_RECENT = 2000;
 function feedSourceFromUri(uri) {
   let m = String(uri || "").match(/^at:\/\/([^/]+)\/app\.bsky\.feed\.generator\/([^/?#\s]+)/);
   if (m) return { kind: "feed", uri: `at://${m[1]}/app.bsky.feed.generator/${m[2]}` };
@@ -2693,6 +2801,9 @@ async function latestLikedPostUri(signal) {
   return uri;
 }
 
+/* The most posts a "newest N posts" start will read, however big a number is
+   typed into the form or carried by a link. */
+const MAX_RECENT = 2000;
 /* In post/resume mode we fetch some time BEFORE the anchor so the N context
    posts exist. 12 hours is ample for a dozen posts with ~700 follows; if a
    very quiet feed yields fewer, the feed simply shows what it has. */
@@ -2854,7 +2965,7 @@ function readHashSettings() {
   for (const [k, raw0] of q) {
     if (!k.startsWith("s.")) continue;
     const key = LINK_ALIASES.keys[k.slice(2)] || k.slice(2);
-    const sc = SETTINGS_SCHEMA.find(x => x.key === key && linkable(x));
+    const row = schemaFor(key); const sc = row && linkable(row) ? row : undefined;
     const map = LINK_ALIASES.values[key] || {};
     const raw = sc?.type === "multi" ? String(raw0).split(",").map(x => map[x.trim()] ?? x.trim()).join(",") : (map[raw0] ?? raw0);
     const v = sc ? paramToSetting(sc, raw) : undefined;
@@ -2872,7 +2983,7 @@ function readHashSettings() {
 function applyLinkSettings() {
   const { values, bad, newer } = readHashSettings();
   if (newer) showBanner("This link was made by a newer version of this page, so some of its settings may not apply here.", { notice: true });
-  const keys = Object.keys(values).filter(k => JSON.stringify(values[k]) !== JSON.stringify(settings[k]));
+  const keys = Object.keys(values).filter(k => !sameJson(values[k], settings[k]));
   if (keys.length) {
     if (!linkOverrides) { baseSettings = structuredClone(settings); linkOverrides = {}; }
     for (const k of keys) { settings[k] = values[k]; linkOverrides[k] = values[k]; }
@@ -2884,9 +2995,9 @@ function applyLinkSettings() {
 function showLinkSettingsNote(bad = []) {
   const note = $("#linkSettingsNote");
   const keys = linkOverrides ? Object.keys(linkOverrides) : [];
-  const label = k => SETTINGS_SCHEMA.find(x => x.key === k)?.label || k;
+  const label = k => schemaFor(k)?.label || k;
   let html = keys.length
-    ? `<span>Using ${keys.length} setting${keys.length === 1 ? "" : "s"} from this link for this visit: <strong>${esc(keys.map(label).join(", "))}</strong>.</span>
+    ? `<span>Using ${keys.length} ${plural(keys.length, "setting")} from this link for this visit: <strong>${esc(keys.map(label).join(", "))}</strong>.</span>
        <button class="btn" type="button" id="btnKeepLinkSettings">Keep these settings</button><button class="btn" type="button" id="btnDropLinkSettings">Use my own settings</button>`
     : "";
   if (bad.length) html += `<span class="hint">Ignored unrecognized settings in the link: ${esc(bad.join(", "))}.</span>`;
@@ -2911,8 +3022,8 @@ function endLinkOverlay(keep, revert = false) {
   $("#linkSettingsNote").classList.add("hidden");
   if (revert) {
     applyLook();
-    if (!$("#drawer").classList.contains("hidden")) renderDrawer();
-    if (state.run && !$("#viewFeed").classList.contains("hidden")) buildView({ fresh: false, keepPosition: true });
+    if (!isHidden("#drawer")) renderDrawer();
+    if (state.run && viewing("feed")) buildView({ fresh: false, keepPosition: true });
   }
 }
 /* Fragment for the catch-up on screen (from state.run, so it reflects the
@@ -2930,7 +3041,7 @@ function catchupFragment() {
 function overlayParams() {
   if (!linkOverrides) return "";
   return Object.keys(linkOverrides).map(k => {
-    const sc = SETTINGS_SCHEMA.find(x => x.key === k);
+    const sc = schemaFor(k);
     return `&s.${k}=` + encodeURIComponent(settingToParam(sc, linkOverrides[k])).replace(/%2C/gi, ",");
   }).join("");
 }
@@ -2942,7 +3053,7 @@ function buildShareLink(withSettings) {
   let h = catchupFragment(), count = 0;
   if (withSettings) {
     for (const sc of SETTINGS_SCHEMA) {
-      if (!linkable(sc) || JSON.stringify(settings[sc.key]) === JSON.stringify(DEFAULTS[sc.key])) continue;
+      if (!linkable(sc) || isDefaultValue(sc.key, settings[sc.key])) continue;
       // Keep commas, colons and slashes readable; encode everything else.
       const v = encodeURIComponent(settingToParam(sc, settings[sc.key])).replace(/%2C/gi, ",").replace(/%3A/gi, ":").replace(/%2F/gi, "/");
       h += (h ? "&" : "") + `s.${sc.key}=${v}`; count++;
@@ -3041,7 +3152,7 @@ async function fetchNewer() {
     state.run.fetchedAt = fetchedAt;
     buildView({ fresh: false, append: true });
     const added = Math.max(0, state.view.length - before);
-    toast(added ? `${added.toLocaleString()} newer post${added === 1 ? "" : "s"} added below` : "No newer posts yet");
+    toast(added ? `${added.toLocaleString()} newer ${plural(added, "post")} added below` : "No newer posts yet");
   } catch (e) {
     if (!isAbort(e)) toast(e.message || "Couldn't load newer posts");
     updateEndcap();
@@ -3064,12 +3175,6 @@ function quotedRecordOf(p) {
 }
 /* True only for quotes of POSTS (not embedded feeds, lists or starter packs). */
 function isQuote(p) { const r = quotedRecordOf(p); return !!r && (r.$type?.startsWith("app.bsky.embed.record#view") ?? false); }
-/* The feed filter. Returns true if an item should be shown under the current
-   settings. `seen` is a Set of post URIs shared across one pass over the
-   list, used by "Show each post only once" (first occurrence wins).
-   Reply rule in "followed" mode: show a reply only if the post it replies to
-   is by you, by the replier themself (a thread), or by someone you follow.
-   Replies that arrive as REPOSTS are always kept (someone chose to share it). */
 /* What kinds of content a post has, for the "Only show posts with" filter.
    Looks at the post's own embed and, one level down, a quoted post's embed
    (what you see inside the quote counts too). "quote" = it quotes a post;
@@ -3106,6 +3211,12 @@ function postKinds(p) {
   return kinds;
 }
 
+/* The feed filter. Returns true if an item should be shown under the current
+   settings. `seen` is a Set of post URIs shared across one pass over the
+   list, used by "Show each post only once" (first occurrence wins).
+   Reply rule in "followed" mode: show a reply only if the post it replies to
+   is by you, by the replier themself (a thread), or by someone you follow.
+   Replies that arrive as REPOSTS are always kept (someone chose to share it). */
 function passes(it, seen) {
   const fi = it.fi, p = fi.post; if (!p?.author) return false;
   const rep = isRepost(fi);
@@ -3145,7 +3256,7 @@ function tileCols() {
   // innerWidth is the fallback for anything that doesn't lay out (jsdom).
   const avail = (document.documentElement.clientWidth || window.innerWidth) - MAIN_PAD;
   const n = Math.floor((avail + TILE_GAP) / (settings.columnWidth + TILE_GAP));
-  return Math.max(1, Math.min(Number(settings.tileMax) || 4, n));
+  return Math.max(1, Math.min(numSetting("tileMax"), n));
 }
 /* How wide the feed may get: n columns and the n-1 gaps BETWEEN them, plus
    main's side padding (box-sizing:border-box, so max-width has to cover it).
@@ -3153,8 +3264,8 @@ function tileCols() {
    has to come to exactly the same number as tileCols, and when it doesn't,
    the cap is a gap too narrow and auto-fill lays out one column fewer than
    the cap allows -- which is what "Most columns: 2" did in 1.1.0. */
-function tileWidth(n = Number(settings.tileMax) || 4) {
-  return n * Number(settings.columnWidth) + (n - 1) * TILE_GAP + MAIN_PAD;
+function tileWidth(n = numSetting("tileMax")) {
+  return n * numSetting("columnWidth") + (n - 1) * TILE_GAP + MAIN_PAD;
 }
 /* Whether the feed is tiled RIGHT NOW. Tiling is purely additive: with one
    column there is nothing to tile, so the page keeps the untiled markup and
@@ -3170,7 +3281,19 @@ function tileOn() { return settings.tile === true && tileCols() >= 2; }
    occasion. Setting a span changes the item's grid AREA, never its own box
    (the band is align-items:start), so this can't feed itself. */
 const TILE_ROW = 2;
-function setSpan(el) { el.style.gridRow = "span " + Math.max(1, Math.ceil(el.offsetHeight / TILE_ROW)); }
+/* The rows an item needs have to cover its MARGIN box, not its border box.
+   A .tile has no margin of its own -- display:flow-root keeps the post's
+   inside it, which is the whole reason for the wrapper -- but a day or hour
+   divider is a bare grid item carrying margin:24px 0 10px / 18px 0 8px, and
+   offsetHeight leaves that out. Its band was short by exactly that much, so
+   the divider painted over the foot of the posts above it and the head of
+   the posts below it. (|| 0 because a browser that reports no computed
+   margin must not turn the whole span into NaN.) */
+function itemHeight(el) {
+  const cs = getComputedStyle(el);
+  return el.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+}
+function setSpan(el) { el.style.gridRow = "span " + Math.max(1, Math.ceil(itemHeight(el) / TILE_ROW)); }
 const tileObserver = typeof ResizeObserver === "undefined" ? null
   : new ResizeObserver(entries => { for (const e of entries) setSpan(e.target); });
 function measureTile(el) { setSpan(el); tileObserver?.observe(el); }
@@ -3373,7 +3496,7 @@ function renderUntil(n) { while (state.rendered < Math.min(n, state.view.length)
    are measured once the batch is in the DOM. Untiled, this is the flat
    append it has always been. */
 function renderMore() {
-  const size = Math.max(25, Number(settings.batchSize) || 150);
+  const size = Math.max(25, numSetting("batchSize"));
   const end = Math.min(state.view.length, state.rendered + size);
   const tiled = tileOn();
   const frag = document.createDocumentFragment();
@@ -3455,21 +3578,21 @@ function maybeRenderMore() {
 /* Summary line above the feed: count, start point, method, and any fetch note. */
 function updateFeedHead() {
   const r = state.run; if (!r) return;
-  const to = r.end ? (r.end.uri ? " to your end post" : ` to ${fmtFull(r.end.t)}`) : "";
+  const to = r.end ? (r.end.uri ? " to your end post" : ` to ${fmtClock(r.end.t)}`) : "";
   const src = r.feed || FOLLOWING;
   const how = r.method === "rebuild" ? `rebuilt from ${state.follows.size.toLocaleString()} follows`
     : src.kind === "timeline" ? "from your timeline" : `from ${src.name || "a custom feed"}`;
   const n = state.view.length;
-  const posts = `${n.toLocaleString()} post${n === 1 ? "" : "s"}`;
+  const posts = `${n.toLocaleString()} ${plural(n, "post")}`;
   const what = r.kind === "recent" ? `The ${posts === "1 post" ? "most recent post" : `${n.toLocaleString()} most recent posts`}`
-    : `${posts} ${r.anchor ? "from your start post" : `from ${fmtFull(r.startT)}`}`;
+    : `${posts} ${r.anchor ? "from your start post" : `from ${fmtClock(r.startT)}`}`;
   $("#feedHead").innerHTML = esc(`${what}${to}, ${how}.${r.note ? " " + r.note : ""}`) +
     `<button class="linkbtn" type="button" id="btnCopyCatchup">Copy link</button>` +
     `<button class="linkbtn" type="button" id="btnCopyCatchupSettings">Copy link with my settings</button>`;
   $("#btnCopyCatchup").onclick = () => copyText(buildShareLink(false).url).then(ok => toast(ok ? "Catch-up link copied" : "Couldn't copy the link"));
   $("#btnCopyCatchupSettings").onclick = () => {
     const { url, count } = buildShareLink(true);
-    copyText(url).then(ok => toast(!ok ? "Couldn't copy the link" : count ? `Link copied with ${count} setting${count === 1 ? "" : "s"}` : "Link copied (all your settings are the defaults)"));
+    copyText(url).then(ok => toast(!ok ? "Couldn't copy the link" : count ? `Link copied with ${count} ${plural(count, "setting")}` : "Link copied (all your settings are the defaults)"));
   };
   // Make an active type filter impossible to forget about.
   const note = $("#filterNote");
@@ -3479,7 +3602,7 @@ function updateFeedHead() {
     note.classList.remove("hidden");
     $("#btnClearTypes").onclick = () => {
       setSetting("onlyTypes", []);
-      if (!$("#drawer").classList.contains("hidden")) renderDrawer();
+      if (!isHidden("#drawer")) renderDrawer();
       buildView({ fresh: false, keepPosition: true });
     };
   } else note.classList.add("hidden");
@@ -3493,7 +3616,7 @@ function updateEndcap() {
   if (state.run.end) {
     // Posts after the end point were already fetched; "keep going" just
     // drops the end point and lets them render below (append fast path).
-    const what = state.run.end.uri ? "your end post" : fmtFull(state.run.end.t);
+    const what = state.run.end.uri ? "your end post" : fmtClock(state.run.end.t);
     e.innerHTML = `${empty}<div>You've reached your end point (${esc(what)}).</div><button class="btn primary" id="btnPastEnd" type="button">Keep going to now</button>`;
     $("#btnPastEnd").onclick = () => {
       state.run.end = null; buildView({ fresh: false, append: true }); updateClock();
@@ -3501,16 +3624,14 @@ function updateEndcap() {
     };
     return;
   }
-  e.innerHTML = `${empty}<div>You're caught up to ${esc(fmtFull(state.run.fetchedAt))}.</div><button class="btn primary" id="btnNewer" type="button">Load newer posts</button>`;
+  e.innerHTML = `${empty}<div>You're caught up to ${esc(fmtClock(state.run.fetchedAt))}.</div><button class="btn primary" id="btnNewer" type="button">Load newer posts</button>`;
   $("#btnNewer").onclick = fetchNewer;
 }
 
-/* ---------- time formatting ---------- */
 /* ---------- time formatting ----------
    All times are shown in the browser's local time zone and locale.
    fmtClock: "Thu, Oct 1, 9:42 PM" (year added if not the current year). */
 function fmtClock(t) { const d = new Date(t); const sameYear = d.getFullYear() === new Date().getFullYear(); return d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", year: sameYear ? undefined : "numeric", hour: "numeric", minute: "2-digit" }); }
-function fmtFull(t) { return fmtClock(t); }
 /* Relative time like the Bluesky app: "now", "5m", "3h", "2d", then a date. */
 function fmtAgo(t) {
   const s = (Date.now() - t) / 1000;
@@ -3838,7 +3959,6 @@ function parentMiniHtml(post, which = "parent") {
   let text = (rec.text || "").replace(/\s+/g, " ").trim();
   // What the post has attached, from its raw record embed (works at any depth).
   const media = post.record?.embed ? mediaLabels(rawMedia(post.record.embed)).join(" · ") : "";
-  if (!text && media) text = "";
   const label = which === "root" ? "Thread started by" : "Replying to";
   return `<button type="button" class="parent-mini" data-act="expand-parent" data-which="${which}" title="Show the full post">
     <span class="pm-label">${label}</span>
@@ -3881,8 +4001,8 @@ function imgSrcAttrs(im, cssW) {
    is ever wider than the window. */
 const POST_INNER_PAD = 30;   // .post padding (14px each side) + its 1px borders
 function cellWidthPx(cols, whole = wholeMode()) {
-  const col = Number(settings.columnWidth) || 640;
-  const mult = whole ? (Number(settings.mediaWidth) || 1) : 1;
+  const col = numSetting("columnWidth");
+  const mult = whole ? numSetting("mediaWidth") : 1;
   const viewport = (typeof window !== "undefined" && window.innerWidth) || col;
   const card = Math.min(col * mult, viewport - 24);
   const inner = Math.max(120, card - POST_INNER_PAD);
@@ -3936,9 +4056,6 @@ function imageCellHtml(im, cols) {
   const cap = settings.wholeAlt && im.alt ? `<div class="alt-cap">${esc(im.alt)}</div>` : "";
   return `<div class="img-cell">${body}${cap}</div>`;
 }
-/* Video placeholder: thumbnail + play button. The actual <video> element and
-   HLS player are only created on demand (attachVideo), so a feed with
-   hundreds of videos doesn't start hundreds of players. */
 /* Gallery strip (app.bsky.embed.gallery#view). Items are a union: today only
    #viewImage exists (thumbnail/fullsize/alt/aspectRatio; note "thumbnail",
    not "thumb" as in the older images embed), but Bluesky has said galleries
@@ -3947,6 +4064,7 @@ function imageCellHtml(im, cols) {
 function galleryHtml(e, p) {
   const items = e.items || []; const n = items.length;
   if (!n) return "";
+  const w = cellWidthPx(1);   // every item in the strip gets the same slot
   const cells = items.map((im, i) => {
     const count = `<span class="g-count">${i + 1}/${n}</span>`;
     if (im.$type && im.$type !== "app.bsky.embed.gallery#viewImage" || !im.fullsize) {
@@ -3960,7 +4078,6 @@ function galleryHtml(e, p) {
     // (CSS), and optionally loads the full-size file. Alt text stays on the
     // badge and in the viewer here: a caption under a horizontally scrolling
     // strip has nowhere good to sit.
-    const w = cellWidthPx(1);
     return `<button class="img g-item" type="button" data-act="zoom" data-full="${esc(im.fullsize)}" data-alt="${esc(im.alt || "")}" style="${ar}">
       <img ${imgSrcAttrs(im, w)} alt="${esc(im.alt || "")}" loading="lazy" decoding="async">${im.alt ? '<span class="alt-badge">ALT</span>' : ""}${count}</button>`;
   }).join("");
@@ -3984,6 +4101,9 @@ function updateGalleryNav(g) {
 }
 document.addEventListener("scroll", ev => { if (ev.target?.classList?.contains("gallery")) updateGalleryNav(ev.target); }, { capture: true, passive: true });
 
+/* Video placeholder: thumbnail + play button. The actual <video> element and
+   HLS player are only created on demand (attachVideo), so a feed with
+   hundreds of videos doesn't start hundreds of players. */
 function videoHtml(v, p) {
   const ar = v.aspectRatio ? `aspect-ratio:${v.aspectRatio.width}/${v.aspectRatio.height};` : "aspect-ratio:16/9;";
   // presentation "gif" (app.bsky.embed.video#view): an uploaded GIF that
@@ -4048,7 +4168,7 @@ function rawMedia(embed) {
 /* Short words for what a raw embed contains, e.g. ["4 images", "Quotes another post"]. */
 function mediaLabels(m) {
   const labels = [];
-  if (m.images.length) labels.push(`${m.images.length} image${m.images.length === 1 ? "" : "s"}`);
+  if (m.images.length) labels.push(`${m.images.length} ${plural(m.images.length, "image")}`);
   if (m.video) labels.push(m.video.gif ? "GIF" : "Video");
   if (m.link) {
     let host = ""; try { host = new URL(m.link.uri).hostname.replace(/^www\./, ""); } catch {}
@@ -4306,11 +4426,10 @@ function updatePreloads() {
     .map(x => x.b);
   const keep = new Set(wanted);
   for (const b of nearVideos) if (b._preloaded && !keep.has(b) && b._video?.paused) unloadVideo(b);
-  // Fetching hls.js starts here, as soon as a video is near enough to preload.
   if (!wanted.length) return;
   if (hlsReadyNow()) { for (const b of wanted) attachVideo(b, { preload: true }); return; }
-  // Otherwise fetching hls.js starts here, as soon as a video is near enough
-  // to preload, and the players are built when it lands.
+  // Otherwise this is where fetching hls.js starts -- as soon as a video is
+  // near enough to preload; the players are built when it lands.
   ensureHls().then(() => { for (const b of wanted) if (b.isConnected) attachVideo(b, { preload: true }); });
 }
 
@@ -4491,7 +4610,7 @@ function stepLightbox(dir) {
   lb.idx = n; showLightboxImage();
 }
 function closeLightbox() { $("#lightbox").classList.add("hidden"); $("#lightbox img").src = ""; }
-const lightboxOpen = () => !$("#lightbox").classList.contains("hidden");
+const lightboxOpen = () => !isHidden("#lightbox");
 // Clicking the arrows steps; clicking anywhere else closes.
 $("#lightbox").addEventListener("click", ev => {
   const nav = ev.target.closest(".lb-nav");
@@ -4502,7 +4621,6 @@ document.addEventListener("keydown", ev => {
   if (lightboxOpen() && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) { ev.preventDefault(); stepLightbox(ev.key === "ArrowRight" ? 1 : -1); }
 });
 
-/* ---------- reading position ---------- */
 /* ---------- reading position ----------
    Finds the first .post whose bottom edge is below the top bar, i.e. the post
    you're currently reading. Binary search works because posts are stacked in
@@ -4534,7 +4652,7 @@ function topVisiblePost() {
    position only ever moves forward in time, so scrolling back up to re-read
    something doesn't lose your place. */
 function updateClock() {
-  if (!state.run || $("#viewFeed").classList.contains("hidden")) return;
+  if (!state.run || !viewing("feed")) return;
   const top = topVisiblePost(); if (!top) return;
   // Where that post sits on screen right now. Recorded every scroll frame,
   // and before the early return below, because it's the only record of the
@@ -4573,7 +4691,7 @@ function updateClock() {
 let scrollRaf = 0;
 window.addEventListener("scroll", () => {
   if (scrollRaf) return;
-  scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; if (!$("#viewFeed").classList.contains("hidden")) { maybeRenderMore(); updateClock(); schedulePreload(); } });
+  scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; if (viewing("feed")) { maybeRenderMore(); updateClock(); schedulePreload(); } });
 }, { passive: true });
 /* Resizing changes the top bar's height and, with tiling on, how many
    columns fit. Laying the posts out again is the grid's own business
@@ -4593,7 +4711,7 @@ window.addEventListener("resize", () => {
     if (now === wasTiled && (!now || cols === wasCols)) return;
     const flipped = now !== wasTiled, spot = readingSpot();
     applyLook();                      // which records the new state in wasTiled/wasCols
-    if (!state.run || $("#viewFeed").classList.contains("hidden")) return;
+    if (!state.run || !viewing("feed")) return;
     if (flipped) buildView({ fresh: false, keepPosition: true, spot });
     else keepReadingSpot();
   }, 150);
@@ -4615,7 +4733,7 @@ function show(name) {
 }
 /* Updates the progress screen. Any omitted field is left unchanged. No-op if the screen is hidden. */
 function setProgress({ title, stage, fraction, stats } = {}) {
-  if ($("#viewProgress").classList.contains("hidden")) return;
+  if (!viewing("progress")) return;
   if (title) $("#progTitle").textContent = title;
   if (stage != null) $("#progStage").textContent = stage;
   if (fraction != null) $("#progFill").style.width = Math.round(Math.max(0, Math.min(1, fraction)) * 100) + "%";
@@ -4629,7 +4747,7 @@ function setProgress({ title, stage, fraction, stats } = {}) {
    paused (rate limit) or retrying (connection trouble) nothing would update.
    This ticker re-renders the stats line every second so countdowns move. */
 let lastStats = "";
-setInterval(() => { if (!$("#viewProgress").classList.contains("hidden")) setProgress(); }, 1000);
+setInterval(() => { if (viewing("progress")) setProgress(); }, 1000);
 /* ms timestamp -> "YYYY-MM-DDTHH:MM" in LOCAL time, for <input type="datetime-local">. */
 function toLocalInput(t) { const d = new Date(t - new Date(t).getTimezoneOffset() * 60000); return d.toISOString().slice(0, 16); }
 /* Fills the start screen: who's signed in, the Resume option (only if a
@@ -4680,7 +4798,7 @@ function prepareStart() {
   resume.classList.toggle("hidden", !pos);
   if (pos) $("#resumeDesc").textContent = `Last read: ${pos.repost ? "a repost by" : "a post by"} @${pos.by || "someone"} from ${fmtClock(pos.t)}`;
   if (!$("#inDate").value) $("#inDate").value = toLocalInput(pos ? pos.t : Date.now() - 24 * 3600e3);
-  $("#postHint").textContent = `Paste a post link. The feed starts there, with ${settings.contextCount} earlier post${settings.contextCount == 1 ? "" : "s"} above it for context. If you saw it as a repost, it finds the repost.`;
+  $("#postHint").textContent = `Paste a post link. The feed starts there, with ${settings.contextCount} earlier ${plural(settings.contextCount, "post")} above it for context. If you saw it as a repost, it finds the repost.`;
   const checked = $('input[name="kind"]:checked');
   if (!checked || (checked.value === "resume" && !pos)) $(`input[name="kind"][value="${pos ? "resume" : "date"}"]`).checked = true;
 }
@@ -4782,7 +4900,7 @@ function changedInGroup(name) {
   let inGroup = false, n = 0;
   for (const s of SETTINGS_SCHEMA) {
     if (s.group) { if (inGroup) break; inGroup = s.group === name; continue; }
-    if (inGroup && JSON.stringify(settings[s.key]) !== JSON.stringify(DEFAULTS[s.key])) n++;
+    if (inGroup && !isDefaultValue(s.key, settings[s.key])) n++;
   }
   return n;
 }
@@ -4827,8 +4945,8 @@ function renderDrawer() {
   d.innerHTML = html;
   syncDependents();
   $("#btnCloseDrawer").onclick = closeDrawer;
-  $("#btnResetSettings").onclick = () => { endLinkOverlay(false); settings = structuredClone(DEFAULTS); saveSettings(); applyLook(); renderDrawer(); if (state.run && !$("#viewFeed").classList.contains("hidden")) buildView({ fresh: false, keepPosition: true }); toast("Settings restored"); };
-  $("#btnClearPos").onclick = () => { if (me()) LS.del("position:" + me()); state.maxRead = null; toast("Reading position forgotten"); if (!$("#viewStart").classList.contains("hidden")) prepareStart(); };
+  $("#btnResetSettings").onclick = () => { endLinkOverlay(false); settings = structuredClone(DEFAULTS); saveSettings(); applyLook(); renderDrawer(); if (state.run && viewing("feed")) buildView({ fresh: false, keepPosition: true }); toast("Settings restored"); };
+  $("#btnClearPos").onclick = () => { if (me()) LS.del("position:" + me()); state.maxRead = null; toast("Reading position forgotten"); if (!isHidden("#viewStart")) prepareStart(); };
 }
 /* Applies a changed setting: coerces/clamps the value, saves, then re-applies
    looks or rebuilds the feed (debounced, so dragging sliders or typing
@@ -4836,7 +4954,7 @@ function renderDrawer() {
 let renderDebounce;
 $("#drawer").addEventListener("input", ev => {
   const el = ev.target.closest("[data-k]"); if (!el) return;
-  const s = SETTINGS_SCHEMA.find(x => x.key === el.dataset.k);
+  const s = schemaFor(el.dataset.k);
   // Column width can turn tiling on or off, or just change the count; either
   // way the feed is laid out again, so the reading spot has to be caught
   // before applyLook does it (see keepReadingSpot).
@@ -4852,7 +4970,7 @@ $("#drawer").addEventListener("input", ev => {
   // Tiling coming on or going off changes the markup, so the feed is rebuilt;
   // a change in the number of columns alone only moves the posts about.
   const flipped = tileOn() !== wasTiling, moved = flipped || tileCols() !== colsBefore;
-  if ((s.apply === "render" || s.apply === "both" || flipped) && state.run && !$("#viewFeed").classList.contains("hidden")) {
+  if ((s.apply === "render" || s.apply === "both" || flipped) && state.run && viewing("feed")) {
     // A rebuild keeps the position itself -- from the spot caught above when
     // the posts have already moved, else from what's on screen when it runs.
     clearTimeout(renderDebounce); renderDebounce = setTimeout(() => buildView({ fresh: false, keepPosition: true, spot: moved ? spot : null }), 250);
@@ -4860,7 +4978,7 @@ $("#drawer").addEventListener("input", ev => {
   // Same as a resize: more or fewer columns moves every post without
   // changing the markup, so the post being read goes back where it was.
   else if (moved && tileOn()) keepReadingSpot();
-  if (s.key === "contextCount" && !$("#viewStart").classList.contains("hidden")) prepareStart();
+  if (s.key === "contextCount" && viewing("start")) prepareStart();
 });
 /* Brings the open drawer back in step with the current settings, without
    re-rendering it (which would lose the focus and caret of whatever control
@@ -4880,7 +4998,7 @@ function syncDependents() {
       row?.classList.toggle("off", !on);
       for (const el of $$(`#drawer [data-k="${s.key}"]`)) el.disabled = !on;
     }
-    const changed = JSON.stringify(settings[s.key]) !== JSON.stringify(DEFAULTS[s.key]);
+    const changed = !isDefaultValue(s.key, settings[s.key]);
     row?.classList.toggle("changed", changed);
     if (row) row.title = changed ? "Changed from the default" : "";
   }
