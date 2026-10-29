@@ -43,9 +43,12 @@ CATCHUP_HTML=../path/to/page.html npm test
   hls.js is fetched on demand), but `<script src>` and `<link>` are stripped
   anyway so a test can never reach the network. A test that wants to assert
   something about those tags must read the file at `h.PAGE_PATH`, not the
-  loaded DOM. hls.js is replaced by a small stand-in that records what the
-  page asks of it; `canPlayType` is left alone, so the page takes the
-  hls.js path unless a test says otherwise.
+  loaded DOM. jsdom has no ResizeObserver, so the harness supplies a
+  stand-in that records what the page observes (`page.resizeObservers`); the
+  tiled layout uses one to keep its row spans in step. hls.js is likewise
+  replaced by a small stand-in that records what the page asks of it;
+  `canPlayType` is left alone, so the page takes the hls.js path unless a
+  test says otherwise.
 
 ## Adding tests
 

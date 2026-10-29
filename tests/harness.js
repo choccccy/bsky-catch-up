@@ -291,7 +291,9 @@ async function waitFor(fn, { timeout = 4000, step = 20, message = "condition" } 
 async function loadPage({ url = "https://example.test/", session = true, settings = {}, storage = {}, server = {} } = {}) {
   const calls = [];
   const clip = [];
-  const observers = [];
+  const observers = [];        // IntersectionObservers, in construction order
+  const resizeObservers = [];  // ResizeObservers (the tiled layout's row spans)
+  const scrolls = [];          // [dx, dy] the page has scrolled itself by
   const dom = new JSDOM(PAGE_HTML, {
     url, runScripts: "dangerously", pretendToBeVisual: true,
     beforeParse(w) {
@@ -300,7 +302,13 @@ async function loadPage({ url = "https://example.test/", session = true, setting
       w.TextEncoder = TextEncoder; w.TextDecoder = TextDecoder;
       w.structuredClone = structuredClone;
       w.CSS = { escape: s => String(s).replace(/["\\]/g, "\\$&") };
-      w.scrollBy = () => {}; w.scrollTo = () => {};
+      // Recorded rather than ignored: how far the page scrolls itself is how
+      // a test sees it putting a reading position back (page.scrolls).
+      w.scrollBy = (x, y) => { scrolls.push([x, y]); };
+      w.scrollTo = () => {};
+      // jsdom has no ResizeObserver; the page uses one to keep the tiled
+      // layout's row spans in step with heights that change after insertion.
+      w.ResizeObserver = class { constructor(cb) { this.cb = cb; this.targets = []; resizeObservers.push(this); } observe(t) { this.targets.push(t); } unobserve(t) { this.targets = this.targets.filter(x => x !== t); } disconnect() { this.targets = []; } };
       w.IntersectionObserver = class { constructor(cb, o) { this.cb = cb; this.opts = o || {}; this.targets = []; observers.push(this); } observe(t) { this.targets.push(t); } unobserve() {} disconnect() { this.targets = []; } };
       Object.defineProperty(w.navigator, "clipboard", { value: { writeText: async t => { clip.push(t); } } });
       w.HTMLMediaElement.prototype.play = function () { this.dispatchEvent(new w.Event("play")); return Promise.resolve(); };
@@ -323,7 +331,7 @@ async function loadPage({ url = "https://example.test/", session = true, setting
   await wait(30);
 
   const pageObj = {
-    window: w, document: d, calls, clip, observers, $, $$, visible,
+    window: w, document: d, calls, clip, observers, resizeObservers, scrolls, $, $$, visible,
     eval: code => w.eval(code),
     /** Evaluates an expression in the page and returns a plain copy (use this
      *  for arrays/objects: values from the page's realm fail deepStrictEqual). */
@@ -377,6 +385,13 @@ async function loadPage({ url = "https://example.test/", session = true, setting
       else els[0].value = value;
       els[0].dispatchEvent(new w.Event("input", { bubbles: true }));
       await wait(320); // render-type settings are debounced (250ms)
+    },
+    /** Resizes the window (jsdom lays nothing out, but the page works out
+     *  how many columns fit from innerWidth) and lets the resize settle. */
+    async resizeTo(width) {
+      Object.defineProperty(w, "innerWidth", { value: width, configurable: true });
+      w.dispatchEvent(new w.Event("resize"));
+      await wait(220);   // the page debounces resizes by 150ms
     },
     /** Saved settings as stored. */
     saved: () => JSON.parse(w.localStorage.getItem("bcu:settings") || "null"),

@@ -82,14 +82,16 @@ test("a group says how many of its settings you've changed", async () => {
 test("sub-settings are marked off while their parent setting doesn't apply", async () => {
   const page = await h.loadPage({ settings: { wholeImages: "app" } });
   page.window.openDrawer();
-  const subs = page.$$("#drawer .set.sub-set");
-  assert.ok(subs.length >= 4);
+  // Only the sub-settings of wholeImages: others (tileMax) have their own parent.
+  const keys = page.json('SETTINGS_SCHEMA.filter(s => s.when?.key === "wholeImages").map(s => s.key)');
+  const subs = keys.map(k => page.$(`#drawer .set.sub-set[data-row="${k}"]`));
+  assert.ok(subs.length >= 4 && subs.every(Boolean));
   for (const r of subs) {
     assert.ok(r.classList.contains("off"), `${r.dataset.row} should be marked off`);
     assert.ok(r.querySelector("[data-k]").disabled, `${r.dataset.row} should be disabled`);
   }
   await page.setSetting("wholeImages", "whole");
-  for (const r of page.$$("#drawer .set.sub-set")) {
+  for (const r of keys.map(k => page.$(`#drawer .set.sub-set[data-row="${k}"]`))) {
     assert.ok(!r.classList.contains("off"), `${r.dataset.row} should be live now`);
     assert.ok(!r.querySelector("[data-k]").disabled);
   }

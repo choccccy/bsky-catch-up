@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.0.3
+  Version 1.1.0
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -219,6 +219,42 @@ WHOLE-IMAGE MODE ("Show images whole", settings.wholeImages)
   mode existed and branches to imageCellHtml() for the new one, so the default
   path can't regress.
 
+TILED MODE ("Tile posts side by side", settings.tile)
+  By default the feed is one column of settings.columnWidth, centred, with
+  whatever is left of a wide window empty either side. With tiling on, the
+  window is filled with as many columns of that width as fit (capped by
+  settings.tileMax), posts laid out brick-fashion.
+  It is purely additive. data-tile is set only while two or more columns
+  actually fit (tileOn(), which every part of this asks instead of reading
+  settings.tile), so a narrow window -- or the setting off -- takes exactly
+  the markup and CSS of the paragraph above. Crossing that line, by resizing
+  or by changing the column width, rebuilds the feed in place.
+  How it is built:
+    - #feed becomes a sequence of .band grids, one per divider group, each
+      holding .tile grid items (renderMore). A day or hour divider closes the
+      current band and goes full-width at the top of the next one, so every
+      post in a band is older than every post in the one below -- and the day
+      band can still stick, which it couldn't as a bare grid item (sticky
+      can't travel inside an item whose containing block is its own one-row
+      area).
+    - A reply fused onto the post above it (ctx "joined") goes in the SAME
+      .tile, because the grid would otherwise place the two halves of a
+      chain apart.
+    - Placement is CSS grid's ordinary non-dense auto-flow over 2px rows,
+      with each item's row span measured in JS (setSpan, one ResizeObserver
+      for everything that changes height later). Non-dense flow never
+      backtracks, which is what keeps chronology descending.
+    - Posts lose content-visibility:auto while tiled: an unpainted post
+      reports its contain-intrinsic-size, so every span in a batch would be
+      measured wrong and then jump as you reached it.
+    - topVisiblePost()'s binary search only lands NEAR the reading line once
+      posts sit side by side, so it scans a few rows around the result.
+    - Changing the number of columns moves every post, so the one being read
+      is put back where it was on screen (keepReadingSpot, or buildView's
+      `spot` when the markup changes too). The spot comes from the scroll
+      handler, which records it on every frame: a resize event arrives with
+      the new layout already in place, so there's nothing left to measure.
+
 FILE LAYOUT
   <style>    CSS, organised by area. Colours are CSS custom properties on
              :root, redefined for dark mode (both the OS preference and the
@@ -426,6 +462,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.1.0] - 2026-10-28
+
+### Added
+
+- **Tile posts side by side**, a new setting under Appearance. On a wide
+  window the feed stops being one column with empty space either side and
+  fills the window with as many columns of your chosen width as fit, laying
+  the posts out brick-fashion. Posts still run oldest to newest down the
+  page: a post never starts higher up than one before it, so reading down
+  the staircase reads the catch-up in order. A sub-setting caps how many
+  columns a very wide screen may use (2 to 6, 4 by default).
+- Day and hour dividers still span the whole width while tiled, and the
+  columns restart under each one, so everything above a divider is earlier
+  than everything below it. The cost is a ragged bottom edge at each
+  divider, which is the honest shape of "these posts, then those".
+- With "Show images whole" set to make posts with pictures wider, a post
+  with media takes two columns while tiled instead of growing past the
+  column width.
+- Changing how many columns there are -- by resizing the window, by moving
+  the column width, or by tiling turning itself off in a narrow window --
+  keeps your place. The post you were reading stays exactly where it was on
+  screen, instead of the page keeping its scroll position and throwing you
+  somewhere else in the catch-up.
+
+### Changed
+
+- Nothing, when the window is narrow. Tiling only switches on when two or
+  more columns actually fit: below that the page uses exactly the markup and
+  CSS it always has, rather than a one-column grid that merely looks the
+  same. Dragging the window across that line rebuilds the feed in place and
+  keeps your reading position. While tiled, posts drop
+  `content-visibility:auto` -- the grid has to be told each post's height,
+  and an unpainted post reports a placeholder one.
 
 ## [1.0.3] - 2026-10-23
 
@@ -1111,7 +1181,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v1.0.3 · Bluesky</title>
+<title>Catch-up v1.1.0 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -1250,6 +1320,51 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
    14px padding each side plus the 1px borders. */
 :root[data-whole] .post.has-media .pv-text,
 :root[data-whole] .post.has-media .post-meta-line{max-width:calc(var(--col) - 30px)}
+
+/* TILED MODE (settings.tile): fill a wide window with columns of posts
+   instead of leaving the sides empty. PURELY ADDITIVE -- data-tile is only
+   set while the window really fits two or more columns (tileOn()), so a
+   narrow window, or the setting off, takes exactly the code path above and
+   nothing here applies.
+   The feed becomes a sequence of .band grids, one per divider group, each
+   holding .tile grid items. Bands are what make the dividers work: every
+   post in a band is older than every post in the next one, and the day band
+   can still stick (sticky can't travel inside a lone grid item, whose
+   containing block is its own one-row area; a band wrapper is tall).
+   Inside a band, CSS grid's ordinary non-dense auto-flow does the placing
+   over 2px rows, with each item's row span measured in JS (setSpan). Non-
+   dense flow never backtracks, so no post starts above an earlier one:
+   chronology descends in a staircase, which is the brick look. The column
+   count is auto-fill's business, not ours. */
+:root{--tile-gap:16px}
+:root[data-tile] main,
+:root[data-whole][data-tile] main{max-width:min(100%, calc(var(--tile-max, 4) * (var(--col) + var(--tile-gap))))}
+:root[data-tile] .bar-inner{max-width:min(100%, calc(var(--tile-max, 4) * (var(--col) + var(--tile-gap)) + 420px))}
+:root[data-tile] .band{display:grid; grid-template-columns:repeat(auto-fill, var(--col)); grid-auto-rows:2px; row-gap:0;
+  column-gap:var(--tile-gap); justify-content:center; align-items:start}
+:root[data-tile] .band > .day,
+:root[data-tile] .band > .hour{grid-column:1 / -1}
+/* flow-root keeps each post's own margins (8px between cards, 18px around
+   an anchor) INSIDE the tile, so the spacing is the same as in one column
+   and the tile's measured height is exactly what its row span must cover. */
+:root[data-tile] .tile{display:flow-root; min-width:0}
+/* Spans are measured once, when the batch lands in the DOM.
+   content-visibility:auto would hand back the 220px contain-intrinsic-size
+   of a post that hasn't been painted yet, so every span in the batch would
+   be wrong and then jump as you reached it. The cost (laying out a whole
+   batch at once) is paid only while tiled. */
+:root[data-tile] .post{content-visibility:visible}
+/* In whole-image mode a widened post is a two-column cell instead (clamped
+   back to one column by the grid when only one fits), so nothing inside a
+   band needs the --col cap any more: a cell IS one column wide. The auto
+   side margins that centred them go with the cap -- a grid item with
+   margin-inline:auto shrinks to fit its content, which left the day band as
+   wide as its date rather than as wide as the row. */
+:root[data-whole][data-tile] .post,
+:root[data-whole][data-tile] .post.has-media,
+:root[data-whole][data-tile] .day,
+:root[data-whole][data-tile] .hour{max-width:100%; margin-inline:0}
+:root[data-tile-wide] .tile.wide{grid-column:span 2}
 /* ---------- panels and forms (login, start, progress screens) ---------- */
 .panel{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:20px; box-shadow:var(--shadow)}
 .panel h1{font-size:1.5em; margin:0 0 4px}
@@ -1800,7 +1915,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.0.3";
+const APP_VERSION = "1.1.0";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -1861,7 +1976,7 @@ function defaultPreloadVideos() {
 /* Default values for every setting. Saved settings are merged over these at
    load time, so adding a new key here is backwards-compatible. */
 const DEFAULTS = {
-  theme: "system", fontSize: 16, columnWidth: 640, timeFormat: "absolute", dayDividers: true, hourDividers: true, showCounts: true,
+  theme: "system", fontSize: 16, columnWidth: 640, tile: false, tileMax: 4, timeFormat: "absolute", dayDividers: true, hourDividers: true, showCounts: true,
   showReposts: true, replies: "followed", showQuotes: true, onlyTypes: [], replyContext: "reminder", collapseRepeats: true, showOwn: true,
   sensitive: "blur", videoMode: "click", gifMode: "auto", preloadVideos: defaultPreloadVideos(), confirmRepost: true, galleryProxy: true, galleryProxyHost: "xbsky.app",
   wholeImages: "app", mediaWidth: 1, wholeAlt: true, wholeVideo: true, wholeLinkThumbs: true,
@@ -1948,6 +2063,8 @@ const SETTINGS_SCHEMA = [
   { key: "theme", link: true, label: "Theme", type: "select", options: [["system", "Match system"], ["light", "Light"], ["dark", "Dark"]], apply: "look" },
   { key: "fontSize", link: true, label: "Text size", type: "range", min: 13, max: 21, step: 1, unit: "px", apply: "look" },
   { key: "columnWidth", link: true, label: "Column width", type: "range", min: 480, max: 960, step: 20, unit: "px", apply: "look" },
+  { key: "tile", link: true, label: "Tile posts side by side", sub: "On a wide window, fill it with as many columns of the width above as fit. Posts still run oldest to newest down the page, and day and hour dividers still span the whole width. A window too narrow for two columns is left exactly as it is.", type: "bool", apply: "both" },
+  { key: "tileMax", when: { key: "tile", value: true }, link: true, label: "Most columns", sub: "Even a very wide screen won't use more than this.", type: "range", min: 2, max: 6, step: 1, apply: "look" },
   { key: "timeFormat", link: true, label: "Timestamps", type: "select", options: [["absolute", "Clock time"], ["relative", "Time ago"], ["both", "Both"]], apply: "render" },
   { key: "dayDividers", link: true, label: "Day dividers", type: "bool", apply: "render" },
   { key: "hourDividers", link: true, label: "Hour dividers", type: "bool", apply: "render" },
@@ -2005,6 +2122,11 @@ function setSetting(key, value) {
   if (linkOverrides) { baseSettings[key] = value; delete linkOverrides[key]; if (!Object.keys(linkOverrides).length) endLinkOverlay(false); }
   saveSettings();
 }
+/* The tiled layout as it currently stands -- whether it's in force at all,
+   and over how many columns -- so a resize or a width change can tell what
+   has to happen: a rebuild (the markup differs), or just putting the
+   reading spot back (every post moved). Both are kept by applyLook. */
+let wasTiled = false, wasCols = 1, resizeDebounce;
 /* Pushes appearance settings into the document: theme attribute and CSS variables. */
 function applyLook() {
   const r = document.documentElement;
@@ -2018,6 +2140,13 @@ function applyLook() {
   r.toggleAttribute("data-whole-video", whole && settings.wholeVideo);
   r.toggleAttribute("data-whole-link", whole && settings.wholeLinkThumbs);
   r.style.setProperty("--media-mult", String(settings.mediaWidth));
+  // Tiling: data-tile is set ONLY while the window really fits two or more
+  // columns, so one column stays on the untiled path (see tileOn).
+  r.style.setProperty("--tile-max", String(settings.tileMax));
+  const tiling = tileOn();
+  r.toggleAttribute("data-tile", tiling);
+  wasTiled = tiling; wasCols = tiling ? tileCols() : 1;
+  r.toggleAttribute("data-tile-wide", tiling && whole && settings.mediaWidth > 1);
   requestAnimationFrame(() => r.style.setProperty("--bar-h", $("#bar").offsetHeight + "px"));
 }
 
@@ -2033,12 +2162,19 @@ function applyLook() {
              so renderMore knows when to insert a divider (also across batches).
    - prevItem / prevEl: the last rendered item and its <article>, so a reply
              to it can be joined onto it (also across batches).
+   - band / tile: while tiled (tileOn), the .band grid being filled and the
+             .tile inside it that holds the last post, so the next batch
+             carries on in the same band and a joined reply lands in the
+             same grid item as the post it replies to.
    - shownUris: post URIs already on screen (as a post or as a full parent);
              decides whether a parent gets a short reminder or the full post.
    - itemByKey: view items by key, for click handlers that need the item.
    - viewIdxByKey / clockKey: where each item sits in the view, and which post
              the header clock currently describes, so the scroll handler can
              skip its work while the top post hasn't changed.
+   - clockTop: where that post's top edge was on screen, so a reflow that
+             moves every post (a change in the number of columns) can put
+             it back exactly where it was.
    - anchorKey / anchorViewIdx: the highlighted start post (post/resume mode).
    - run:    describes the current catch-up session; fetchedAt is the time the
              fetch began, i.e. the moment you're "caught up to".
@@ -2058,10 +2194,13 @@ const state = {
   lastHour: null,
   prevItem: null,
   prevEl: null,
+  band: null,             // tiled mode: the .band being filled, and
+  tile: null,             // the .tile a joined reply gets fused into
   shownUris: new Set(),
   itemByKey: new Map(),
   viewIdxByKey: new Map(),
-  clockKey: null,         // which post the header is currently describing
+  clockKey: null,
+  clockTop: 0,         // which post the header is currently describing
   anchorKey: null,
   contextStartKey: null,
   run: null,              // {kind, startT, anchor, fetchedAt, method, note}
@@ -2954,6 +3093,60 @@ function passes(it, seen) {
 
 /* ============================== view building & rendering ============================== */
 const feedEl = () => $("#feed");
+
+/* ---------- tiled layout (settings.tile) ----------
+   How many reading columns fit the window, capped by settings.tileMax. This
+   works out what the .band grid's auto-fill works out for itself (main's
+   content box is the window less its 12px padding each side), so JS and CSS
+   agree on the count without reading back layout. */
+function tileCols() {
+  const gap = 16;                               // --tile-gap
+  // clientWidth leaves out the scrollbar, which is the width the grid gets;
+  // innerWidth is the fallback for anything that doesn't lay out (jsdom).
+  const avail = (document.documentElement.clientWidth || window.innerWidth) - 24;
+  const n = Math.floor((avail + gap) / (settings.columnWidth + gap));
+  return Math.max(1, Math.min(Number(settings.tileMax) || 4, n));
+}
+/* Whether the feed is tiled RIGHT NOW. Tiling is purely additive: with one
+   column there is nothing to tile, so the page keeps the untiled markup and
+   CSS exactly as they are rather than rendering a one-column grid that only
+   looks the same. Everything tiling touches asks this, not settings.tile. */
+function tileOn() { return settings.tile === true && tileCols() >= 2; }
+/* Every direct child of a .band is a grid item over 2px rows, so it has to
+   say how many rows it covers (grid has no masonry of its own). Heights
+   change after insertion -- a picture with no reserved ratio arriving, alt
+   text, "show this one larger", a video player attaching, expandThreadGap()
+   adding posts inside a card, a change of text size or column width -- so
+   one ResizeObserver keeps the spans in step, instead of a pass per
+   occasion. Setting a span changes the item's grid AREA, never its own box
+   (the band is align-items:start), so this can't feed itself. */
+const TILE_ROW = 2;
+function setSpan(el) { el.style.gridRow = "span " + Math.max(1, Math.ceil(el.offsetHeight / TILE_ROW)); }
+const tileObserver = typeof ResizeObserver === "undefined" ? null
+  : new ResizeObserver(entries => { for (const e of entries) setSpan(e.target); });
+function measureTile(el) { setSpan(el); tileObserver?.observe(el); }
+function disconnectTiles() { tileObserver?.disconnect(); }
+/* The reading spot, as last seen by the scroll handler: the post at the top
+   of the screen and where its top edge was. */
+function readingSpot() { return state.clockKey ? { key: state.clockKey, offset: state.clockTop } : null; }
+/* Puts that post back where it was after something reflowed the feed
+   WITHOUT rebuilding it -- a change in the number of columns moves every
+   post, and keeping the scroll offset instead would skip a stretch of the
+   catch-up or throw you back over one you'd read. The spot has to come from
+   the scroll handler because a resize event arrives with the new layout
+   already in place: there is nothing left to measure by then. Runs again on
+   the next frame and shortly after, since the row spans are re-measured
+   asynchronously (tileObserver), as buildView does for the same reason. */
+function keepReadingSpot() {
+  const spot = readingSpot(); if (!spot) return;
+  const el = feedEl().querySelector(`[data-key="${CSS.escape(spot.key)}"]`); if (!el) return;
+  const h = window.innerHeight;
+  // A sane offset is one that was on screen; anything else (a stale record)
+  // falls back to just under the top bar.
+  const want = spot.offset > -h && spot.offset < h ? spot.offset : $("#bar").offsetHeight + 48;
+  const go = () => window.scrollBy(0, el.getBoundingClientRect().top - want);
+  go(); requestAnimationFrame(() => { go(); setTimeout(go, 120); });
+}
 /* Applies filters to state.items, slices from the starting point, then
    (optionally) rearranges reply threads; see arrangeThreads().
    - Date mode: start at the first item at/after the chosen time.
@@ -3069,9 +3262,13 @@ function arrangeThreads(view, mode) {
    append:       (fetchNewer only) allow the fast path: if the new view only
                  ADDS items after everything already rendered, keep the DOM
                  and just continue rendering below.
+   spot:         {key, offset} to keep instead of whatever is at the top of
+                 the screen now. Used after a reflow has already happened
+                 (a resize), where what's on screen is no longer what the
+                 reader was looking at.
    The scroll correction runs three times (now, next frame, +120ms) because
    images and content-visibility can shift layout right after insertion. */
-function buildView({ fresh, keepPosition = !fresh, append = false } = {}) {
+function buildView({ fresh, keepPosition = !fresh, append = false, spot = null } = {}) {
   const newView = computeView();
   // Fast path, ONLY for append (fetchNewer): if nothing already on screen
   // changed, keep the DOM and just let new items render below. It must not
@@ -3083,10 +3280,12 @@ function buildView({ fresh, keepPosition = !fresh, append = false } = {}) {
     state.view = newView; updateFeedHead(); updateEndcap(); maybeRenderMore(); return;
   }
   let topKey = null, topOffset = 0;
-  if (keepPosition) { const top = topVisiblePost(); if (top) { topKey = top.dataset.key; topOffset = top.getBoundingClientRect().top; } }
+  if (keepPosition && spot) { topKey = spot.key; topOffset = spot.offset; }
+  else if (keepPosition) { const top = topVisiblePost(); if (top) { topKey = top.dataset.key; topOffset = top.getBoundingClientRect().top; } }
   state.view = newView; state.rendered = 0; state.lastDay = null; state.lastHour = null;
   state.prevItem = null; state.prevEl = null; state.shownUris = new Set();
-  feedEl().innerHTML = ""; disconnectVideos();
+  state.band = null; state.tile = null;
+  feedEl().innerHTML = ""; disconnectVideos(); disconnectTiles();
   updateFeedHead();
   let targetKey = topKey || (fresh ? (settings.scrollTo === "context" ? state.contextStartKey : state.anchorKey) : null);
   let targetIdx = targetKey ? state.view.findIndex(it => it.key === targetKey) : -1;
@@ -3117,11 +3316,27 @@ function renderUntil(n) { while (state.rendered < Math.min(n, state.view.length)
    inserting a day divider whenever the local calendar date changes and (if
    enabled) an hour divider whenever the clock hour changes. Newly
    added videos are registered with the preload (and autoplay) observers;
-   GIF videos use the autoplay observer when gifAutoplay() allows. */
+   GIF videos use the autoplay observer when gifAutoplay() allows.
+   While tiled (tileOn) the same items go into .band grids of .tile items
+   instead of straight into #feed: a divider starts a new band, every other
+   post opens a new tile, and a joined reply is fused into the tile of the
+   post above it so the grid can't split a chain. The spans the grid needs
+   are measured once the batch is in the DOM. Untiled, this is the flat
+   append it has always been. */
 function renderMore() {
   const size = Math.max(25, Number(settings.batchSize) || 150);
   const end = Math.min(state.view.length, state.rendered + size);
+  const tiled = tileOn();
   const frag = document.createDocumentFragment();
+  const placed = [];                          // grid items added this batch
+  /* One block of the feed: a grid item in its band when tiled (opening a
+     band if there isn't one, which is also the no-dividers case), else a
+     plain child of #feed. */
+  const addBlock = el => {
+    if (!tiled) { frag.append(el); return; }
+    if (!state.band) { const b = document.createElement("div"); b.className = "band"; frag.append(b); state.band = b; }
+    state.band.append(el); placed.push(el);
+  };
   for (let i = state.rendered; i < end; i++) {
     const it = state.view[i];
     const d = new Date(it.pt ?? it.t);          // dividers follow feed position (see arrangeThreads)
@@ -3131,7 +3346,8 @@ function renderMore() {
     if (settings.dayDividers && day !== state.lastDay) {
       const div = document.createElement("div"); div.className = "day bleed";
       div.textContent = d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: d.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined });
-      frag.append(div); divided = true;
+      if (tiled) state.band = null;          // a divider starts a new band
+      addBlock(div); divided = true;
     }
     // Hour dividers mark the first post of each clock hour that has posts
     // (empty hours get no divider). The first hour of each day gets one too,
@@ -3140,7 +3356,8 @@ function renderMore() {
       const div = document.createElement("div"); div.className = "hour bleed";
       const top = new Date(d); top.setMinutes(0, 0, 0);
       div.textContent = top.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-      frag.append(div); divided = true;
+      if (tiled && !divided) state.band = null;   // (a day divider just opened one)
+      addBlock(div); divided = true;
     }
     state.lastDay = day; state.lastHour = hour;
 
@@ -3161,13 +3378,22 @@ function renderMore() {
     }
     const el = renderItem(it, i, ctx);
     if (ctx === "joined") state.prevEl?.classList.add("has-next");
-    frag.append(el);
+    if (!tiled) frag.append(el);
+    else if (ctx === "joined" && state.tile) state.tile.append(el);
+    else {
+      const t = document.createElement("div"); t.className = "tile";
+      t.append(el); state.tile = t; addBlock(t);
+    }
+    // A post with media may take two columns (whole-image mode); the grid
+    // clamps that back to one when only one column exists.
+    if (tiled && state.tile && el.classList.contains("has-media")) state.tile.classList.add("wide");
     state.shownUris.add(it.fi.post.uri);
     if (ctx === "full" && parentUri) state.shownUris.add(parentUri);
     state.prevItem = it; state.prevEl = el;
   }
   feedEl().append(frag);
   state.rendered = end;
+  for (const el of placed) measureTile(el);   // heights are only real in the DOM
   observeVideos(feedEl());
   updateEndcap();
 }
@@ -4232,16 +4458,27 @@ document.addEventListener("keydown", ev => {
    Finds the first .post whose bottom edge is below the top bar, i.e. the post
    you're currently reading. Binary search works because posts are stacked in
    order (day dividers are excluded since sticky elements report their stuck
-   position, which would break the ordering). */
+   position, which would break the ordering).
+   Tiled, that stacking only holds down a column: a later post can sit higher
+   up in the column beside it, so the search lands NEAR the reading line
+   rather than on it. From there a scan of a few rows either side picks the
+   earliest post still below the line, which is the one being read. The
+   window is in items, so it covers the same few rows whatever the column
+   count. */
 function topVisiblePost() {
   const posts = feedEl().getElementsByClassName("post"); if (!posts.length) return null;
   const line = $("#bar").offsetHeight + 8;
+  const below = i => posts[i].getBoundingClientRect().bottom > line;
   let lo = 0, hi = posts.length - 1, ans = null;
   while (lo <= hi) {
-    const mid = (lo + hi) >> 1; const el = posts[mid];
-    if (el.getBoundingClientRect().bottom > line) { ans = mid; hi = mid - 1; } else lo = mid + 1;
+    const mid = (lo + hi) >> 1;
+    if (below(mid)) { ans = mid; hi = mid - 1; } else lo = mid + 1;
   }
-  return ans == null ? null : posts[ans];
+  if (ans == null) return null;
+  if (!tileOn()) return posts[ans];
+  const win = 4 * tileCols();
+  for (let i = Math.max(0, ans - win); i < ans; i++) if (below(i)) return posts[i];
+  return posts[ans];
 }
 /* Called on scroll. Updates the header clock, "posts below" count and
    progress strip, and (if enabled) saves the furthest-read item. The saved
@@ -4250,6 +4487,11 @@ function topVisiblePost() {
 function updateClock() {
   if (!state.run || $("#viewFeed").classList.contains("hidden")) return;
   const top = topVisiblePost(); if (!top) return;
+  // Where that post sits on screen right now. Recorded every scroll frame,
+  // and before the early return below, because it's the only record of the
+  // reading spot left once something reflows the feed: a resize event
+  // arrives with the new layout already in place (see keepReadingSpot).
+  state.clockTop = top.getBoundingClientRect().top;
   // Everything below is derived from which post is at the top, so while that
   // hasn't changed there is nothing to redo. This keeps two Intl date formats
   // and a localStorage write out of the great majority of scroll frames.
@@ -4284,7 +4526,29 @@ window.addEventListener("scroll", () => {
   if (scrollRaf) return;
   scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; if (!$("#viewFeed").classList.contains("hidden")) { maybeRenderMore(); updateClock(); schedulePreload(); } });
 }, { passive: true });
-window.addEventListener("resize", () => document.documentElement.style.setProperty("--bar-h", $("#bar").offsetHeight + "px"));
+/* Resizing changes the top bar's height and, with tiling on, how many
+   columns fit. Laying the posts out again is the grid's own business
+   (auto-fill re-lays out and the ResizeObserver re-measures the spans), but
+   two things are ours:
+     - crossing the line between tiled and not changes the MARKUP, so the
+       feed is rebuilt;
+     - any change in the number of columns moves every post, so the post
+       being read is put back where it was on screen. The spot is the one
+       the scroll handler recorded, since by now the new layout is already
+       in place. */
+window.addEventListener("resize", () => {
+  document.documentElement.style.setProperty("--bar-h", $("#bar").offsetHeight + "px");
+  clearTimeout(resizeDebounce);
+  resizeDebounce = setTimeout(() => {
+    const now = tileOn(), cols = tileCols();
+    if (now === wasTiled && (!now || cols === wasCols)) return;
+    const flipped = now !== wasTiled, spot = readingSpot();
+    applyLook();                      // which records the new state in wasTiled/wasCols
+    if (!state.run || $("#viewFeed").classList.contains("hidden")) return;
+    if (flipped) buildView({ fresh: false, keepPosition: true, spot });
+    else keepReadingSpot();
+  }, 150);
+});
 
 /* ============================== views ============================== */
 /* ---------- views and forms ----------
@@ -4521,6 +4785,10 @@ let renderDebounce;
 $("#drawer").addEventListener("input", ev => {
   const el = ev.target.closest("[data-k]"); if (!el) return;
   const s = SETTINGS_SCHEMA.find(x => x.key === el.dataset.k);
+  // Column width can turn tiling on or off, or just change the count; either
+  // way the feed is laid out again, so the reading spot has to be caught
+  // before applyLook does it (see keepReadingSpot).
+  const wasTiling = tileOn(), colsBefore = tileCols(), spot = readingSpot();
   let v = s.type === "bool" ? el.checked : s.type === "range" || s.type === "number" ? Number(el.value) : el.value;
   if (s.type === "multi") v = $$(`#drawer [data-k="${s.key}"]:checked`).map(x => x.value);
   if (s.type === "number") { if (isNaN(v)) return; v = Math.max(s.min, Math.min(s.max, v)); }
@@ -4529,9 +4797,17 @@ $("#drawer").addEventListener("input", ev => {
   if (s.type === "range") $(`[data-val="${s.key}"]`).textContent = v + (s.unit || "");
   if (s.apply === "look" || s.apply === "both") applyLook();
   if (s.apply === "videos") schedulePreload();
-  if ((s.apply === "render" || s.apply === "both") && state.run && !$("#viewFeed").classList.contains("hidden")) {
-    clearTimeout(renderDebounce); renderDebounce = setTimeout(() => buildView({ fresh: false, keepPosition: true }), 250);
+  // Tiling coming on or going off changes the markup, so the feed is rebuilt;
+  // a change in the number of columns alone only moves the posts about.
+  const flipped = tileOn() !== wasTiling, moved = flipped || tileCols() !== colsBefore;
+  if ((s.apply === "render" || s.apply === "both" || flipped) && state.run && !$("#viewFeed").classList.contains("hidden")) {
+    // A rebuild keeps the position itself -- from the spot caught above when
+    // the posts have already moved, else from what's on screen when it runs.
+    clearTimeout(renderDebounce); renderDebounce = setTimeout(() => buildView({ fresh: false, keepPosition: true, spot: moved ? spot : null }), 250);
   }
+  // Same as a resize: more or fewer columns moves every post without
+  // changing the markup, so the post being read goes back where it was.
+  else if (moved && tileOn()) keepReadingSpot();
   if (s.key === "contextCount" && !$("#viewStart").classList.contains("hidden")) prepareStart();
 });
 /* Brings the open drawer back in step with the current settings, without
