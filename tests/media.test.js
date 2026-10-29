@@ -483,3 +483,33 @@ test("the page fetches nothing at all when it loads", async () => {
     assert.match(tag, /\shref="data:/, `head <link> must be inline: ${tag.slice(0, 60)}`);
   assert.equal(src.match(/fonts\.(googleapis|gstatic)\.com/g), null, "no Google Fonts reference anywhere");
 });
+
+test("a gallery asks for a picture the size of the slot it lands in", async () => {
+  // A strip item's HEIGHT is fixed (380px) and its width follows from its
+  // aspect ratio, so a portrait picture sits in a slot about half the strip's
+  // width. The page used to hand the browser the whole strip's width, which
+  // made it fetch Bluesky's 2000px file for a ~285px slot.
+  const portrait = { $type: "app.bsky.embed.gallery#view", items: Array.from({ length: 6 }, (_, i) => ({
+    $type: "app.bsky.embed.gallery#viewImage", thumbnail: `pt${i}.jpg`, fullsize: `pf${i}.jpg`, alt: "",
+    aspectRatio: { width: 3, height: 4 } })) };
+  const page = await h.loadPage({ settings: { columnWidth: 640 },
+    server: { timeline: [h.item(h.post("G", h.actor(1), 10, { embed: portrait }))] } });
+  await page.startDate(h.BASE);
+
+  const img = page.$(".gallery img");
+  const declared = parseInt(img.getAttribute("sizes"), 10);
+  // 380px tall x 3/4 = 285px wide, well under the strip's own 610px.
+  assert.equal(declared, 285, "the slot is the item's height times its ratio");
+  const strip = page.eval("cellWidthPx(1)");
+  assert.ok(declared < strip * 0.6, `declared ${declared}px should be far under the strip's ${strip}px`);
+  // and at 285px even a 2x screen doesn't need the 2000px file
+  assert.equal(img.getAttribute("srcset").split(", ").length, 1,
+    "a slot that small is offered the thumbnail only");
+
+  // a landscape item in the same strip is wider, and does get both offered
+  const land = await h.loadPage({ settings: { columnWidth: 640 },
+    server: { timeline: [h.item(h.post("G", h.actor(1), 10, { embed: h.embeds.gallery(6) }))] } });
+  await land.startDate(h.BASE);
+  const w = parseInt(land.$(".gallery img").getAttribute("sizes"), 10);
+  assert.ok(w > declared && w <= 520, `landscape slot ${w}px is wider but still under the strip`);
+});

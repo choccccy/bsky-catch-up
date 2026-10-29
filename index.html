@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.1.2
+  Version 1.1.4
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -270,6 +270,41 @@ TILED MODE ("Tile posts side by side", settings.tile)
       handler, which records it on every frame: a resize event arrives with
       the new layout already in place, so there's nothing left to measure.
 
+  WHAT HAS BEEN SWEPT FOR SINGLE-COLUMN ASSUMPTIONS (1.1.2)
+  Tiling broke two things that were safe while the feed was one centred
+  column -- the start post's .bleed band, and setSpan measuring a border box
+  -- and both reached a user before anyone looked. So the rest was gone
+  through deliberately, against a real 224-post catch-up in a browser at
+  1 / 2 / 4 columns. Checked and SOUND, so don't re-check blind:
+    - .bleed on the day and hour dividers: still right, because grid-column
+      1/-1 makes them full-row boxes that ARE centred. Only the anchor post
+      wasn't, and that is scoped now.
+    - every position:sticky and position:fixed. .bar sits outside the feed;
+      .day works because the band wrapper is tall (that is what it is for);
+      the drawer, scrim, lightbox, lightbox arrows and toast are all fixed to
+      the viewport and don't care how the feed is laid out. Confirmed live:
+      the repost menu still clamps inside the window when opened from the
+      rightmost column, the lightbox still covers the viewport, the toast is
+      still centred on it.
+    - .g-item's height:min(380px, 62vw). The 62vw only bites below a ~613px
+      viewport, which is far too narrow to tile, so it never applies tiled.
+    - --media-cap (100vh based) is viewport-relative on purpose, and stays
+      correct per column.
+    - the lost paint containment. Tiled, .post drops content-visibility:auto
+      and with it the clipping that used to hide anything sticking out of a
+      card. Across 224 real posts NOTHING was found sticking out: every
+      source of overflow carries its own clipping (.gallery scrolls,
+      .video/.imgs/.blurwrap/.ext all hide theirs). This is therefore a
+      LATENT trap rather than a live bug -- a new embed type that overflows
+      its box and does not clip itself would be clipped in one column and
+      spill across the columns beside it when tiled. Give any new embed its
+      own overflow rule.
+    - topVisiblePost's scan window, keepReadingSpot, maybeRenderMore's
+      sentinel, --bar-h and tileCols: all correct at every column count.
+  Found and NOT a tiling problem, see the changelog: galleries ask the
+  browser for pictures about twice the size of the slot they land in. It
+  measures the same in one column, so it predates tiling.
+
 FILE LAYOUT
   <style>    CSS, organised by area. Colours are CSS custom properties on
              :root, redefined for dark mode (both the OS preference and the
@@ -497,6 +532,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.1.4] - 2026-10-28
+
+### Fixed
+
+- Galleries (the posts with five or more pictures) were loading each picture
+  at about twice the size it is shown at, and on a tall picture nearer three
+  times. A gallery is a strip of a fixed height, so how WIDE a picture ends up
+  depends on its shape: a portrait one gets a slot around half the strip's
+  width. The page was telling the browser every slot was the full width of the
+  strip, so the browser sensibly fetched the larger of the two files Bluesky
+  offers -- about 11MB of memory per picture once decoded, for a slot that
+  never needed it. Each picture is now measured properly, which on a catch-up
+  full of galleries is a good deal less memory and data for exactly the same
+  thing on screen. Nothing looks different.
+- Signing out left the previous account's saved feeds on screen. The feed
+  picker is filled once when you sign in, and signing out didn't empty it, so
+  the next person to sign in on the same computer was offered the last
+  account's feeds and lists by name -- and could start a catch-up reading one
+  of them. Signing out now forgets everything belonging to the account, in one
+  place so nothing is missed next time. (Your saved reading position is kept,
+  as before; "Forget my reading position" in Settings is still how you clear
+  that.)
+
+### Changed
+
+- More housekeeping, with nothing to see. The three different pieces of code
+  that built a bsky.app link to a post are now one; so are the two that drew
+  the name/handle/time line above a post, and the two that put your place back
+  after the feed is laid out again. The tiled layout's measurements are handed
+  to the stylesheet instead of being written out in both places, which is the
+  class of mistake that broke "Most columns" in 1.1.0.
+- The tiled layout was gone through deliberately for anything else that
+  assumed the feed is a single centred column, since that assumption caused
+  both of 1.1.2's bugs. Everything else checked out; what was checked, and the
+  one trap left for future work, is written down at the top of the file.
 
 ## [1.1.2] - 2026-10-28
 
@@ -1277,7 +1348,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v1.1.2 · Bluesky</title>
+<title>Catch-up v1.1.4 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -1434,7 +1505,12 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
    dense flow never backtracks, so no post starts above an earlier one:
    chronology descends in a staircase, which is the brick look. The column
    count is auto-fill's business, not ours. */
-:root{--tile-gap:16px}   /* = TILE_GAP in the script; keep the two in step */
+ /* --tile-gap and --tile-row are pushed in by applyLook from TILE_GAP and
+    TILE_ROW, the same way --tile-width is: the script has to do arithmetic
+    with all three (tileCols, tileWidth, setSpan), and a second copy here is
+    exactly how "Most columns" came to disagree with itself in 1.1.0. The
+    values in the var() calls below are only what applies before the first
+    applyLook, which runs at the top of boot. */
 /* --tile-width is the "most columns" cap in pixels, worked out by tileWidth()
    so that it and tileCols() can't disagree (see there).
    Only the FEED is allowed to be that wide: main holds the login, start and
@@ -1444,8 +1520,8 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
    every width, so it keeps the measure it has always had. */
 :root[data-tile][data-view="feed"] main,
 :root[data-whole][data-tile][data-view="feed"] main{max-width:min(100%, var(--tile-width))}
-:root[data-tile] .band{display:grid; grid-template-columns:repeat(auto-fill, var(--col)); grid-auto-rows:2px; row-gap:0;
-  column-gap:var(--tile-gap); justify-content:center; align-items:start}
+:root[data-tile] .band{display:grid; grid-template-columns:repeat(auto-fill, var(--col)); grid-auto-rows:var(--tile-row, 2px); row-gap:0;
+  column-gap:var(--tile-gap, 16px); justify-content:center; align-items:start}
 :root[data-tile] .band > .day,
 :root[data-tile] .band > .hour{grid-column:1 / -1}
 /* flow-root keeps each post's own margins (8px between cards, 18px around
@@ -2034,7 +2110,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.1.2";
+const APP_VERSION = "1.1.4";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -2288,6 +2364,8 @@ function applyLook() {
   r.style.setProperty("--media-mult", String(settings.mediaWidth));
   // Tiling: data-tile is set ONLY while the window really fits two or more
   // columns, so one column stays on the untiled path (see tileOn).
+  r.style.setProperty("--tile-gap", TILE_GAP + "px");
+  r.style.setProperty("--tile-row", TILE_ROW + "px");
   r.style.setProperty("--tile-width", tileWidth() + "px");
   const tiling = tileOn();
   r.toggleAttribute("data-tile", tiling);
@@ -2530,12 +2608,38 @@ async function login(handle, password, remember) {
   state.session = { did: j.did, handle: j.handle, pds, accessJwt: j.accessJwt, refreshJwt: j.refreshJwt };
   if (remember) LS.set("session", state.session); else LS.del("session");
 }
+/* Drops everything held about the signed-in account, in one place so nothing
+   is missed. It used to be an inline list in signOut that had fallen behind
+   what the page keeps: the account's saved feeds stayed in state.savedFeeds
+   AND in the already-filled picker, so signing in as someone else on the same
+   computer was met with the previous account's feed names -- and starting a
+   catch-up could read one of them. Anything account-scoped added later
+   belongs here. (Reading positions are keyed by DID in localStorage, so they
+   are not ours to clear; "Forget my reading position" in Settings does that.) */
+function forgetAccount() {
+  state.session = null; state.profile = null;
+  state.follows = new Map();
+  state.items = []; state.view = []; state.rendered = 0;
+  state.postState = new Map(); hydrateQueue.clear();
+  state.savedFeeds = null; state.run = null; state.maxRead = null;
+  chosenFeed = null;
+  // The picker is filled once per sign-in (its data-filled marker), so it has
+  // to be emptied too or the next account is shown the last one's feeds.
+  const sel = $("#inFeed");
+  if (sel) {
+    delete sel.dataset.filled;
+    for (const o of [...sel.options]) if (o.value) o.remove();   // keep "Following"
+    sel.value = "";
+  }
+  const url = $("#inFeedUrl"); if (url) url.value = "";
+  $("#feedUrlBox")?.classList.add("hidden");
+}
 /* Best-effort server-side session deletion, then clears local state and storage. */
 async function signOut() {
   const s = state.session;
   if (s) netFetch(`${s.pds}/xrpc/com.atproto.server.deleteSession`, { method: "POST", headers: { Authorization: `Bearer ${s.refreshJwt}` } }).catch(() => {});
   LS.del("session");
-  state.session = null; state.profile = null; state.follows = new Map(); state.items = []; state.postState = new Map(); hydrateQueue.clear();
+  forgetAccount();
   show("login");
 }
 
@@ -2761,6 +2865,16 @@ async function loadSavedFeeds(signal) {
 }
 
 /* ============================== starting points ============================== */
+/* The bsky.app address of a post. Three callers want this from three
+   different starting points, and each used to build the URL itself:
+     postLinkFor(actor, rkey)  the two parts, however they were obtained
+     postLinkFrom(uriOrLink)   an at:// URI or a pasted link, normalised
+                               (anything unrecognisable comes back unchanged)
+     postUrl(post)             a post view, which can offer a handle
+   Only this pair writes the address out, so there is one thing to change if
+   bsky.app ever moves. */
+const postLinkFor = (actor, rkey) => `https://bsky.app/profile/${actor}/post/${rkey}`;
+const postLinkFrom = s => { const r = parsePostRef(s); return r ? postLinkFor(r.actor, r.rkey) : s; };
 /* Parses a post reference from either a bsky.app URL
    (https://bsky.app/profile/<handle-or-did>/post/<rkey>) or an at:// URI.
    Returns {actor, rkey} or null. */
@@ -2893,7 +3007,7 @@ function runHashRequest(req) {
 function writeHash(kind, value, end, src) {
   const point = (k, v) => {
     if (k === "date") return new Date(v).toISOString();
-    const ref = parsePostRef(v); return ref ? `https://bsky.app/profile/${ref.actor}/post/${ref.rkey}` : v;
+    return postLinkFrom(v);
   };
   let h = kind === "resume" ? "resume" : kind === "recent" ? "recent=" + Math.max(1, Number(value) || 0) : "from=" + point(kind, value);
   if (end) h += "&to=" + point(end.kind, end.kind === "date" ? end.t : end.input);
@@ -3030,9 +3144,8 @@ function endLinkOverlay(keep, revert = false) {
    resolved start/end, including "Keep going to now"). */
 function catchupFragment() {
   const r = state.run; if (!r) return "";
-  const postLink = uri => { const m = uri.match(/^at:\/\/([^/]+)\/app\.bsky\.feed\.post\/([^/]+)$/); return m ? `https://bsky.app/profile/${m[1]}/post/${m[2]}` : uri; };
-  let h = r.kind === "resume" ? "resume" : r.kind === "recent" ? "recent=" + r.max : "from=" + (r.anchor ? postLink(r.anchor.uri) : new Date(r.startT).toISOString());
-  if (r.end) h += "&to=" + (r.end.uri ? postLink(r.end.uri) : new Date(r.end.t).toISOString());
+  let h = r.kind === "resume" ? "resume" : r.kind === "recent" ? "recent=" + r.max : "from=" + (r.anchor ? postLinkFrom(r.anchor.uri) : new Date(r.startT).toISOString());
+  if (r.end) h += "&to=" + (r.end.uri ? postLinkFrom(r.end.uri) : new Date(r.end.t).toISOString());
   if (r.feed && r.feed.kind !== "timeline" && r.feed.uri) h += "&feed=" + encodeURIComponent(r.feed.uri);
   return h + `&v=${LINK_FORMAT}`;
 }
@@ -3249,8 +3362,16 @@ const feedEl = () => $("#feed");
    works out what the .band grid's auto-fill works out for itself (main's
    content box is the window less its 12px padding each side), so JS and CSS
    agree on the count without reading back layout. */
-const TILE_GAP = 16;    // the gap between columns, as --tile-gap in the CSS
-const MAIN_PAD = 24;    // main's own side padding, which box-sizing includes
+/* ---------- numbers the script and the stylesheet both need ----------
+   Each of these exists because a measurement in here has to come out at the
+   same value as a rule in the CSS. Where the script can simply hand the
+   number over -- a custom property the CSS reads -- it does, and then there
+   is only one copy (applyLook sets --tile-gap, --tile-row and --tile-width).
+   Where it can't, because the CSS needs it inside a shorthand or a unit the
+   script can't write, the comment names the rule it mirrors. If you change
+   one of those, change the rule too. */
+const TILE_GAP = 16;        // -> --tile-gap, read by .band's column-gap
+const MAIN_PAD = 24;        // mirrors main{padding:… 12px …}, doubled; box-sizing includes it
 function tileCols() {
   // clientWidth leaves out the scrollbar, which is the width the grid gets;
   // innerWidth is the fallback for anything that doesn't lay out (jsdom).
@@ -3280,7 +3401,7 @@ function tileOn() { return settings.tile === true && tileCols() >= 2; }
    one ResizeObserver keeps the spans in step, instead of a pass per
    occasion. Setting a span changes the item's grid AREA, never its own box
    (the band is align-items:start), so this can't feed itself. */
-const TILE_ROW = 2;
+const TILE_ROW = 2;          // -> --tile-row, read by .band's grid-auto-rows
 /* The rows an item needs have to cover its MARGIN box, not its border box.
    A .tile has no margin of its own -- display:flow-root keeps the post's
    inside it, which is the whole reason for the wrapper -- but a day or hour
@@ -3301,6 +3422,16 @@ function disconnectTiles() { tileObserver?.disconnect(); }
 /* The reading spot, as last seen by the scroll handler: the post at the top
    of the screen and where its top edge was. */
 function readingSpot() { return state.clockKey ? { key: state.clockKey, offset: state.clockTop } : null; }
+/* Puts `el` where `want()` says it should sit on screen, three times: now,
+   on the next frame, and shortly after. Once isn't enough -- pictures
+   arriving, content-visibility and (tiled) the row spans, which are
+   re-measured asynchronously by the ResizeObserver, all move things right
+   after insertion. want() is called each time so it can read a layout value
+   (the bar's height) that may itself have settled in between. */
+function settleScroll(el, want) {
+  const go = () => window.scrollBy(0, el.getBoundingClientRect().top - want());
+  go(); requestAnimationFrame(() => { go(); setTimeout(go, 120); });
+}
 /* Puts that post back where it was after something reflowed the feed
    WITHOUT rebuilding it -- a change in the number of columns moves every
    post, and keeping the scroll offset instead would skip a stretch of the
@@ -3316,8 +3447,7 @@ function keepReadingSpot() {
   // A sane offset is one that was on screen; anything else (a stale record)
   // falls back to just under the top bar.
   const want = spot.offset > -h && spot.offset < h ? spot.offset : $("#bar").offsetHeight + 48;
-  const go = () => window.scrollBy(0, el.getBoundingClientRect().top - want);
-  go(); requestAnimationFrame(() => { go(); setTimeout(go, 120); });
+  settleScroll(el, () => want);
 }
 /* Applies filters to state.items, slices from the starting point, then
    (optionally) rearranges reply threads; see arrangeThreads().
@@ -3470,14 +3600,7 @@ function buildView({ fresh, keepPosition = !fresh, append = false, spot = null }
   updateEndcap();
   if (targetIdx >= 0) {
     const el = feedEl().querySelector(`[data-key="${CSS.escape(state.view[targetIdx].key)}"]`);
-    if (el) {
-      const go = () => {
-        const barH = $("#bar").offsetHeight;
-        const want = keepPosition && topKey ? topOffset : barH + 48;
-        window.scrollBy(0, el.getBoundingClientRect().top - want);
-      };
-      go(); requestAnimationFrame(() => { go(); setTimeout(go, 120); });
-    }
+    if (el) settleScroll(el, () => (keepPosition && topKey ? topOffset : $("#bar").offsetHeight + 48));
   } else if (fresh) window.scrollTo(0, 0);
   updateClock();
 }
@@ -3661,9 +3784,8 @@ function fmtPostTime(t, feedT = t) {
    at:// URI when there's no author at all -- bsky.app shows its XRPC error
    page for profile/undefined). */
 function postUrl(p) {
-  const rkey = p.uri.split("/").pop();
   const who = p.author?.handle && p.author.handle !== "handle.invalid" ? p.author.handle : (p.author?.did || p.uri.split("/")[2]);
-  return `https://bsky.app/profile/${who}/post/${rkey}`;
+  return postLinkFor(who, p.uri.split("/").pop());
 }
 /* The link "Copy link" puts on the clipboard. Normally the bsky.app link,
    but for posts with a gallery (own or quoted) and settings.galleryProxy on,
@@ -3681,6 +3803,20 @@ function shareUrl(p) {
   return { url: url.replace("https://bsky.app/", `https://${host}/`), proxied: host !== "bsky.app" ? host : false };
 }
 function profileUrl(a) { return `https://bsky.app/profile/${a.handle && a.handle !== "handle.invalid" ? a.handle : a.did}`; }
+/* The name / handle / time line. A post and a quoted post draw the same one
+   and used to build it separately, which is how the quote's version drifted
+   into carrying its avatar inline. The differences are the arguments:
+     avatar    a quote puts a small avatar inside the line; a post's sits
+               outside it, in its own column
+     timeHtml  already escaped by the caller, because a post shows its full
+               timestamp and a quote the short "3h" form
+     timeTitle only the post has one. */
+function headHtml(a, { href, timeHtml, timeTitle = "", avatar = false }) {
+  return `<div class="pv-head">${avatar && a.avatar ? `<img class="avatar" src="${esc(a.avatar)}" alt="" loading="lazy">` : ""}
+        <a class="pv-name" href="${esc(profileUrl(a))}" target="_blank" rel="noopener">${esc(a.displayName || a.handle)}</a>
+        <span class="pv-handle">@${esc(a.handle)}</span>
+        <a class="pv-time" href="${esc(href)}" target="_blank" rel="noopener"${timeTitle ? ` title="${esc(timeTitle)}"` : ""}>${timeHtml}</a></div>`;
+}
 /* Renders post text with its facets (links, mentions, hashtags) as HTML.
    Facet ranges are UTF-8 BYTE offsets, not JS string indices, so the text is
    encoded to bytes, sliced, and decoded back. Overlapping or out-of-range
@@ -3813,11 +3949,7 @@ function postViewHtml(p, { extraClass = "", replyTo = null, t = null, feedT = nu
   return `<div class="pv ${extraClass}" data-uri="${esc(p.uri)}">
     <a class="avatar-link" href="${esc(profileUrl(a))}" target="_blank" rel="noopener" tabindex="-1">${avatar}</a>
     <div class="pv-body">
-      <div class="pv-head">
-        <a class="pv-name" href="${esc(profileUrl(a))}" target="_blank" rel="noopener">${esc(a.displayName || a.handle)}</a>
-        <span class="pv-handle">@${esc(a.handle)}</span>
-        <a class="pv-time" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="${esc(new Date(time).toLocaleString())}">${esc(fmtPostTime(time, feedT ?? time))}</a>
-      </div>
+      ${headHtml(a, { href: postUrl(p), timeHtml: esc(fmtPostTime(time, feedT ?? time)), timeTitle: new Date(time).toLocaleString() })}
       ${replyTo ? `<div class="reply-to">Replying to ${esc(replyTo)}</div>` : ""}
       <div class="pv-text">${richText(rec.text, rec.facets)}</div>
       ${p.embed ? `<div class="embed">${embedHtml(p.embed, p, 0)}</div>` : ""}
@@ -3999,7 +4131,7 @@ function imgSrcAttrs(im, cssW) {
    the post's inner width shared between `cols` columns. Media posts are wider
    than the text column in whole-image mode (settings.mediaWidth), and nothing
    is ever wider than the window. */
-const POST_INNER_PAD = 30;   // .post padding (14px each side) + its 1px borders
+const POST_INNER_PAD = 30;   // mirrors .post{padding:… 14px …} both sides + its 1px borders
 function cellWidthPx(cols, whole = wholeMode()) {
   const col = numSetting("columnWidth");
   const mult = whole ? numSetting("mediaWidth") : 1;
@@ -4027,7 +4159,30 @@ function arOf(x) {
   // --ar plus the two numbers separately, because CSS can't do arithmetic on
   // "16/9" and the height cap is applied by working out the width that
   // produces it (see --media-cap).
-  return { ratio: `${w}/${h}`, vars: `--ar:${w}/${h}; --arw:${w}; --arh:${h}`, tall: h / w > TALL_RATIO };
+  return { ratio: `${w}/${h}`, vars: `--ar:${w}/${h}; --arw:${w}; --arh:${h}`, tall: h / w > TALL_RATIO, w, h };
+}
+/* --media-cap in pixels: the tallest a picture may be. Mirrors the custom
+   property of that name in the CSS; keep the two in step. */
+function mediaCapPx() {
+  const bar = $("#bar")?.offsetHeight || 58;
+  return Math.max(120, ((typeof window !== "undefined" && window.innerHeight) || 800) - bar) * 0.9;
+}
+/* How wide one gallery item is ACTUALLY laid out.
+   The strip is not like the image grid. A grid cell's width comes from the
+   post, but a strip item's HEIGHT is fixed and its width follows from its
+   aspect ratio -- so a portrait picture lands in a slot about half the
+   strip's width. Handing imgSrcAttrs the strip's width instead meant the
+   browser was told a 285px slot was 610px, and dutifully fetched Bluesky's
+   2000px file for it: roughly 11MB of decoded memory per picture, for
+   nothing (see KNOWN LIMITATIONS).
+   The three numbers mirror .g-item in the CSS; keep them in step. */
+const GALLERY_H = 380, GALLERY_VH = 0.62, GALLERY_MAX_W = 0.85;
+function galleryItemWidth(strip, ar) {
+  const r = ar ? ar.w / ar.h : 1;
+  // Whole-image mode: the item keeps its own shape under the height cap.
+  if (wholeMode()) return Math.min(strip, mediaCapPx() * r);
+  const h = Math.min(GALLERY_H, GALLERY_VH * ((typeof window !== "undefined" && window.innerWidth) || strip));
+  return Math.min(strip * GALLERY_MAX_W, h * r);
 }
 /* Image grid (1-4 images). By default this is the Bluesky app's layout:
    squares, cropped to fill. With "Show images whole" on, every cell carries
@@ -4064,7 +4219,7 @@ function imageCellHtml(im, cols) {
 function galleryHtml(e, p) {
   const items = e.items || []; const n = items.length;
   if (!n) return "";
-  const w = cellWidthPx(1);   // every item in the strip gets the same slot
+  const strip = cellWidthPx(1);
   const cells = items.map((im, i) => {
     const count = `<span class="g-count">${i + 1}/${n}</span>`;
     if (im.$type && im.$type !== "app.bsky.embed.gallery#viewImage" || !im.fullsize) {
@@ -4079,7 +4234,7 @@ function galleryHtml(e, p) {
     // badge and in the viewer here: a caption under a horizontally scrolling
     // strip has nowhere good to sit.
     return `<button class="img g-item" type="button" data-act="zoom" data-full="${esc(im.fullsize)}" data-alt="${esc(im.alt || "")}" style="${ar}">
-      <img ${imgSrcAttrs(im, w)} alt="${esc(im.alt || "")}" loading="lazy" decoding="async">${im.alt ? '<span class="alt-badge">ALT</span>' : ""}${count}</button>`;
+      <img ${imgSrcAttrs(im, galleryItemWidth(strip, a))} alt="${esc(im.alt || "")}" loading="lazy" decoding="async">${im.alt ? '<span class="alt-badge">ALT</span>' : ""}${count}</button>`;
   }).join("");
   return wrapSensitive(`<div class="gallery-wrap"><div class="gallery">${cells}</div>
     <button class="g-nav prev off" type="button" data-act="gscroll" data-dir="-1" aria-label="Previous image">‹</button>
@@ -4228,10 +4383,7 @@ function quoteHtml(r, depth) {
       // data-uri lets the delegated click handler find this quoted post (it's
       // the nearest [data-uri] ancestor of the quote's own buttons).
       return `<div class="quote" data-uri="${esc(r.uri)}">
-        <div class="pv-head">${a.avatar ? `<img class="avatar" src="${esc(a.avatar)}" alt="" loading="lazy">` : ""}
-          <a class="pv-name" href="${esc(profileUrl(a))}" target="_blank" rel="noopener">${esc(a.displayName || a.handle)}</a>
-          <span class="pv-handle">@${esc(a.handle)}</span>
-          <a class="pv-time" href="${esc(postUrl(fake))}" target="_blank" rel="noopener">${isNaN(t) ? "" : esc(fmtAgo(t))}</a></div>
+        ${headHtml(a, { href: postUrl(fake), timeHtml: isNaN(t) ? "" : esc(fmtAgo(t)), avatar: true })}
         <div class="pv-text">${richText(v.text, v.facets)}</div>${inner}
         ${r.cid ? `<div class="actions" data-actions="${esc(r.uri)}">${actionsHtml(fake)}</div>` : ""}
       </div>`;

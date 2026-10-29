@@ -259,3 +259,23 @@ test("with nothing read yet, the like option still fills the row", async () => {
   assert.match(css, /\.choice-pair\s*>\s*\.choice\.hidden\{[^}]*display\s*:\s*none/,
     "a hidden option in the row must take no space");
 });
+
+test("signing out forgets the account's saved feeds", async () => {
+  // The picker is filled once per sign-in. Sign-out used to leave both
+  // state.savedFeeds and the filled <select> behind, so the next person to
+  // sign in on the same computer was shown the previous account's feeds.
+  const page = await h.loadPage({ server: withFeeds({ timeline: [h.item(h.post("A", a, 10))] }) });
+  const names = () => [...page.$("#inFeed").options].map(o => o.textContent).join(" | ");
+  for (let i = 0; i < 100 && !names().includes("For You"); i++) await new Promise(r => setTimeout(r, 20));
+  assert.match(names(), /For You/, "the signed-in account's feeds are listed");
+
+  page.$("#btnSignOut").click();
+  await new Promise(r => setTimeout(r, 50));
+
+  assert.equal(page.eval("state.savedFeeds"), null, "the saved feeds are dropped");
+  assert.equal(page.eval("chosenFeed"), null, "and so is the chosen one");
+  assert.doesNotMatch(names(), /For You|Friends/, "no feed names left in the picker");
+  assert.equal(page.eval('$("#inFeed").dataset.filled'), undefined,
+    "the picker will fill again for the next account");
+  assert.ok(page.visible("viewLogin"));
+});

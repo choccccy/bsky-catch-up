@@ -376,3 +376,19 @@ test("a divider's row span covers its margins, not just its box", async () => {
   // (100 + 18 + 8) / 2px rows = 63, not the 50 the border box alone gives.
   assert.equal(span, "span 63", "the margins have to be in the span");
 });
+
+test("the tiled metrics are handed to the CSS, not written out twice", async () => {
+  // tileCols/tileWidth/setSpan all do arithmetic with these, and a second
+  // copy in the stylesheet is how "Most columns" came to disagree with itself
+  // in 1.1.0. applyLook pushes them, so there is one source for each.
+  const page = await h.loadPage({ settings: TILED, server });
+  const root = page.document.documentElement;
+  assert.equal(root.style.getPropertyValue("--tile-gap"), page.eval("TILE_GAP") + "px");
+  assert.equal(root.style.getPropertyValue("--tile-row"), page.eval("TILE_ROW") + "px");
+  assert.equal(root.style.getPropertyValue("--tile-width"), page.eval("tileWidth()") + "px");
+
+  const css = require("node:fs").readFileSync(h.PAGE_PATH, "utf8");
+  const band = css.match(/:root\[data-tile\] \.band\{[\s\S]*?\}/)[0];
+  assert.match(band, /grid-auto-rows:var\(--tile-row/, "the band reads the row height");
+  assert.match(band, /column-gap:var\(--tile-gap/, "and the gap");
+});
