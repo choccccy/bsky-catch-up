@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.1.6
+  Version 1.1.8
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -110,6 +110,14 @@ HOW IT WORKS (high-level data flow)
                the list at the starting point (date, or start post minus N
                context posts) and, if set, the end point. The result is
                state.view.
+               One filter depends on the feed rather than the posts: "Hide
+               people I follow" (settings.hideFollowed) leaves only accounts
+               you don't already follow, which is what makes a ranked feed
+               like For You all fresh. It needs state.follows, and it is
+               IGNORED on the Following feed, where it would hide everything
+               -- hideFollowedFits / hideFollowedMode are the one definition
+               of that, used by the filter, the drawer (the schema's `needs`),
+               the note above the feed and startCatchup's needFollows.
   6. Render    renderMore() appends state.view to the DOM in batches as the
                user scrolls (infinite scroll downward only). Posts are built
                as HTML strings; every interpolated value goes through esc().
@@ -123,10 +131,14 @@ HOW IT WORKS (high-level data flow)
      A .bleed reaches the two viewport edges by measuring outwards from its
      OWN centre, so it only lands right on a box that is itself centred in the
      window. That holds for anything in the one-column layout, and for the
-     dividers while tiled (they span the whole row). It does NOT hold for a
-     post sitting in one tile, which is why the start post's band has to be
-     scoped back to its column there. Before putting .bleed on anything new,
-     ask whether the thing is centred.
+     dividers while tiled (they span the whole row) and for the start post,
+     whose tile is given a whole row too. It does NOT hold for a post sitting
+     in one tile among others. Before putting .bleed on anything new, ask
+     whether the thing is centred.
+               The action bar's first button follows or unfollows the post's
+               author -- see followBtnHtml and fs(), which keep follow state
+               per AUTHOR the way ps() keeps like and repost state per post,
+               from the author's viewer state or from state.follows.
   7. Position  On scroll, updateClock() finds the top-most visible post,
                updates the header clock/progress strip, and remembers the
                furthest-read post in localStorage ("Resume where I left off").
@@ -247,6 +259,10 @@ TILED MODE ("Tile posts side by side", settings.tile)
     - A reply fused onto the post above it (ctx "joined") goes in the SAME
       .tile, because the grid would otherwise place the two halves of a
       chain apart.
+    - The highlighted start post breaks the band like a divider does: its
+      tile gets .full (grid-column:1/-1) and the band is closed either side,
+      so it has a row to itself. That is what makes its .bleed band correct
+      again -- a full-row box IS centred in the window (see the CSS).
     - Placement is CSS grid's ordinary non-dense auto-flow over 2px rows,
       with each item's row span measured in JS (setSpan, one ResizeObserver
       for everything that changes height later). Non-dense flow never
@@ -277,8 +293,9 @@ TILED MODE ("Tile posts side by side", settings.tile)
   through deliberately, against a real 224-post catch-up in a browser at
   1 / 2 / 4 columns. Checked and SOUND, so don't re-check blind:
     - .bleed on the day and hour dividers: still right, because grid-column
-      1/-1 makes them full-row boxes that ARE centred. Only the anchor post
-      wasn't, and that is scoped now.
+      1/-1 makes them full-row boxes that ARE centred. The anchor post wasn't;
+      1.1.2 scoped its band back to its column, and 1.1.7 instead gave it a
+      full row of its own, which is the same rule as the dividers.
     - every position:sticky and position:fixed. .bar sits outside the feed;
       .day works because the band wrapper is tall (that is what it is for);
       the drawer, scrim, lightbox, lightbox arrows and toast are all fixed to
@@ -316,7 +333,8 @@ FILE LAYOUT
              state; network (netFetch, pacer, xrpc, sign-in); feed items &
              fetching (timeline / rebuild, gather); catch-up links (fragment
              parsing, link settings overlay, share links); starting points &
-             startCatchup; filtering (postKinds, passes); view building
+             startCatchup; filtering (postKinds, passes, hideFollowedMode);
+             view building
              (computeView, arrangeThreads) & rendering (renderMore,
              renderItem, post/action markup, quote-like-state hydration);
              embeds (images, galleries, video, links, quotes, summaries of
@@ -357,9 +375,20 @@ KNOWN LIMITATIONS / THINGS TO VERIFY AGAINST THE LIVE API
     coarse. A 2x display will take the big file for any picture wider than
     ~500 CSS px and pay ~11MB of decoded memory for it; the saving lands on
     1x displays, which is where the slow machines mostly are.
-  - Inline video depends on video.bsky.app allowing cross-origin requests
-    from a file:// page (origin "null"). If it doesn't, videoFailed() shows
-    a link to bsky.app instead.
+  - Inline video needs video.bsky.app to allow cross-origin requests from a
+    file:// page (origin "null"). Measured in 1.1.7: it does -- the master
+    playlist, the variant playlists, the segments and the 302 the segments
+    take to video.cdn.bsky.app all answer "access-control-allow-origin: *".
+    So a failure here is a real playback failure (a video Bluesky hasn't
+    finished transcoding, a dropped connection), not the origin; see
+    attachVideo's recover() for what is tried before giving up.
+  - The follow list is fetched once per session (one request per 100 follows)
+    and never refreshed, so an account followed while the page is open still
+    counts as "not followed" by "Hide people I follow", and as not-followed by
+    the reply rule, until the page is reloaded. That includes following or
+    unfollowing with the button in the action bar: it is real and reaches
+    Bluesky at once, but this catch-up goes on showing what it was already
+    showing, by design (see toggleFollow).
   - Rebuild mode re-implements the Following feed's reply rule ("only show
     replies to people I follow") and skips muted accounts itself; it does not
     apply muted words or list-based moderation.
@@ -374,11 +403,20 @@ EXTENDING
     absent means it is only read when needed. Add link: true only if the
     setting describes the catch-up (what's shown and how), not the
     visitor's own setup.
+  - A setting that only applies to some feeds: give it needs() and needsWhy in
+    SETTINGS_SCHEMA so the drawer greys it out and says why, AND make the code
+    that reads it fall back to the default on a feed it doesn't fit (see
+    hideFollowedMode). The drawer alone isn't enough: saved settings and
+    catch-up links can both arrive with it already on.
   - New embed type: add a case to embedHtml() (and quoteHtml() for records),
     to postKinds() so the "Only show posts with" filter knows it, and to
     rawMedia()/mediaLabels() so deeply nested posts can summarize it.
   - New post action: add a button in actionsHtml() with data-act="...", then
-    handle it in the delegated document click listener.
+    handle it in the delegated document click listener. An action on the
+    AUTHOR rather than the post carries its own id on the button instead of
+    relying on the enclosing [data-uri] -- see data-follow and refreshFollow.
+    If it writes to the user's repo, go through createConfirmedRecord /
+    deleteOwnRecord rather than calling createRecord yourself.
   - NEVER write a setting's default value a second time. A fallback belongs in
     DEFAULTS and nowhere else: read numbers through numSetting("key"), which
     takes the fallback from DEFAULTS, rather than writing
@@ -532,6 +570,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.1.8] - 2026-10-28
+
+### Added
+
+- "Hide people I follow", in Settings under "What's in the feed". Feeds like
+  Discover or For You mix accounts you don't follow in with ones you do, and
+  the ones you do are what you'd see in your Following feed anyway -- so this
+  leaves them out and what remains is all fresh. Three choices: off, "their
+  posts", or "their posts and their reposts" as well, for when you'd rather not
+  see what someone you follow has shared either. It needs the list of accounts
+  you follow, which is loaded for you (and, if you switch the filter on halfway
+  through a catch-up, fetched there and then).
+  It does nothing on your own Following feed, where every post is from someone
+  you follow and hiding them would leave an empty page: there the setting is
+  greyed out with a line saying why, and a value that arrives from a saved
+  setting or a shared link is ignored rather than emptying the feed. While it's
+  on, a note above the feed says so and how many posts it's holding back, with
+  a button to show everyone again. It travels in catch-up links as
+  `&s.hideFollowed=posts` (or `=all`).
+- A **Follow button**, first in the row of buttons under every post -- reposts
+  and quoted posts included, so there's one place to look for it. It says which
+  way round it is rather than coming and going: an outline when you don't
+  follow someone, filled in when you do, and pressing it does the other thing.
+  So the stranger a repost just introduced you to is one press away, and so is
+  unfollowing someone whose post has reminded you why you'd rather not.
+  It asks first, with a small menu, the way reposting does -- both directions,
+  since the two buttons sit side by side and a mis-aimed press shouldn't be a
+  silent unfollow. "Ask before following" in Settings turns that off.
+  Following or unfollowing doesn't change what this catch-up is showing you:
+  the list of people you follow is read when it starts, and that is what "Hide
+  people I follow" and the reply rule go on using until you load the page
+  again. The follow itself reaches Bluesky immediately.
+
+## [1.1.7] - 2026-10-28
+
+### Fixed
+
+- Videos gave up far too easily. A video player reports a problem as either
+  "I can recover from this" or "fatal", and this page treated every fatal one
+  as the end: a single stretch of bad network, a stalled buffer, or a video
+  Bluesky hadn't finished processing yet, and the post turned into a black box
+  saying "This video couldn't play here" for as long as you were reading. It
+  now does what a video player is supposed to do -- start the download again
+  after a network error, rebuild the picture after a media error, twice each
+  -- and a stretch that plays fine clears the count, so two unlucky moments an
+  hour apart don't add up. If it really can't play, the message now offers
+  "Try again" next to the link out to bsky.app, and what went wrong is written
+  to the browser console. (For the record: Bluesky's video servers were never
+  the problem. They allow this page to play their videos from anywhere,
+  including a copy saved to your own disk, which the file used to doubt.)
+- In Safari and on iOS, a video scrolling out of sight marked itself as
+  broken. Freeing a video's memory ends with the browser complaining that the
+  video has no source any more, and the page was listening to that complaint
+  as though the video had failed -- so scrolling back up found a dead box
+  where a thumbnail should have been.
+
+### Changed
+
+- "Load newer posts" is now "Load N more" when you asked for the most recent
+  posts rather than everything since a time. That mode exists for feeds like
+  For You, which rank posts instead of ordering them by time -- where asking
+  for "anything newer than the newest post I have" almost always came back
+  with "No newer posts yet", because the feed doesn't work that way. The
+  button now reads further down the feed instead and adds what it finds above
+  what you've already read, keeping your place; posts the feed has newly
+  ranked to the top come along too. When there's nothing more, it says so.
+- The start post, which is drawn as a full-width coloured band, now breaks the
+  columns while posts are tiled side by side, the way day and hour markers
+  already do. It takes a row of its own, with its band reaching both edges of
+  the window again, instead of sitting in one column with the band cropped to
+  that column's width.
 
 ## [1.1.6] - 2026-10-28
 
@@ -1375,7 +1485,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v1.1.6 · Bluesky</title>
+<title>Catch-up v1.1.8 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -1568,14 +1678,15 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 :root[data-whole][data-tile] .hour{max-width:100%; margin-inline:0}
 /* The start post's highlight band is a .bleed, which reaches both viewport
    edges by measuring outwards from its OWN centre. That only lands right on a
-   box that is itself centred in the window -- the day and hour dividers, which
-   span the whole row (grid-column:1/-1) and so still are. An anchor post is
-   one grid item in one column, half a column off centre, so the same rule
-   painted its band clear across the window; and isolation:isolate keeps the
-   z-index:-1 inside the post's own stacking context, so it covered the posts
-   in the column beside it instead of sliding behind them. Tiled, the band is
-   its own column's width. */
-:root[data-tile] .tile .post.anchor::before{left:0; right:0}
+   box that is itself centred in the window. A day or hour divider is, because
+   it spans the whole row (grid-column:1/-1) -- and so, now, is the start post:
+   renderMore gives its tile .full and closes the band either side, so it gets
+   a row to itself and nothing sits beside it. The band is therefore allowed
+   the full window again, as it is untiled. The card inside keeps the reading
+   measure and is centred in that row (the same thing :root[data-whole] .hour
+   does), so a four-column window doesn't stretch the post's text across it. */
+:root[data-tile] .tile.full{grid-column:1 / -1}
+:root[data-tile] .tile.full .post.anchor{max-width:var(--col); margin-inline:auto}
 :root[data-tile-wide] .tile.wide{grid-column:span 2}
 /* ---------- panels and forms (login, start, progress screens) ---------- */
 .panel{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:20px; box-shadow:var(--shadow)}
@@ -1650,7 +1761,10 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
    .post uses content-visibility:auto so off-screen posts skip rendering work;
    this is what keeps very long feeds smooth. */
 .feed-head{font-size:.9em; color:var(--muted); margin:0 4px 12px; overflow-wrap:anywhere}
-.feed-head .linkbtn{background:none; border:0; padding:0; margin-left:6px; color:var(--accent); cursor:pointer; font:inherit; text-decoration:underline}
+/* A button that reads as a link. Shared, so the video fallback's "Try again"
+   sits beside its bsky.app link without looking like a form control. */
+.linkbtn{background:none; border:0; padding:0; color:inherit; cursor:pointer; font:inherit; text-decoration:underline}
+.feed-head .linkbtn{margin-left:6px; color:var(--accent)}
 /* Filter notice above the feed when "Only show posts with" is active. */
 .filter-note{display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--surface); border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:8px; padding:6px 10px; margin:0 0 12px; font-size:.9em}
 .filter-note .btn{padding:3px 10px; font-size:.9em}
@@ -1770,11 +1884,14 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .act svg{width:17px; height:17px}
 .act.liked{color:var(--like)}
 .act.reposted{color:var(--repost)}
+/* Following an author you don't already follow: first in the bar on every
+   post, and marked once it's done (clicking it again unfollows). */
+.act.follow.on{color:var(--accent)}
 .act.busy{opacity:.5; pointer-events:none}
 /* A like/repost waiting for Bluesky to confirm it (see toggleRecord). */
-.act.pending{pointer-events:none; animation:pending-pulse 1s ease-in-out infinite}
+.act.pending, .follow.pending{pointer-events:none; animation:pending-pulse 1s ease-in-out infinite}
 @keyframes pending-pulse{50%{opacity:.35}}
-@media (prefers-reduced-motion: reduce){ .act.pending{animation:none; opacity:.5} }
+@media (prefers-reduced-motion: reduce){ .act.pending, .follow.pending{animation:none; opacity:.5} }
 .act.right{margin-left:auto}
 
 /* ---------- embeds (images, link cards, video, quotes) ---------- */
@@ -1867,7 +1984,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 /* GIF videos (presentation "gif"): no controls, so a small badge says what it is. */
 .gif-badge{position:absolute; left:8px; bottom:8px; background:rgba(0,0,0,.65); color:#fff; font-size:.72em; font-weight:700; padding:1px 6px; border-radius:4px; pointer-events:none}
 .video.is-gif video{cursor:pointer}
-.video-fail a{color:#fff}
+.video-fail a, .video-fail .linkbtn{color:#fff}
 .blurwrap{position:relative; border-radius:10px; overflow:hidden}
 .blurwrap.blurred > .blur-inner{filter:blur(28px); pointer-events:none}
 .blur-cover{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.25)}
@@ -1921,7 +2038,12 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
    dimmed while it isn't in effect. The control is disabled too, in
    renderDrawer and syncDependents. */
 .set.sub-set{margin-left:3px; padding-left:14px; border-left:2px solid var(--line)}
-.set.sub-set.off{opacity:.45}
+/* .off dims a row that isn't in effect, whether that's a `when` parent or a
+   `needs` test on the feed being read. The reason for a `needs` row is printed
+   in its own box UNDER the row, not inside it: opacity makes a group its
+   children can't escape, so a reason inside the row would be dimmed too. */
+.set.off{opacity:.45}
+.set-why{font-size:.8em; color:var(--muted); padding:0 0 8px}
 /* A setting you've moved off its default gets a dot beside its name, so what
    you've changed is visible without having to remember the defaults. The
    group summaries count these. */
@@ -2123,6 +2245,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
   <!-- Feed -->
   <section class="hidden" id="viewFeed">
     <div class="filter-note hidden" id="filterNote"></div>
+    <div class="filter-note hidden" id="followNote"></div>
     <div class="feed-head" id="feedHead"></div>
     <div id="feed"></div>
     <div class="sentinel" id="sentinel"></div>
@@ -2142,7 +2265,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.1.6";
+const APP_VERSION = "1.1.8";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -2192,6 +2315,8 @@ const ICON = {
   link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>',
   open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>',
   play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8z"/></svg>',
+  follow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/></svg>',
+  following: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M16 11l2 2 4-4"/></svg>',
 };
 
 /* ============================== settings ============================== */
@@ -2211,8 +2336,8 @@ function defaultPreloadVideos() {
    load time, so adding a new key here is backwards-compatible. */
 const DEFAULTS = {
   theme: "system", fontSize: 16, columnWidth: 640, tile: false, tileMax: 2, timeFormat: "absolute", dayDividers: true, hourDividers: true, showCounts: true,
-  showReposts: true, replies: "followed", showQuotes: true, onlyTypes: [], replyContext: "reminder", collapseRepeats: true, showOwn: true,
-  sensitive: "blur", videoMode: "click", gifMode: "auto", preloadVideos: defaultPreloadVideos(), confirmRepost: true, galleryProxy: true, galleryProxyHost: "xbsky.app",
+  showReposts: true, replies: "followed", showQuotes: true, onlyTypes: [], replyContext: "reminder", collapseRepeats: true, showOwn: true, hideFollowed: "off",
+  sensitive: "blur", videoMode: "click", gifMode: "auto", preloadVideos: defaultPreloadVideos(), confirmRepost: true, confirmFollow: true, galleryProxy: true, galleryProxyHost: "xbsky.app",
   wholeImages: "app", mediaWidth: 1, wholeAlt: true, wholeVideo: true, wholeLinkThumbs: true,
   contextCount: 12, scrollTo: "anchor", trackPosition: true, fetchMethod: "auto",
   concurrency: 6, rpm: 500, batchSize: 150,
@@ -2302,6 +2427,14 @@ const POST_KINDS = [["images", "Images (1–4)"], ["gallery", "Galleries (5+)"],
                        greyed out (and its control disabled) while it doesn't
                        apply; see .set.sub-set / .off, renderDrawer and
                        syncDependents.
+   - needs / needsWhy  needs() says whether the setting means anything for the
+                       feed being read (or the one picked on the start screen);
+                       while it doesn't, the row is greyed out and disabled and
+                       needsWhy is printed under it as .set-why. Like `when`
+                       but NOT indented: what it depends on isn't another
+                       setting. The filter itself must ALSO ignore itself in
+                       that case (see hideFollowedMode), because a saved value
+                       or a catch-up link can arrive with it already on.
    A {group: "Name"} entry starts a new group. Each group renders as a
    <details> that is CLOSED when the drawer opens: there are a lot of settings
    here and showing them all at once is a wall of controls. Any setting whose
@@ -2330,6 +2463,10 @@ const SETTINGS_SCHEMA = [
     options: [["reminder", "Short reminder (full post if not seen yet)"], ["full", "Full post above every reply"], ["moveLater", "Move thread to its latest reply"], ["moveUp", "Move replies up under their post"], ["none", "Just “Replying to @name”"]], apply: "render" },
   { key: "collapseRepeats", link: true, label: "Show each post only once", sub: "Hides later reposts of something already in the feed", type: "bool", apply: "render" },
   { key: "showOwn", link: true, label: "My own posts and reposts", type: "bool", apply: "render" },
+  { key: "hideFollowed", link: true, label: "Hide people I follow", sub: "For a feed that mixes in accounts you don't follow \u2014 Discover, For You, a list. What you'd see in your Following feed anyway is left out, so what's left is fresh.", type: "select",
+    options: [["off", "Off"], ["posts", "Their posts"], ["all", "Their posts and their reposts"]],
+    needs: () => hideFollowedFits(feedInQuestion()),
+    needsWhy: "Your Following feed is nothing but posts from people you follow, so there would be nothing left. This applies to a custom feed or a list.", apply: "render" },
   { key: "sensitive", link: true, label: "Adult or graphic media", type: "select", options: [["blur", "Blur"], ["show", "Show"], ["hide", "Hide the post"]], apply: "render" },
   { group: "Media and actions" },
   { key: "wholeImages", link: true, label: "Show images whole", sub: "The Bluesky app crops pictures to squares and hides most of a gallery. \u201cShow them whole\u201d gives every picture its own shape, and lets posts with pictures be wider than the text column.", type: "select",
@@ -2342,6 +2479,7 @@ const SETTINGS_SCHEMA = [
   { key: "gifMode", link: true, label: "GIFs", sub: "Bluesky turns uploaded GIFs into short silent videos; these loop like GIFs. If your system asks for reduced motion, they always wait for a click.", type: "select", options: [["auto", "Play automatically"], ["click", "Click to play"]], apply: "render" },
   { key: "preloadVideos", link: true, label: "Videos to preload ahead", sub: "Buffers the first few seconds of the next videos so they start instantly when you press play. 0 turns this off.", type: "number", min: 0, max: 10, apply: "videos" },
   { key: "confirmRepost", link: true, label: "Ask before reposting", sub: "Shows a small menu instead of reposting on one click", type: "bool" },
+  { key: "confirmFollow", link: true, label: "Ask before following", sub: "Shows a small menu instead of following on one click. Unfollowing asks the same way.", type: "bool" },
   { key: "galleryProxy", link: true, label: "Copy gallery links via an embed proxy", sub: "Bluesky's own link previews don't show galleries. When on, “Copy link” on gallery posts uses the proxy below instead of bsky.app.", type: "bool" },
   { key: "galleryProxyHost", link: true, label: "Embed proxy for gallery links", sub: "The site that replaces bsky.app in copied links, e.g. xbsky.app. Leave empty to use bsky.app.", type: "text", placeholder: "xbsky.app" },
   { group: "Catching up" },
@@ -2474,11 +2612,13 @@ const state = {
   clockTop: 0,         // which post the header is currently describing
   anchorKey: null,
   anchorViewIdx: -1,
+  hiddenFollowed: 0,      // posts the follow filter dropped on the last pass
   contextStartKey: null,
   savedFeeds: null,       // the account's saved feeds, once loaded (loadSavedFeeds)
   run: null,              // {kind, startT, anchor, fetchedAt, method, note}
   abort: null,
   postState: new Map(),   // uri -> {post, like, repost, likeCount, repostCount}
+  authors: new Map(),     // did -> {follow, wasStranger, busy}: follow state, see fs()
   maxRead: null,
   stats: { requests: 0 },
 };
@@ -2665,9 +2805,11 @@ async function login(handle, password, remember) {
    are not ours to clear; "Forget my reading position" in Settings does that.) */
 function forgetAccount() {
   state.session = null; state.profile = null;
+  followsAbort?.abort();
   state.follows = new Map();
+  state.hiddenFollowed = 0;
   state.items = []; state.view = []; state.rendered = 0;
-  state.postState = new Map(); hydrateQueue.clear();
+  state.postState = new Map(); state.authors = new Map(); hydrateQueue.clear();
   state.savedFeeds = null; state.run = null; state.maxRead = null;
   chosenFeed = null;
   // The picker is filled once per sign-in (its data-filled marker), so it has
@@ -2742,6 +2884,26 @@ async function loadFollows(signal, onProgress) {
   } while (cursor && (r.follows || []).length);
   state.follows = m;
 }
+/* Loads the follow list in the middle of a catch-up, for the one setting that
+   can start needing it after the fetch is over: "Hide people I follow" turned
+   on over a custom feed, which startCatchup had no reason to load it for. Until
+   it arrives the filter hides nothing, so the note above the feed says what is
+   happening rather than leaving the feed quietly unchanged. One load at a time,
+   and signing out cancels it (forgetAccount) so it can't refill the follows of
+   an account that has just been forgotten. */
+let followsPending = false, followsAbort = null;
+async function ensureFollows() {
+  if (state.follows.size || followsPending || !state.session) return;
+  followsPending = true;
+  followsAbort = new AbortController();
+  updateFeedHead();
+  try { await loadFollows(followsAbort.signal); }
+  catch (e) { if (!isAbort(e)) showBanner("Couldn't load the accounts you follow: " + (e.message || e)); }
+  finally { followsPending = false; followsAbort = null; }
+  if (!state.session) return;
+  if (state.run && viewing("feed")) buildView({ fresh: false, keepPosition: true });
+  else updateFeedHead();
+}
 
 /* Which feed a catch-up reads:
      {kind:"timeline"}                     the Following feed (the default,
@@ -2751,6 +2913,19 @@ async function loadFollows(signal, onProgress) {
    All three return app.bsky.feed.defs#feedViewPost, the same shape, so only
    the request differs -- everything downstream is untouched. */
 const FOLLOWING = { kind: "timeline", name: "Following" };
+/* Does "Hide people I follow" mean anything on this feed? Your Following feed
+   -- and a rebuild of it, which is built FROM your follow list -- is nothing
+   but posts from people you follow, so there the filter would empty the page.
+   gather() only ever rebuilds a timeline source (canRebuild), so this one test
+   covers both. */
+const hideFollowedFits = src => (src || FOLLOWING).kind !== "timeline";
+/* The feed the filter and the drawer are talking about: the one being read,
+   else the one picked on the start screen (chosenFeed; null = Following). */
+const feedInQuestion = () => state.run?.feed || chosenFeed || FOLLOWING;
+/* The filter's mode here, "off" wherever it doesn't fit. That is what makes a
+   value arriving from saved settings or a catch-up link harmless on Following,
+   as well as greying the row out in the drawer. */
+const hideFollowedMode = () => hideFollowedFits(feedInQuestion()) ? settings.hideFollowed : "off";
 function feedQuery(src) {
   if (src?.kind === "feed") return ["app.bsky.feed.getFeed", { feed: src.uri }];
   if (src?.kind === "list") return ["app.bsky.feed.getListFeed", { list: src.uri }];
@@ -3277,7 +3452,8 @@ async function startCatchup(kind, value, end = null, feed = null) {
     // The follow list is only needed to decide which replies to show, and to
     // rebuild the Following feed when the timeline runs out. Loading it for a
     // custom feed with another reply setting is a lot of requests for nothing.
-    const needFollows = settings.replies === "followed" || (src.kind === "timeline" && settings.fetchMethod !== "timeline");
+    const needFollows = settings.replies === "followed" || (src.kind === "timeline" && settings.fetchMethod !== "timeline")
+      || (settings.hideFollowed !== "off" && hideFollowedFits(src));
     if (needFollows && !state.follows.size) {
       setProgress({ stage: "Loading the accounts you follow…" });
       await loadFollows(signal, n => setProgress({ stats: `${n.toLocaleString()} accounts` }));
@@ -3287,7 +3463,7 @@ async function startCatchup(kind, value, end = null, feed = null) {
     const fetchedAt = Date.now();
     const g = await gather(src, until, max, signal, "Loading posts");
     state.items = mergeItems(g.items);
-    state.postState = new Map(); hydrateQueue.clear();
+    state.postState = new Map(); state.authors = new Map(); hydrateQueue.clear();
     state.run = { kind, startT, anchor, end: endPoint, fetchedAt, method: g.method, note: g.note, feed: src, max };
     state.maxRead = null;
     show("feed");
@@ -3321,6 +3497,36 @@ async function fetchNewer() {
     toast(added ? `${added.toLocaleString()} newer ${plural(added, "post")} added below` : "No newer posts yet");
   } catch (e) {
     if (!isAbort(e)) toast(e.message || "Couldn't load newer posts");
+    updateEndcap();
+  } finally { state.abort = null; }
+}
+
+/* "Load N more" at the bottom of a "most recent posts" catch-up. Reading by
+   time means nothing on a ranked feed (that is the whole reason this mode
+   exists), so the useful move at the end is to go DEEPER into the ranking
+   rather than to look for anything newer.
+   It re-reads the feed from the top asking for one batch more than we hold:
+   no cursor to keep or go stale, posts already held are dropped by key, and
+   anything the feed has newly ranked to the top comes along for free. The
+   cost is re-paging what we already have (100 posts a request).
+   The extra posts are further down the feed, so in the oldest-first view they
+   land ABOVE what you've read -- hence keepPosition rather than append. */
+async function fetchMoreRecent() {
+  if (!state.run || state.abort) return;
+  const ac = new AbortController(); state.abort = ac;
+  const btn = $("#btnMore"); if (btn) { btn.disabled = true; btn.textContent = "Loading more posts\u2026"; }
+  try {
+    const fetchedAt = Date.now();
+    const g = await gather(state.run.feed || FOLLOWING, 0, state.items.length + state.run.max, ac.signal, "Loading more posts");
+    const before = state.view.length;
+    state.items = mergeItems(state.items, g.items);
+    state.run.fetchedAt = fetchedAt;
+    buildView({ fresh: false, keepPosition: true });
+    const added = Math.max(0, state.view.length - before);
+    if (added) toast(`${added.toLocaleString()} more ${plural(added, "post")} added above`);
+    else { state.run.atEnd = true; updateEndcap(); toast("This feed doesn't go back any further"); }
+  } catch (e) {
+    if (!isAbort(e)) toast(e.message || "Couldn't load more posts");
     updateEndcap();
   } finally { state.abort = null; }
 }
@@ -3382,8 +3588,10 @@ function postKinds(p) {
    list, used by "Show each post only once" (first occurrence wins).
    Reply rule in "followed" mode: show a reply only if the post it replies to
    is by you, by the replier themself (a thread), or by someone you follow.
-   Replies that arrive as REPOSTS are always kept (someone chose to share it). */
-function passes(it, seen) {
+   Replies that arrive as REPOSTS are always kept (someone chose to share it).
+   `tally` is optional and counts what the follow filter dropped, for the note
+   above the feed; computeView passes one, and nothing else needs to. */
+function passes(it, seen, tally) {
   const fi = it.fi, p = fi.post; if (!p?.author) return false;
   const rep = isRepost(fi);
   const av = p.author.viewer || {};
@@ -3393,6 +3601,16 @@ function passes(it, seen) {
   if (rep && !settings.showReposts) return false;
   const actor = rep ? fi.reason.by?.did : p.author.did;
   if (actor === me() && !settings.showOwn) return false;
+  // "Hide people I follow": drop a post by someone you follow (whoever brought
+  // it into the feed), and in "all" mode anything they reposted as well. Off
+  // where it would empty the page -- see hideFollowedMode. An empty
+  // state.follows hides nothing, which is why ensureFollows exists.
+  const hf = hideFollowedMode();
+  if (hf !== "off" && (state.follows.has(p.author.did)
+      || (hf === "all" && rep && state.follows.has(fi.reason.by?.did)))) {
+    if (tally) tally.followed++;
+    return false;
+  }
   if (p.record?.reply && !rep) {
     if (settings.replies === "off") return false;
     if (settings.replies === "followed") {
@@ -3516,7 +3734,12 @@ function keepReadingSpot() {
    Also records anchorKey / anchorViewIdx / contextStartKey / itemByKey. */
 function computeView() {
   const seen = new Set();
-  const vis = state.items.filter(it => passes(it, seen));
+  // The follow filter's count is of everything FETCHED for this catch-up, which
+  // in post/resume mode reaches CONTEXT_WINDOW before the start point, so the
+  // note says "hidden" rather than claiming a number for the window on screen.
+  const tally = { followed: 0 };
+  const vis = state.items.filter(it => passes(it, seen, tally));
+  state.hiddenFollowed = tally.followed;
   const run = state.run; let startIdx = 0, anchorIdx = -1;
   if (run.anchor) {
     anchorIdx = vis.findIndex(it => it.fi.post.uri === run.anchor.uri && it.t >= run.anchor.t - 1000);
@@ -3726,12 +3949,19 @@ function renderMore() {
     }
     const el = renderItem(it, i, ctx);
     if (ctx === "joined") state.prevEl?.classList.add("has-next");
+    // The highlighted start post is full width, so tiled it breaks the band
+    // the way a divider does: its own band, its own row, nothing beside it.
+    // (A reply can never be fused into its tile -- "joined" excludes the
+    // anchor on both sides -- so the tile always holds exactly one post.)
+    const alone = tiled && it.key === state.anchorKey;
+    if (alone) state.band = null;
     if (!tiled) frag.append(el);
     else if (ctx === "joined" && state.tile) state.tile.append(el);
     else {
-      const t = document.createElement("div"); t.className = "tile";
+      const t = document.createElement("div"); t.className = "tile" + (alone ? " full" : "");
       t.append(el); state.tile = t; addBlock(t);
     }
+    if (alone) { state.band = null; state.tile = null; }
     // A post with media may take two columns (whole-image mode); the grid
     // clamps that back to one when only one column exists.
     if (tiled && state.tile && el.classList.contains("has-media")) state.tile.classList.add("wide");
@@ -3770,18 +4000,40 @@ function updateFeedHead() {
     const { url, count } = buildShareLink(true);
     copyText(url).then(ok => toast(!ok ? "Couldn't copy the link" : count ? `Link copied with ${count} ${plural(count, "setting")}` : "Link copied (all your settings are the defaults)"));
   };
-  // Make an active type filter impossible to forget about.
-  const note = $("#filterNote");
+  // Make a filter that's quietly holding posts back impossible to forget about.
   if (settings.onlyTypes?.length) {
     const names = POST_KINDS.filter(([v]) => settings.onlyTypes.includes(v)).map(([, l]) => l.toLowerCase()).join(", ");
-    note.innerHTML = `<span>Showing only posts with: <strong>${esc(names)}</strong></span><button class="btn" type="button" id="btnClearTypes">Show everything</button>`;
-    note.classList.remove("hidden");
-    $("#btnClearTypes").onclick = () => {
-      setSetting("onlyTypes", []);
-      if (!isHidden("#drawer")) renderDrawer();
-      buildView({ fresh: false, keepPosition: true });
-    };
-  } else note.classList.add("hidden");
+    setFilterNote("#filterNote", `Showing only posts with: <strong>${esc(names)}</strong>`,
+      "Show everything", () => turnFilterOff("onlyTypes", []));
+  } else setFilterNote("#filterNote", null);
+  // The follow filter, with how much it is holding back. While the follow list
+  // is still on its way it hides nothing, so say that instead of offering a
+  // count of nought.
+  const hidden = state.hiddenFollowed;
+  if (followsPending) setFilterNote("#followNote", "Looking up the accounts you follow\u2026", null, null);
+  else if (hideFollowedMode() !== "off") {
+    setFilterNote("#followNote", `Showing only accounts you don't follow${hidden ? ` (${hidden.toLocaleString()} ${plural(hidden, "post")} hidden)` : ""}`,
+      "Show everyone", () => turnFilterOff("hideFollowed", "off"));
+  } else setFilterNote("#followNote", null);
+}
+/* One of the notes above the feed: a sentence (trusted HTML, so every value in
+   it goes through esc() at the call site) and optionally a button that turns
+   the filter off -- or hidden, when the filter isn't on. Both filters that can
+   quietly hold posts back say their piece through here. */
+function setFilterNote(sel, html, btnLabel, onClick) {
+  const note = $(sel);
+  if (!html) { note.classList.add("hidden"); note.innerHTML = ""; return; }
+  note.innerHTML = `<span>${html}</span>` + (btnLabel ? `<button class="btn" type="button" data-note-btn="1">${esc(btnLabel)}</button>` : "");
+  note.classList.remove("hidden");
+  const btn = note.querySelector("[data-note-btn]");
+  if (btn) btn.onclick = onClick;
+}
+/* The "show me everything again" button on those notes: back to the default,
+   the open drawer brought in step with it, and the feed rebuilt where it is. */
+function turnFilterOff(key, value) {
+  setSetting(key, value);
+  if (!isHidden("#drawer")) renderDrawer();
+  buildView({ fresh: false, keepPosition: true });
 }
 /* Bottom-of-feed block with "caught up to" time and the Load newer posts button. */
 function updateEndcap() {
@@ -3798,6 +4050,17 @@ function updateEndcap() {
       state.run.end = null; buildView({ fresh: false, append: true }); updateClock();
       try { history.replaceState(null, "", "#" + catchupFragment() + overlayParams()); } catch {}   // address drops the end too
     };
+    return;
+  }
+  // "Most recent N posts" mode: see fetchMoreRecent for why the useful button
+  // here reads deeper into the feed instead of looking for newer posts.
+  if (state.run.kind === "recent") {
+    const n = state.view.length;
+    const more = state.run.atEnd
+      ? `<div>This feed doesn't go back any further.</div>`
+      : `<button class="btn primary" id="btnMore" type="button">Load ${state.run.max.toLocaleString()} more</button>`;
+    e.innerHTML = `${empty}<div>That's all ${n.toLocaleString()} ${plural(n, "post")}, as of ${esc(fmtClock(state.run.fetchedAt))}.</div>${more}`;
+    if (!state.run.atEnd) $("#btnMore").onclick = fetchMoreRecent;
     return;
   }
   e.innerHTML = `${empty}<div>You're caught up to ${esc(fmtClock(state.run.fetchedAt))}.</div><button class="btn primary" id="btnNewer" type="button">Load newer posts</button>`;
@@ -3921,6 +4184,54 @@ function ps(p) {
   return s;
 }
 
+/* Shared follow state for an AUTHOR (not a post), the way ps() does for posts:
+     follow   the URI of OUR app.bsky.graph.follow record if you follow them,
+              null if you don't, "pending" while one is being created, or
+              "unknown" for "you follow them, but nothing has told us which
+              record says so" (see toggleFollow, which resolves it).
+   Seeded from TWO places, because either can be missing: the author's own
+   viewer state (what the feed said about them) and state.follows, the follow
+   list this catch-up loaded. A feed entry can arrive with no viewer state at
+   all, and then the follow list is what we know; the follow list isn't always
+   loaded (see needFollows), and then the viewer state is. Being in either one
+   means you already follow them. */
+function fs(a) {
+  let s = state.authors.get(a.did);
+  if (!s) {
+    const uri = a.viewer?.following || state.follows.get(a.did)?.viewer?.following || null;
+    s = { follow: uri || (state.follows.has(a.did) ? "unknown" : null), busy: false };
+    state.authors.set(a.did, s);
+  }
+  return s;
+}
+/* Whether to offer a Follow button for this author. Every post gets one, the
+   same button in the same place whether you follow them or not -- an interface
+   that changes shape from post to post is a worse thing than a button you
+   sometimes don't need, and it is the only way to unfollow from here.
+   Never for yourself, and never on a guess: with no viewer state AND no follow
+   list there is nothing to say which way round the button should be, and
+   drawing "Follow" at someone you already follow would be a lie. A block
+   either way is Bluesky's business, not a button's. */
+function canFollow(a) {
+  if (!a?.did || !state.session || a.did === me()) return false;
+  if (!a.viewer && !state.follows.size) return false;
+  const v = a.viewer || {};
+  return !(v.blocking || v.blockedBy || v.blockingByList);
+}
+/* The Follow button, first in the action bar -- the same place on every post,
+   reposts and quoted posts included, so there is one thing to look for, and it
+   says which way round it is rather than appearing and disappearing.
+   data-follow carries the DID, because this action belongs to the author
+   rather than to the post it sits on (refreshFollow finds every copy by it).
+   Icon only, like the rest of the bar; the words are in the tooltip and for
+   screen readers. */
+function followBtnHtml(a) {
+  if (!canFollow(a)) return "";
+  const s = fs(a), on = !!s.follow, pending = s.follow === "pending";
+  const what = on ? `Following @${a.handle}` : `Follow @${a.handle}`;
+  return `<button class="act follow${on ? " on" : ""}${pending ? " pending" : ""}" type="button" data-act="follow" data-follow="${esc(a.did)}"
+    title="${esc(pending ? "Saving\u2026" : on ? `Unfollow @${a.handle}` : what)}" aria-label="${esc(what)}">${on ? ICON.following : ICON.follow}</button>`;
+}
 /* Copies authoritative viewer state and counts from a full post view. */
 function applyServerState(s, p) {
   s.like = p.viewer?.like || null; s.repost = p.viewer?.repost || null;
@@ -3985,7 +4296,7 @@ function actionsHtml(p) {
   // Pending: a like/repost being created, waiting for Bluesky's confirmation.
   const pend = f => (s[f] === "pending" ? " pending" : "");
   const waitTitle = s.unavailable ? "This post isn't available" : "Checking whether you've already liked or reposted this…";
-  return `
+  return `${followBtnHtml(p.author || {})}
     <a class="act" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Reply on bsky.app">${ICON.reply}${c(s.replyCount)}</a>
     <button class="act${s.repost ? " reposted" : ""}${wait}${pend("repost")}" type="button" data-act="repost" title="${s.repost === "pending" ? "Saving…" : s.hydrated ? (s.repost ? "Undo repost" : "Repost") : waitTitle}">${ICON.repost}${c(s.repostCount)}</button>
     <button class="act${s.like ? " liked" : ""}${wait}${pend("like")}" type="button" data-act="like" title="${s.like === "pending" ? "Saving…" : s.hydrated ? (s.like ? "Unlike" : "Like") : waitTitle}">${s.like ? ICON.liked : ICON.like}${c(s.likeCount)}</button>
@@ -4480,19 +4791,40 @@ function embedHtml(e, p, depth) {
      unloaded     back to placeholder: player destroyed, buffered data freed.
                   Happens when a box scrolls well out of range, or when a
                   paused, preloaded box is no longer among the nearest N.
-     failed       couldn't play (e.g. blocked request); shows a bsky.app link.
+     failed       couldn't play, and recovery was spent or pointless; shows
+                  "Try again" (videoRetry, back to placeholder) and a
+                  bsky.app link.
    Per-box JS properties: _video (<video>), _hls (hls.js instance),
    _placeholder (original HTML, for unloading), _preloaded (true while the
-   player exists only because of preloading, i.e. never played). */
+   player exists only because of preloading, i.e. never played), _recovers
+   (fatal errors recovered from so far) and _onError (the native path's error
+   listener, so teardown can take it off again). */
 function videoFailed(box) {
-  box.innerHTML = `<div class="video-fail">This video couldn't play here. <a href="${esc(box.dataset.href)}" target="_blank" rel="noopener">Watch it on bsky.app</a></div>`;
+  // Keep whatever the box held (thumbnail + play button) so "Try again" has
+  // something to put back. attachVideo normally saves it; the no-player path
+  // fails before it gets that far.
+  if (box._placeholder == null) box._placeholder = box.innerHTML;
+  box.innerHTML = `<div class="video-fail">This video couldn't play here. <button type="button" class="linkbtn" data-act="retry">Try again</button> &middot; <a href="${esc(box.dataset.href)}" target="_blank" rel="noopener">Watch it on bsky.app</a></div>`;
   box.dataset.failed = "1";
+}
+/* "Try again" after a failure: back to the placeholder, counters cleared, as
+   if the box had never been touched. Worth offering because most of what
+   reaches videoFailed is a bad minute rather than a bad video. */
+function videoRetry(box) {
+  delete box.dataset.failed;
+  box._recovers = null;
+  box.innerHTML = box._placeholder || "";
+  box._placeholder = null;
+  schedulePreload();
 }
 /* Buffer sizes in seconds. While merely preloaded we keep the buffer small so
    preloading a few videos stays cheap; once playback starts it's raised to a
    normal streaming buffer. (hls.js reads its config live, so changing these
    on an existing instance takes effect on its next buffering decision.) */
 const PRELOAD_BUFFER_S = 6, PLAYING_BUFFER_S = 30;
+/* How many times a player may be recovered from a fatal network or media
+   error before the box gives up and shows the bsky.app link. */
+const RECOVER_TRIES = 2;
 
 /* Replaces a placeholder with a working player and returns the <video>
    (or null if the video can't play). Idempotent: an existing player is
@@ -4547,15 +4879,37 @@ function attachVideo(box, { preload = false } = {}) {
   if (box.dataset.thumb) v.poster = box.dataset.thumb;
   const src = box.dataset.playlist;
   const fail = () => { teardownPlayer(box); videoFailed(box); };
+  /* hls.js asks the page to decide what a FATAL error means. Its own
+     documented answer is: restart loading after a network error, recover the
+     media pipeline after a media error, give up on anything else. Giving up
+     on all three (which this did before 1.1.7) meant one segment timing out,
+     one stalled buffer, or a video Bluesky hadn't finished transcoding yet
+     killed the player for good. Each kind gets RECOVER_TRIES attempts; a
+     fragment buffering successfully clears the count, so a long video isn't
+     killed by two unrelated hiccups an hour apart. */
+  const recover = (h, d) => {
+    const E = window.Hls.ErrorTypes || {};
+    const kind = d.type === E.NETWORK_ERROR ? "net" : d.type === E.MEDIA_ERROR ? "media" : null;
+    const tries = box._recovers || (box._recovers = { net: 0, media: 0 });
+    if (!kind || tries[kind] >= RECOVER_TRIES) { fail(); return; }
+    tries[kind]++;
+    if (kind === "net") h.startLoad(); else h.recoverMediaError();
+  };
   // Native HLS first where it genuinely works (Safari, iOS), so those
   // browsers never fetch hls.js. See nativeHls() for why "maybe" isn't
   // good enough.
   if (nativeHls()) {
+    box._onError = fail;
     v.src = src; v.addEventListener("error", fail, { once: true });
   } else if (window.Hls && window.Hls.isSupported()) {
     const buf = preload ? PRELOAD_BUFFER_S : PLAYING_BUFFER_S;
     const h = new window.Hls({ capLevelToPlayerSize: true, maxBufferLength: buf, maxMaxBufferLength: buf * 2 });
-    h.on(window.Hls.Events.ERROR, (_, d) => { if (d.fatal) fail(); });
+    h.on(window.Hls.Events.ERROR, (_, d) => {
+      console.warn("[catch-up] video", d.type, d.details, d.fatal ? "fatal" : "recoverable");
+      if (!d.fatal) return;
+      recover(h, d);
+    });
+    h.on(window.Hls.Events.FRAG_BUFFERED, () => { box._recovers = null; });   // it's working again
     h.loadSource(src); h.attachMedia(v); box._hls = h;
   } else { videoFailed(box); return null; }
   // Once it plays for real: grow the buffer and stop treating it as a preload
@@ -4581,6 +4935,11 @@ function attachVideo(box, { preload = false } = {}) {
 function teardownPlayer(box) {
   box._hls?.destroy(); box._hls = null;
   const v = box._video;
+  // Dropping the source makes the element fire "error" (empty src) on a later
+  // task. On the native-HLS path (Safari, iOS) that is the SAME listener that
+  // means "this video is broken", so unloading a perfectly good video used to
+  // mark it failed -- after unloadVideo had already put the placeholder back.
+  if (box._onError) { v?.removeEventListener("error", box._onError); box._onError = null; }
   if (v) { v.pause(); v.removeAttribute("src"); v.load(); }
   box._video = null; box._preloaded = false;
 }
@@ -4668,16 +5027,106 @@ function disconnectVideos() {
 function rkeyOf(uri) { return uri.split("/").pop(); }
 /* Re-renders the action bar everywhere this post appears on screen. */
 function refreshActions(uri) { $$(`[data-actions="${CSS.escape(uri)}"]`).forEach(el => (el.innerHTML = actionsHtml(state.postState.get(uri).post))); }
+/* Re-draws the Follow button everywhere this AUTHOR appears: one follow is
+   about the person, so every post of theirs on screen has to agree. The button
+   lives in the action bar, so this is refreshActions once per post of theirs
+   that is on screen. */
+function refreshFollow(did) {
+  // Collected first: refreshActions replaces the bars these buttons are in,
+  // so walking the live list as it goes would lose the rest of them.
+  const uris = new Set();
+  for (const btn of $$(`[data-follow="${CSS.escape(did)}"]`)) {
+    const uri = btn.closest("[data-actions]")?.dataset.actions;
+    if (uri && state.postState.has(uri)) uris.add(uri);
+  }
+  for (const uri of uris) refreshActions(uri);
+}
+/* The author a gutter button belongs to, taken from the post it sits beside --
+   the post view holds the handle the button's labels need. */
+function authorOfButton(btn) {
+  const uri = btn.closest("[data-uri]")?.dataset.uri;
+  return uri ? state.postState.get(uri)?.post?.author || null : null;
+}
+/* Follow or unfollow the author. A follow is a record in the user's own repo
+   (app.bsky.graph.follow) naming their DID; unfollowing deletes it. Optimistic
+   and confirmed exactly like a like or a repost (see createConfirmedRecord),
+   and the button is the only thing that changes: state.follows -- the snapshot
+   this catch-up was filtered with -- is deliberately left alone, so nothing
+   disappears from under the reader. It is reread on the next reload. */
+/* The at:// URI of our follow record for someone we know we follow but whose
+   record nothing has named ("unknown", see fs). One profile read settles it.
+   Only reachable by unfollowing someone the follow list knew about but whose
+   feed entries carried no viewer state. */
+async function followUriFor(did) {
+  const r = await xrpc("app.bsky.actor.getProfile", { actor: did }, { priority: true });
+  const uri = r?.viewer?.following;
+  if (!uri) throw new Error("Bluesky didn't say which follow record to remove.");
+  return uri;
+}
+async function toggleFollow(did) {
+  const btn = $(`[data-follow="${CSS.escape(did)}"]`);
+  const a = btn && authorOfButton(btn); if (!a) return;
+  const s = fs(a); if (s.busy) return;
+  s.busy = true;
+  const prev = s.follow;
+  const collection = "app.bsky.graph.follow";
+  const log = (...x) => console.info("[catch-up]", "follow", ...x);
+  try {
+    if (prev) {
+      s.follow = null; refreshFollow(did);
+      await deleteOwnRecord(collection, prev === "unknown" ? await followUriFor(did) : prev, log);
+      toast(`Unfollowed @${a.handle}`);
+    } else {
+      s.follow = "pending"; refreshFollow(did);
+      s.follow = await createConfirmedRecord(collection, { $type: collection, subject: did, createdAt: new Date().toISOString() }, "follow", log);
+      toast(`Now following @${a.handle}`);
+    }
+  } catch (e) {
+    console.warn("[catch-up] follow failed", e);
+    s.follow = prev;
+    showBanner(`Couldn't ${prev ? "unfollow" : "follow"} @${a.handle}: ${e.message}`);
+  } finally { s.busy = false; refreshFollow(did); }
+}
+/* Writes one record to the user's own repo and makes sure it really landed:
+   the response must name a record in THIS account's repo, and reading it back
+   (com.atproto.repo.getRecord) must find it. Returns the new record's URI, or
+   throws with a message fit to show the user. Likes, reposts and follows all
+   go through here, so there is one description of "saved" for all three.
+   `what` names the thing in those messages; `log` writes the steps to the
+   console with the [catch-up] prefix. {priority:true} keeps these requests
+   from waiting behind feed loading. */
+async function createConfirmedRecord(collection, record, what, log) {
+  log("creating", record);
+  const r = await xrpc("com.atproto.repo.createRecord", {}, { post: true, priority: true, body: { repo: me(), collection, record } });
+  log("server response", r);
+  const prefix = `at://${me()}/${collection}/`;
+  if (typeof r?.uri !== "string" || !r.uri.startsWith(prefix)) {
+    throw new Error(`Bluesky's reply didn't confirm the ${what} was saved (got ${JSON.stringify(r).slice(0, 120)}).`);
+  }
+  try {
+    await xrpc("com.atproto.repo.getRecord", { repo: me(), collection, rkey: rkeyOf(r.uri) }, { priority: true, retries: 1 });
+    log("confirmed", r.uri);
+  } catch (e) {
+    if (e.code === "RecordNotFound" || e.status === 400) {
+      throw new Error(`Bluesky said the ${what} was saved, but it isn't in your account (${e.message}).`);
+    }
+    log("couldn't confirm (keeping it)", e); // e.g. a connection blip; the create itself succeeded
+  }
+  return r.uri;
+}
+/* Deletes one of our own records, named by its at:// URI. */
+async function deleteOwnRecord(collection, uri, log) {
+  log("deleting", uri);
+  await xrpc("com.atproto.repo.deleteRecord", {}, { post: true, priority: true, body: { repo: me(), collection, rkey: rkeyOf(uri) } });
+  log("deleted", uri);
+}
 /* Like/unlike or repost/undo-repost. Likes and reposts are records in the
    user's own repo (app.bsky.feed.like / app.bsky.feed.repost) pointing at the
    post's {uri, cid}; undoing deletes our record by its rkey.
    Optimistic: the button updates immediately, shown as pending (dimmed,
-   pulsing) until confirmed. Creating is confirmed twice: the response must
-   name a record in this user's repo, and reading that record back
-   (com.atproto.repo.getRecord) must find it. Any failure rolls back and
-   shows a notice with Bluesky's message; every step is logged to the
-   console with the [catch-up] prefix. `busy` stops double-clicks racing.
-   Requests use {priority:true} so they never wait behind feed loading. */
+   pulsing) until confirmed (see createConfirmedRecord). Any failure rolls back
+   and shows a notice with Bluesky's message. `busy` stops double-clicks
+   racing. */
 async function toggleRecord(uri, kind) {
   const s = state.postState.get(uri); if (!s || s.busy) return;
   s.busy = true;
@@ -4688,31 +5137,11 @@ async function toggleRecord(uri, kind) {
   try {
     if (prev) {
       s[field] = null; s[countField] = Math.max(0, s[countField] - 1); refreshActions(uri);
-      log("deleting", prev);
-      await xrpc("com.atproto.repo.deleteRecord", {}, { post: true, priority: true, body: { repo: me(), collection, rkey: rkeyOf(prev) } });
-      log("deleted", prev);
+      await deleteOwnRecord(collection, prev, log);
     } else {
       s[field] = "pending"; s[countField]++; refreshActions(uri);
       const record = { $type: collection, subject: { uri, cid: s.post.cid }, createdAt: new Date().toISOString() };
-      log("creating", record);
-      const r = await xrpc("com.atproto.repo.createRecord", {}, { post: true, priority: true, body: { repo: me(), collection, record } });
-      log("server response", r);
-      // 1) The response must name a record in this account's repo.
-      const prefix = `at://${me()}/${collection}/`;
-      if (typeof r?.uri !== "string" || !r.uri.startsWith(prefix)) {
-        throw new Error(`Bluesky's reply didn't confirm the ${kind} was saved (got ${JSON.stringify(r).slice(0, 120)}).`);
-      }
-      // 2) Read it back from the account to be sure it's really there.
-      try {
-        await xrpc("com.atproto.repo.getRecord", { repo: me(), collection, rkey: rkeyOf(r.uri) }, { priority: true, retries: 1 });
-        log("confirmed", r.uri);
-      } catch (e) {
-        if (e.code === "RecordNotFound" || e.status === 400) {
-          throw new Error(`Bluesky said the ${kind} was saved, but it isn't in your account (${e.message}).`);
-        }
-        log("couldn't confirm (keeping it)", e); // e.g. a connection blip; the create itself succeeded
-      }
-      s[field] = r.uri;
+      s[field] = await createConfirmedRecord(collection, record, kind, log);
     }
   } catch (e) {
     console.warn("[catch-up]", kind, "failed", e);
@@ -4728,28 +5157,53 @@ async function copyText(text) {
     document.body.append(ta); ta.select(); let ok = false; try { ok = document.execCommand("copy"); } catch {} ta.remove(); return ok;
   }
 }
-/* The small repost menu (Repost / Quote on bsky.app), when "Ask before reposting" is on. */
+/* The small menu under an action button, for the two actions that ask before
+   they do something public: reposting and following. Items are
+   {icon, label, run} (a button) or {icon, label, href} (a link out), and any
+   click closes it. It is positioned under the button and clamped to the window,
+   which is what keeps it inside the page when the button is in the rightmost
+   tiled column. */
 let openMenu = null;
 function closeMenu() { openMenu?.remove(); openMenu = null; }
-function showRepostMenu(btn, uri) {
+function showMenu(btn, items) {
   closeMenu();
-  const s = state.postState.get(uri);
+  const small = icon => icon.replace("<svg", '<svg width="16" height="16"');
   const m = document.createElement("div"); m.className = "menu";
-  m.innerHTML = `<button type="button" data-m="toggle">${ICON.repost.replace("<svg", '<svg width="16" height="16"')}${s.repost ? "Undo repost" : "Repost"}</button>
-    <a href="${esc(postUrl(s.post))}" target="_blank" rel="noopener" data-m="quote">${ICON.open.replace("<svg", '<svg width="16" height="16"')}Quote on bsky.app</a>`;
+  m.innerHTML = items.map((it, i) => it.href
+    ? `<a href="${esc(it.href)}" target="_blank" rel="noopener" data-m="${i}">${small(it.icon)}${esc(it.label)}</a>`
+    : `<button type="button" data-m="${i}">${small(it.icon)}${esc(it.label)}</button>`).join("");
   document.body.append(m);
   const r = btn.getBoundingClientRect();
   m.style.left = Math.min(window.scrollX + r.left, window.scrollX + document.documentElement.clientWidth - m.offsetWidth - 8) + "px";
   m.style.top = window.scrollY + r.bottom + 4 + "px";
-  m.addEventListener("click", ev => { const b = ev.target.closest("[data-m]"); if (!b) return; if (b.dataset.m === "toggle") toggleRecord(uri, "repost"); closeMenu(); });
+  m.addEventListener("click", ev => { const b = ev.target.closest("[data-m]"); if (!b) return; items[Number(b.dataset.m)].run?.(); closeMenu(); });
   openMenu = m;
+}
+/* Repost / Quote on bsky.app, when "Ask before reposting" is on. */
+function showRepostMenu(btn, uri) {
+  const s = state.postState.get(uri);
+  showMenu(btn, [
+    { icon: ICON.repost, label: s.repost ? "Undo repost" : "Repost", run: () => toggleRecord(uri, "repost") },
+    { icon: ICON.open, label: "Quote on bsky.app", href: postUrl(s.post) },
+  ]);
+}
+/* Follow / Unfollow, when "Ask before following" is on. Both directions ask:
+   unfollowing someone by a mis-aimed click is the worse of the two mistakes,
+   since the button is right where the one you meant to press was. */
+function showFollowMenu(btn, did) {
+  const a = authorOfButton(btn); if (!a) return;
+  const on = !!fs(a).follow;
+  showMenu(btn, [
+    { icon: on ? ICON.following : ICON.follow, label: `${on ? "Unfollow" : "Follow"} @${a.handle}`, run: () => toggleFollow(did) },
+    { icon: ICON.open, label: "Their profile on bsky.app", href: profileUrl(a) },
+  ]);
 }
 /* One delegated click handler for every interactive element inside the feed
    (elements are re-created often, so per-element listeners would leak).
    Elements declare their action with
-   data-act="like|repost|copy|zoom|gscroll|reveal|play|expand-parent|expand-gap". */
+   data-act="like|repost|follow|copy|zoom|gscroll|reveal|play|retry|expand-parent|expand-gap". */
 document.addEventListener("click", ev => {
-  if (openMenu && !openMenu.contains(ev.target) && !ev.target.closest('[data-act="repost"]')) closeMenu();
+  if (openMenu && !openMenu.contains(ev.target) && !ev.target.closest('[data-act="repost"], [data-act="follow"]')) closeMenu();
   const btn = ev.target.closest("[data-act]"); if (!btn || !btn.closest("#feed")) return;
   const act = btn.dataset.act;
   const uri = btn.closest("[data-uri]")?.dataset.uri;
@@ -4757,6 +5211,12 @@ document.addEventListener("click", ev => {
   else if (act === "repost") {
     if (settings.confirmRepost) { if (openMenu) closeMenu(); else showRepostMenu(btn, uri); }
     else toggleRecord(uri, "repost");
+  }
+  else if (act === "follow") {
+    // This action is the author's, not the post's: the DID is on the button.
+    const did = btn.dataset.follow;
+    if (settings.confirmFollow) { if (openMenu) closeMenu(); else showFollowMenu(btn, did); }
+    else toggleFollow(did);
   }
   else if (act === "copy") {
     const { url, proxied } = shareUrl(state.postState.get(uri).post);
@@ -4782,6 +5242,7 @@ document.addEventListener("click", ev => {
     }
   }
   else if (act === "expand-gap") expandThreadGap(btn);
+  else if (act === "retry") videoRetry(btn.closest(".video"));
   else if (act === "play") {
     // Resolves immediately when HLS is native or hls.js is already in; only a
     // video clicked before it arrived ever actually waits.
@@ -5124,6 +5585,15 @@ const SETTING_CONTROLS = {
   multi: { wide: true, build: (s, v, a) => `<div class="checks">${s.options.map(([val, lab]) =>
     `<label><input type="checkbox" data-k="${esc(s.key)}" value="${esc(val)}"${(v || []).includes(val) ? " checked" : ""}>${esc(lab)}</label>`).join("")}</div>` },
 };
+/* Whether a setting is in effect at all: a `when` setting needs its parent at
+   a particular value, a `needs` setting needs the feed it describes (see
+   hideFollowedFits). Both the drawer's markup and syncDependents ask here, so
+   a row can't be dimmed by one and enabled by the other. */
+function settingApplies(s) {
+  if (s.when && settings[s.when.key] !== s.when.value) return false;
+  if (s.needs && !s.needs()) return false;
+  return true;
+}
 function renderDrawer() {
   const d = $("#drawer");
   let html = `<h2>Settings <button class="btn" type="button" id="btnCloseDrawer">Done</button></h2><div class="hint">Changes apply right away and are saved on this computer. Catch-up v${esc(APP_VERSION)}</div>`;
@@ -5145,8 +5615,12 @@ function renderDrawer() {
     // A setting with `when` only applies while another setting has a given
     // value (see syncDependents): it is indented under its parent and greyed
     // out, rather than hidden, so you can see what the mode would give you.
-    const dep = s.when ? ` sub-set${settings[s.when.key] === s.when.value ? "" : " off"}` : "";
-    const dis = s.when && settings[s.when.key] !== s.when.value ? " disabled" : "";
+    // A `needs` setting is greyed out the same way, but on the feed being read
+    // rather than another setting, so it isn't indented and the reason why is
+    // printed under the row (see .set-why).
+    const avail = settingApplies(s);
+    const dep = s.when ? ` sub-set${avail ? "" : " off"}` : (avail ? "" : " off");
+    const dis = avail ? "" : " disabled";
     const entry = SETTING_CONTROLS[s.type];
     const build = typeof entry === "function" ? entry : entry?.build;
     if (!build) continue;                       // an unknown type draws nothing
@@ -5156,6 +5630,7 @@ function renderDrawer() {
     const wide = typeof entry === "object" && entry.wide;
     const label = `<label${wide ? "" : ` for="${id}"`}><span class="set-name">${esc(s.label)}</span>${s.sub ? `<span class="sub">${esc(s.sub)}</span>` : ""}</label>`;
     html += `<div class="set${wide ? " multi" : dep}" data-row="${esc(s.key)}">${label}${ctl}</div>`;
+    if (s.needsWhy) html += `<div class="set-why${avail ? " hidden" : ""}" data-why="${esc(s.key)}">${esc(s.needsWhy)}</div>`;
   }
   endGroup();
   html += `<details class="group"><summary>Reset</summary><div class="group-body"><button class="btn" type="button" id="btnResetSettings">Restore default settings</button><button class="btn" type="button" id="btnClearPos">Forget my reading position</button></div></details>`;
@@ -5196,6 +5671,9 @@ $("#drawer").addEventListener("input", ev => {
   // changing the markup, so the post being read goes back where it was.
   else if (moved && tileOn()) keepReadingSpot();
   if (s.key === "contextCount" && viewing("start")) prepareStart();
+  // The follow filter needs the follow list, which a custom-feed catch-up may
+  // never have had a reason to load; it rebuilds the feed again once it's in.
+  if (s.key === "hideFollowed" && v !== "off" && !state.follows.size) ensureFollows();
 });
 /* Brings the open drawer back in step with the current settings, without
    re-rendering it (which would lose the focus and caret of whatever control
@@ -5210,10 +5688,11 @@ function syncDependents() {
   for (const s of SETTINGS_SCHEMA) {
     if (s.group) continue;
     const row = $(`#drawer [data-row="${s.key}"]`);
-    if (s.when) {
-      const on = settings[s.when.key] === s.when.value;
+    if (s.when || s.needs) {
+      const on = settingApplies(s);
       row?.classList.toggle("off", !on);
       for (const el of $$(`#drawer [data-k="${s.key}"]`)) el.disabled = !on;
+      $(`#drawer [data-why="${s.key}"]`)?.classList.toggle("hidden", on);
     }
     const changed = !isDefaultValue(s.key, settings[s.key]);
     row?.classList.toggle("changed", changed);

@@ -315,9 +315,22 @@ async function loadPage({ url = "https://example.test/", session = true, setting
       w.HTMLMediaElement.prototype.pause = function () {};
       w.HTMLMediaElement.prototype.load = function () {};
       // Minimal hls.js stand-in, recording what the page asks of it.
+      // `emit` lets a test play the part of hls.js reporting an error, and
+      // startLoad/recoverMediaError count the page's attempts to recover.
       w.__hls = [];
-      w.Hls = class { static isSupported() { return true; } constructor(c) { this.config = c; this.destroyed = false; w.__hls.push(this); } on() {} loadSource(s) { this.src = s; } attachMedia(v) { this.media = v; } destroy() { this.destroyed = true; } };
-      w.Hls.Events = { ERROR: "hlsError" };
+      w.Hls = class {
+        static isSupported() { return true; }
+        constructor(c) { this.config = c; this.destroyed = false; this.handlers = {}; this.loads = 0; this.recoveries = 0; w.__hls.push(this); }
+        on(ev, cb) { (this.handlers[ev] ||= []).push(cb); }
+        emit(ev, data) { for (const cb of this.handlers[ev] || []) cb(ev, data); }
+        startLoad() { this.loads++; }
+        recoverMediaError() { this.recoveries++; }
+        loadSource(s) { this.src = s; }
+        attachMedia(v) { this.media = v; }
+        destroy() { this.destroyed = true; }
+      };
+      w.Hls.Events = { ERROR: "hlsError", FRAG_BUFFERED: "hlsFragBuffered" };
+      w.Hls.ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError", OTHER_ERROR: "otherError" };
       if (session) w.localStorage.setItem("bcu:session", JSON.stringify({ did: ME.did, handle: ME.handle, pds: "https://pds.example", accessJwt: "access", refreshJwt: "refresh" }));
       if (settings !== null) w.localStorage.setItem("bcu:settings", JSON.stringify({ _v: 2, rpm: 3000, fetchMethod: "timeline", ...settings }));
       for (const [k, v] of Object.entries(storage)) w.localStorage.setItem("bcu:" + k, JSON.stringify(v));

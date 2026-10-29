@@ -279,3 +279,53 @@ test("signing out forgets the account's saved feeds", async () => {
     "the picker will fill again for the next account");
   assert.ok(page.visible("viewLogin"));
 });
+
+/* ---------- the end of a "most recent N posts" catch-up ---------- */
+// Reading by time means nothing on a ranked feed, which is the whole reason
+// this mode exists -- so "Load newer posts" (which asks for everything since
+// the newest post it holds) would almost always come back empty. The useful
+// move there is to read DEEPER into the ranking instead.
+
+test("recent mode offers more posts, not newer ones", async () => {
+  const many = Array.from({ length: 12 }, (_, i) => h.item(h.post("P" + i, a, 10 + i)));
+  const page = await h.loadPage({ server: withFeeds({ feeds: { [FEED]: many } }) });
+  await page.startRecent(5, { feed: FEED });
+  assert.equal(page.$("#btnNewer"), null, "no 'load newer posts' button here");
+  assert.match(page.$("#btnMore").textContent, /Load 5 more/);
+  assert.match(page.$("#endcap").textContent, /That's all 5 posts, as of/);
+});
+
+test("a date catch-up still offers newer posts", async () => {
+  const page = await h.loadPage({ server: withFeeds({ feeds: { [FEED]: [h.item(h.post("F1", a, 10))] } }) });
+  await page.startDate(h.BASE, null, { feed: FEED });
+  assert.equal(page.$("#btnMore"), null);
+  assert.match(page.$("#btnNewer").textContent, /Load newer posts/);
+});
+
+test("loading more reads deeper into the feed and puts the posts above", async () => {
+  const many = Array.from({ length: 12 }, (_, i) => h.item(h.post("P" + i, a, 10 + i)));
+  const page = await h.loadPage({ server: withFeeds({ feeds: { [FEED]: many } }) });
+  await page.startRecent(5, { feed: FEED });
+  assert.deepEqual(page.ids(), ["P7", "P8", "P9", "P10", "P11"]);
+  const newest = page.article("P11");
+
+  page.$("#btnMore").click();
+  await h.waitFor(() => page.ids().includes("P2"), { message: "deeper posts" });
+  // Five more, further down the ranking -- so, oldest first, above what we had.
+  assert.deepEqual(page.ids(), ["P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P10", "P11"]);
+  assert.notEqual(page.article("P11"), newest, "the view was rebuilt around them");
+  assert.match(page.toast(), /5 more posts added above/);
+  assert.match(page.$("#endcap").textContent, /That's all 10 posts/);
+  assert.match(page.$("#btnMore").textContent, /Load 5 more/, "and you can keep going");
+});
+
+test("a feed with nothing deeper says so and drops the button", async () => {
+  const some = Array.from({ length: 3 }, (_, i) => h.item(h.post("P" + i, a, 10 + i)));
+  const page = await h.loadPage({ server: withFeeds({ feeds: { [FEED]: some } }) });
+  await page.startRecent(5, { feed: FEED });
+  page.$("#btnMore").click();
+  await h.waitFor(() => page.toast(), { message: "the end-of-feed toast" });
+  assert.match(page.toast(), /doesn't go back any further/);
+  assert.equal(page.$("#btnMore"), null, "nothing left to press");
+  assert.match(page.$("#endcap").textContent, /doesn't go back any further/);
+});

@@ -466,6 +466,113 @@ test("without native HLS the page still builds an hls.js player", async () => {
   assert.equal(page.window.__hls[0].src, "https://video.example/playlist.m3u8");
 });
 
+/* ---------- when a video goes wrong ---------- */
+// hls.js leaves it to the page to decide what a FATAL error means. Before
+// 1.1.7 every one of them was terminal, so a single segment timing out, or a
+// video Bluesky hadn't finished transcoding, killed the box for good.
+
+/** A page showing one video, with its hls.js player built and ready. */
+const videoPage = async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("V", a, 10, { embed: h.embeds.video() }))] } });
+  await page.startDate(h.BASE);
+  page.$('[data-act="play"]').click();
+  await h.wait(30);
+  return page;
+};
+const fatal = (hls, type) => hls.emit("hlsError", { fatal: true, type, details: "test" });
+
+test("a fatal network error restarts loading instead of giving up", async () => {
+  const page = await videoPage();
+  const hls = page.window.__hls[0];
+  fatal(hls, "networkError");
+  assert.equal(hls.loads, 1, "hls.js was told to start loading again");
+  assert.equal(hls.destroyed, false, "the player is still there");
+  assert.equal(page.$(".video-fail"), null, "and nothing was shown to the reader");
+});
+
+test("a fatal media error recovers the media pipeline", async () => {
+  const page = await videoPage();
+  const hls = page.window.__hls[0];
+  fatal(hls, "mediaError");
+  assert.equal(hls.recoveries, 1);
+  assert.equal(page.$(".video-fail"), null);
+});
+
+test("a fatal error that keeps coming back does give up", async () => {
+  const page = await videoPage();
+  const hls = page.window.__hls[0];
+  fatal(hls, "networkError"); fatal(hls, "networkError"); fatal(hls, "networkError");
+  assert.equal(hls.loads, 2, "two attempts, then no more");
+  assert.ok(page.$(".video-fail"), "the bsky.app fallback is shown");
+  assert.equal(hls.destroyed, true, "and the player was torn down");
+});
+
+test("a fragment buffering clears the count, so unrelated hiccups don't add up", async () => {
+  const page = await videoPage();
+  const hls = page.window.__hls[0];
+  fatal(hls, "networkError"); fatal(hls, "networkError");
+  hls.emit("hlsFragBuffered", {});           // it's working again
+  fatal(hls, "networkError"); fatal(hls, "networkError");
+  assert.equal(hls.loads, 4, "the second pair was recovered from too");
+  assert.equal(page.$(".video-fail"), null);
+});
+
+test("an error hls.js can't categorise is terminal straight away", async () => {
+  const page = await videoPage();
+  const hls = page.window.__hls[0];
+  fatal(hls, "otherError");
+  assert.equal(hls.loads + hls.recoveries, 0, "nothing worth retrying");
+  assert.ok(page.$(".video-fail"));
+});
+
+test('"Try again" puts the thumbnail back and builds a new player', async () => {
+  const page = await videoPage();
+  fatal(page.window.__hls[0], "otherError");
+  const fail = page.$(".video-fail");
+  assert.ok(fail.querySelector('[data-act="retry"]'), "the fallback offers a way back");
+  assert.match(fail.textContent, /Watch it on bsky\.app/, "and still links out");
+
+  page.$('[data-act="retry"]').click();
+  assert.equal(page.$(".video-fail"), null, "the failure is gone");
+  assert.ok(page.$('.video img'), "the thumbnail is back");
+  page.$('[data-act="play"]').click();
+  await h.wait(30);
+  assert.equal(page.window.__hls.length, 2, "and a fresh player can be built");
+});
+
+test("unloading a natively-played video doesn't mark it failed", async () => {
+  // teardownPlayer drops the element's source, which makes it fire "error" on
+  // a later task. On the native path that is the SAME listener that means
+  // "this video is broken", so unloading a perfectly good video used to fail
+  // it -- overwriting the placeholder unloadVideo had just put back.
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("V", a, 10, { embed: h.embeds.video() }))] } });
+  await page.startDate(h.BASE);
+  sayHls(page, "probably");
+  page.$('[data-act="play"]').click();
+  await h.wait(30);
+  const v = page.$(".video video");
+  assert.equal(v.getAttribute("src"), "https://video.example/playlist.m3u8", "played natively");
+
+  const po = page.observers.find(o => o.opts.rootMargin);
+  const box = po.targets[0];
+  po.cb([{ target: box, isIntersecting: false }]);
+  await h.wait(50);
+  assert.ok(!box._video && box.querySelector(".play"), "unloaded back to its placeholder");
+  v.dispatchEvent(new page.window.Event("error"));    // what dropping the source provokes
+  assert.equal(page.$(".video-fail"), null, "which is not a reason to give up on the video");
+  assert.ok(box.querySelector(".play"), "the placeholder is still there");
+});
+
+test("a real native playback error still fails the box", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("V", a, 10, { embed: h.embeds.video() }))] } });
+  await page.startDate(h.BASE);
+  sayHls(page, "probably");
+  page.$('[data-act="play"]').click();
+  await h.wait(30);
+  page.$(".video video").dispatchEvent(new page.window.Event("error"));
+  assert.ok(page.$(".video-fail"), "the bsky.app fallback is shown");
+});
+
 test("the page fetches nothing at all when it loads", async () => {
   // hls.js is fetched on demand (see ensureHls) and the typeface is embedded,
   // so opening the page makes no third-party request: no ~600KB of JavaScript

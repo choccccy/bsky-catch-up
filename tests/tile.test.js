@@ -322,25 +322,46 @@ test("only the feed is allowed the tiled width", async () => {
   assert.ok(!/\[data-tile\][^\n]*\.bar-inner/.test(css), "and the top bar is not widened at all");
 });
 
-test("the start post's highlight band stays inside its own column while tiled", async () => {
+test("the start post breaks the band and takes a row of its own while tiled", async () => {
   // The band is a .bleed, which reaches the viewport edges by measuring out
-  // from its own centre -- right only for a box that is itself centred. The
-  // dividers still are (they span the whole row); an anchor post is one grid
-  // item in one column, so its band painted across the window and, because
-  // .bleed isolates its own stacking context, OVER the column beside it.
+  // from its own centre -- right only for a box that is itself centred. A
+  // divider is (it spans the whole row); an anchor sharing a row with other
+  // posts is not, so its band painted across the window and, because .bleed
+  // isolates its own stacking context, OVER the column beside it. 1.1.2
+  // scoped the band back to the column; 1.1.7 gives the anchor the whole row
+  // instead, which is the same rule the dividers already follow.
   const timeline = Array.from({ length: 30 }, (_, i) => h.item(h.post("P" + i, a, 10 + i)));
   const page = await h.loadPage({ settings: TILED, server: { timeline } });
   await page.startPost("https://bsky.app/profile/u1.test/post/P20");
 
   const anchor = page.article("P20");
   assert.ok(anchor.classList.contains("bleed"), "the start post still carries the band");
-  assert.ok(anchor.closest(".tile"), "and it really is a grid item, which is what makes the band wrong");
+  const tile = anchor.closest(".tile");
+  assert.ok(tile.classList.contains("full"), "its tile spans the whole row");
+  assert.equal(tile.parentElement.children.length, 1, "and nothing else is in that band");
+
+  // The posts either side are in bands of their own, so the grid can't put
+  // anything beside the anchor.
+  const bandOf = el => el.closest(".band");
+  const before = page.article("P19"), after = page.article("P21");
+  assert.notEqual(bandOf(before), bandOf(anchor), "the post above is in another band");
+  assert.notEqual(bandOf(after), bandOf(anchor), "and so is the post below");
+  assert.ok(!after.closest(".tile").classList.contains("full"), "which is an ordinary tile again");
 
   const css = require("node:fs").readFileSync(h.PAGE_PATH, "utf8");
-  const scoped = css.match(/^:root\[data-tile\][^\n]*\.post\.anchor::before\s*\{[^}]*\}/m);
-  assert.ok(scoped, "tiled, the anchor's band must be scoped back to its column");
-  assert.match(scoped[0], /left:\s*0/, "its left edge is the column's, not the window's");
-  assert.match(scoped[0], /right:\s*0/, "and so is its right");
+  const full = css.match(/^:root\[data-tile\]\s*\.tile\.full\s*\{[^}]*\}/m);
+  assert.ok(full, "a full tile must be given the whole row");
+  assert.match(full[0], /grid-column:\s*1\s*\/\s*-1/, "grid-column:1/-1, like a divider");
+  assert.ok(!/\.tile\s+\.post\.anchor::before/.test(css),
+    "and the band is no longer scoped back to a column, which would now be wrong");
+});
+
+test("untiled, nothing is given a full row", async () => {
+  const timeline = Array.from({ length: 30 }, (_, i) => h.item(h.post("P" + i, a, 10 + i)));
+  const page = await h.loadPage({ settings: { ...TILED, tile: false }, server: { timeline } });
+  await page.startPost("https://bsky.app/profile/u1.test/post/P20");
+  assert.equal(page.$$("#feed .tile").length, 0, "no tiles at all");
+  assert.equal(page.$$("#feed .full").length, 0, "and nothing claiming a row");
 });
 
 test("a junk column cap falls back to the default, not to a number written twice", async () => {
