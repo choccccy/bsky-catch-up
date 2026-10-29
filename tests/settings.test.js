@@ -157,12 +157,25 @@ test("the page tells the browser which way it is shaded", async () => {
   // page: a white box with our light text in it, unreadable.
   const src = require("fs").readFileSync(h.PAGE_PATH, "utf8");
   const css = src.slice(src.indexOf("<style>"), src.indexOf("</style>"));
-  const darkBlocks = [...css.matchAll(/(:root\[data-theme="dark"\]|:root:not\(\[data-theme="light"\]\))\s*\{([^}]*)\}/g)];
-  assert.ok(darkBlocks.length >= 2, "both ways of being dark are covered");
-  for (const [, sel, body] of darkBlocks) {
-    assert.match(body, /color-scheme\s*:\s*dark/, `${sel} must set color-scheme`);
-  }
+  const darkBlocks = [...css.matchAll(/:root\[data-theme="dark"\]\s*\{([^}]*)\}/g)];
+  assert.equal(darkBlocks.length, 1,
+    "the dark palette is written once; applyLook resolves \u201cMatch system\u201d to an explicit data-theme");
+  assert.match(darkBlocks[0][1], /color-scheme\s*:\s*dark/, "it must set color-scheme");
   assert.match(css, /:root\{[^}]*color-scheme\s*:\s*light/s, "the light palette sets it too");
+  assert.ok(!/@media\s*\(prefers-color-scheme/.test(css),
+    "no media-query copy of the palette to fall out of step");
+
+  // ...which only works if the page really does resolve the setting itself,
+  // and keeps following the system while "Match system" is chosen.
+  const page = await h.loadPage({ settings: { theme: "system" } });
+  const root = page.document.documentElement;
+  assert.match(root.getAttribute("data-theme"), /^(light|dark)$/,
+    "an explicit theme is always written, never left off");
+  await page.setSetting("theme", "dark");
+  assert.equal(root.getAttribute("data-theme"), "dark");
+  await page.setSetting("theme", "light");
+  assert.equal(root.getAttribute("data-theme"), "light");
+  assert.equal(page.eval("typeof effectiveTheme"), "function", "and it is resolved in one place");
 });
 
 test("every text-like field in the start form is actually styled", async () => {

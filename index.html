@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.1.4
+  Version 1.1.6
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -532,6 +532,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.1.6] - 2026-10-28
+
+### Changed
+
+- The last of the housekeeping, and again nothing looks or behaves
+  differently. The dark colours were written out twice, once for "Dark" and
+  once for "Match system", because a stylesheet can't share one block between
+  the two. The page now works out which way it is shaded itself and says so on
+  the page, so the dark palette exists in one place and a colour can't be
+  changed in one copy and missed in the other. "Match system" still follows
+  your system the moment you change it.
+- The two places that built a link to someone's profile are now one, matching
+  the links to posts.
+
+## [1.1.5] - 2026-10-28
+
+### Changed
+
+- Housekeeping only: nothing about the page behaves or looks any different.
+  The settings drawer is now built from one small table describing each kind
+  of control, rather than a chain of six branches that each wrote out the same
+  row by hand. The handful of spacing rules that were written onto the markup
+  itself have moved into the stylesheet with everything else. And the
+  stylesheet's sections were put back in order -- the gallery rules had ended
+  up under "misc", the feed picker under the settings drawer, and a block of
+  sign-in page styles under a heading that said "feed".
 
 ## [1.1.4] - 2026-10-28
 
@@ -1348,7 +1375,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v1.1.4 · Bluesky</title>
+<title>Catch-up v1.1.6 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -1403,9 +1430,12 @@ site with this release.
 /* ---------- design tokens ----------
    Light palette by default. Dark palette is applied either when the OS prefers
    dark (unless the user forced light), or when the user forced dark via
-   settings (data-theme="dark" on <html>). The palette is therefore written
-   TWICE, identically: a selector list can't straddle a media query, so the
-   two blocks below have to repeat each other. Change one, change the other.
+   settings. Both cases arrive here the same way: applyLook() always writes an
+   explicit data-theme of "light" or "dark" on <html>, resolving the "Match
+   system" setting through matchMedia and listening for it to change. That is
+   why the dark palette is written ONCE. It used to be written twice --
+   identically, because a selector list can't straddle a media query -- which
+   is two places to miss when a colour changes.
    --fs and --col are driven by the "Text size" and "Column width" settings. */
 :root{
   --bg:#EDF0F4; --surface:#FFFFFF; --surface-2:#F5F7FA; --ink:#1B2430; --muted:#5F6B7A; --line:#D9DFE7;
@@ -1429,14 +1459,6 @@ site with this release.
   --accent:#8EA6FF; --accent-ink:#0F141B; --like:#FF6B9A; --repost:#4CC495; --anchor:#3A3312; --anchor-line:#C9A227; --hour-bg:#1C2640;
   --shadow:none;
 }
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    color-scheme:dark;
-    --bg:#0F141B; --surface:#171E27; --surface-2:#1E2732; --ink:#E3E8EF; --muted:#8E9AAB; --line:#2A3441;
-    --accent:#8EA6FF; --accent-ink:#0F141B; --like:#FF6B9A; --repost:#4CC495; --anchor:#3A3312; --anchor-line:#C9A227; --hour-bg:#1C2640;
-    --shadow:none;
-  }
-}
 /* ---------- base ---------- */
 *{box-sizing:border-box}
 html,body{margin:0}
@@ -1450,7 +1472,7 @@ button,input,select{font:inherit; color:inherit}
 :focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
 .hidden{display:none !important}
 
-/* top bar */
+/* ---------- top bar ---------- */
 .bar{position:sticky; top:0; z-index:20; background:var(--surface); border-bottom:1px solid var(--line)}
 .bar-inner{display:flex; align-items:center; gap:12px; padding:8px 16px; max-width:calc(var(--col) + 420px); margin:0 auto}
 .clock{display:flex; flex-direction:column; min-width:0; flex:1}
@@ -1469,7 +1491,7 @@ button,input,select{font:inherit; color:inherit}
 .strip{height:4px; background:var(--surface-2); position:relative}
 .strip-fill{position:absolute; inset:0 auto 0 0; width:0; background:var(--accent); transition:width .2s}
 
-/* layout */
+/* ---------- layout ---------- */
 main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 /* "Show images whole" (settings.wholeImages): posts carrying pictures may be
    wider than the reading column, so images don't have to be shrunk to fit it.
@@ -1569,6 +1591,14 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 /* Same for a date: let the browser's control be its natural size. */
 .field input[type=datetime-local]{width:auto; max-width:100%}
 .hint{font-size:.85em; color:var(--muted)}
+/* Spacing that used to be written as style="" on the markup itself. A choice
+   whose body is a single field (a pasted link, a count) needs that field
+   pushed clear of the radio above it; a form's last button needs room above
+   it. Keeping them here means the sign-in, start and progress screens are
+   styled in one place like everything else. */
+.field-indent{margin:8px 0 0}
+.form-actions{margin-top:14px}
+.panel-actions{margin-top:16px}
 .err{color:var(--like); font-size:.9em; margin-top:8px; white-space:pre-wrap}
 .choice{display:block; border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:10px; cursor:pointer}
 .choice:has(input:checked){border-color:var(--accent); background:var(--surface-2)}
@@ -1589,15 +1619,20 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .choice-pair{display:flex; gap:10px; flex-wrap:wrap}
 .choice-pair > .choice{flex:1 1 230px; margin-bottom:10px}
 .choice-pair > .choice.hidden{display:none}
+/* Feed picker on the start screen. */
+.feed-pick select{border:1px solid var(--line); background:var(--surface-2); border-radius:8px; padding:8px 10px; width:100%}
+/* An empty hint still costs a flex gap; Following has nothing to warn about. */
+#feedHint:empty{display:none}
+.feed-pick .hint{margin-top:6px}
 .who{display:flex; align-items:center; gap:10px; margin-bottom:16px}
 .who img{width:36px; height:36px; border-radius:50%}
 
-/* progress */
+/* ---------- progress screen ---------- */
 .prog-bar{height:10px; background:var(--surface-2); border-radius:6px; overflow:hidden; margin:14px 0 8px}
 .prog-fill{height:100%; width:0; background:var(--accent); transition:width .25s}
 .prog-stats{font-size:.9em; color:var(--muted); font-variant-numeric:tabular-nums}
 
-/* feed */
+/* ---------- notes and callouts on the sign-in and start screens ---------- */
 /* Sign-in page privacy/about notes: a short always-visible callout plus a
    collapsible <details> with the full explanation. */
 .callout{border-left:4px solid var(--anchor-line); background:var(--surface-2); border-radius:6px; padding:10px 12px; margin:0 0 16px; font-size:.92em}
@@ -1610,15 +1645,15 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 /* Optional end point on the start screen (revealed by its checkbox). */
 .end-toggle{display:flex; align-items:center; gap:8px; margin:6px 0 10px; font-weight:700; cursor:pointer}
 .end-box{margin:0 0 12px 24px}
-/* Filter notice above the feed when "Only show posts with" is active. */
-.filter-note{display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--surface); border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:8px; padding:6px 10px; margin:0 0 12px; font-size:.9em}
-.filter-note .btn{padding:3px 10px; font-size:.9em}
 /* ---------- feed ----------
    .day dividers stick under the top bar (--bar-h is measured in JS).
    .post uses content-visibility:auto so off-screen posts skip rendering work;
    this is what keeps very long feeds smooth. */
 .feed-head{font-size:.9em; color:var(--muted); margin:0 4px 12px; overflow-wrap:anywhere}
 .feed-head .linkbtn{background:none; border:0; padding:0; margin-left:6px; color:var(--accent); cursor:pointer; font:inherit; text-decoration:underline}
+/* Filter notice above the feed when "Only show posts with" is active. */
+.filter-note{display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--surface); border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:8px; padding:6px 10px; margin:0 0 12px; font-size:.9em}
+.filter-note .btn{padding:3px 10px; font-size:.9em}
 /* ---------- full-width bands ----------
    .bleed paints a band behind an element that spans the whole window width,
    even though the element itself sits in the centred reading column. The
@@ -1742,7 +1777,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 @media (prefers-reduced-motion: reduce){ .act.pending{animation:none; opacity:.5} }
 .act.right{margin-left:auto}
 
-/* embeds */
+/* ---------- embeds (images, link cards, video, quotes) ---------- */
 .embed{margin-top:8px}
 .imgs{display:grid; gap:4px; border-radius:10px; overflow:hidden}
 .imgs.n2,.imgs.n4{grid-template-columns:1fr 1fr}
@@ -1843,12 +1878,31 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .endcap .btn{margin-top:10px}
 .sentinel{height:1px}
 
+/* ---------- galleries (app.bsky.embed.gallery, 5-10 images) ----------
+   A horizontal strip that scrolls/snaps one image at a time, like the
+   Bluesky app's carousel. Each image keeps a fixed height and its own aspect
+   ratio (capped at 85% of the strip width so the next image peeks in).
+   .g-nav arrows are for mouse users; hidden at the ends by updateGalleryNav. */
+.gallery-wrap{position:relative}
+.gallery{display:flex; gap:6px; overflow-x:auto; scroll-snap-type:x mandatory; scrollbar-width:none; border-radius:10px}
+.gallery::-webkit-scrollbar{display:none}
+.g-item{flex:none; height:min(380px, 62vw); max-width:85%; scroll-snap-align:start; border-radius:10px; overflow:hidden}
+.g-item img{width:100%; height:100%; object-fit:cover}
+.g-count{position:absolute; top:6px; right:6px; background:rgba(0,0,0,.65); color:#fff; font-size:.72em; font-weight:700; padding:1px 6px; border-radius:8px; font-variant-numeric:tabular-nums}
+.g-unsupported{display:flex; align-items:center; justify-content:center; text-align:center; padding:12px; background:var(--surface-2); font-size:.85em; aspect-ratio:1/1; position:relative}
+.g-nav{position:absolute; top:50%; transform:translateY(-50%); width:34px; height:34px; border-radius:50%; border:0; background:rgba(0,0,0,.6); color:#fff; font-size:22px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0 0 3px}
+.g-nav.prev{left:8px} .g-nav.next{right:8px}
+.g-nav.off{display:none}
+/* Whole-image mode: the strip stays a strip (you asked for it to), but each
+   item keeps its own shape instead of being cropped to a fixed height, and
+   it may use the post's extra width. */
+/* Same cap as the grid, applied as a width for the same reason: a height on
+   a box with an aspect-ratio would letterbox a wide picture inside a narrow
+   post rather than making it smaller. */
+:root[data-whole] .g-item{height:auto; max-width:100%; width:min(100%, calc(var(--media-cap) * var(--arw, 1) / var(--arh, 1)))}
+:root[data-whole] .g-item img{object-fit:contain}
+.embed-unknown{border:1px dashed var(--line); border-radius:10px; padding:8px 10px; color:var(--muted); font-size:.9em}
 /* ---------- settings drawer (built dynamically from SETTINGS_SCHEMA) ---------- */
-/* Feed picker on the start screen. */
-.feed-pick select{border:1px solid var(--line); background:var(--surface-2); border-radius:8px; padding:8px 10px; width:100%}
-/* An empty hint still costs a flex gap; Following has nothing to warn about. */
-#feedHint:empty{display:none}
-.feed-pick .hint{margin-top:6px}
 .drawer-scrim{position:fixed; inset:0; background:rgba(0,0,0,.3); z-index:40}
 .drawer{position:fixed; top:0; right:0; bottom:0; width:min(380px, 100vw); background:var(--surface); border-left:1px solid var(--line); z-index:41; overflow-y:auto; padding:16px 18px 40px}
 .drawer h2{font-size:1.2em; margin:0 0 4px; display:flex; justify-content:space-between; align-items:center}
@@ -1886,39 +1940,17 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 /* Multi-choice settings (checkbox lists) stack under their label. */
 .set.multi{flex-direction:column; align-items:stretch}
 .set .checks{display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; font-size:.9em}
+/* A range and its live value sit on one line. */
+.set .range-row{display:flex; align-items:center; gap:6px}
 .set .checks label{display:flex; align-items:center; gap:6px}
 
-/* misc */
-/* Error / notice banner at the top of the page (network failures, unexpected
-   errors, "running inside a preview window" notice). */
+/* ---------- error and notice banner ----------
+   At the top of the page (network failures, unexpected
+   (network failures, unexpected errors, "running inside a preview window"). */
 .banner{display:flex; gap:12px; align-items:flex-start; background:var(--surface); border:1px solid var(--like); border-left-width:4px; border-radius:10px; padding:12px 14px; margin-bottom:14px; font-size:.92em}
 .banner.notice{border-color:var(--anchor-line)}
 .banner-text{flex:1; white-space:pre-wrap}
 .banner button{background:none; border:0; cursor:pointer; color:var(--muted); font-size:1.2em; line-height:1; padding:0 4px}
-/* ---------- galleries (app.bsky.embed.gallery, 5-10 images) ----------
-   A horizontal strip that scrolls/snaps one image at a time, like the
-   Bluesky app's carousel. Each image keeps a fixed height and its own aspect
-   ratio (capped at 85% of the strip width so the next image peeks in).
-   .g-nav arrows are for mouse users; hidden at the ends by updateGalleryNav. */
-.gallery-wrap{position:relative}
-.gallery{display:flex; gap:6px; overflow-x:auto; scroll-snap-type:x mandatory; scrollbar-width:none; border-radius:10px}
-.gallery::-webkit-scrollbar{display:none}
-.g-item{flex:none; height:min(380px, 62vw); max-width:85%; scroll-snap-align:start; border-radius:10px; overflow:hidden}
-.g-item img{width:100%; height:100%; object-fit:cover}
-.g-count{position:absolute; top:6px; right:6px; background:rgba(0,0,0,.65); color:#fff; font-size:.72em; font-weight:700; padding:1px 6px; border-radius:8px; font-variant-numeric:tabular-nums}
-.g-unsupported{display:flex; align-items:center; justify-content:center; text-align:center; padding:12px; background:var(--surface-2); font-size:.85em; aspect-ratio:1/1; position:relative}
-.g-nav{position:absolute; top:50%; transform:translateY(-50%); width:34px; height:34px; border-radius:50%; border:0; background:rgba(0,0,0,.6); color:#fff; font-size:22px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0 0 3px}
-.g-nav.prev{left:8px} .g-nav.next{right:8px}
-.g-nav.off{display:none}
-/* Whole-image mode: the strip stays a strip (you asked for it to), but each
-   item keeps its own shape instead of being cropped to a fixed height, and
-   it may use the post's extra width. */
-/* Same cap as the grid, applied as a width for the same reason: a height on
-   a box with an aspect-ratio would letterbox a wide picture inside a narrow
-   post rather than making it smaller. */
-:root[data-whole] .g-item{height:auto; max-width:100%; width:min(100%, calc(var(--media-cap) * var(--arw, 1) / var(--arh, 1)))}
-:root[data-whole] .g-item img{object-fit:contain}
-.embed-unknown{border:1px dashed var(--line); border-radius:10px; padding:8px 10px; color:var(--muted); font-size:.9em}
 
 /* ---------- overlays: image lightbox, toast notifications, repost menu ---------- */
 .lightbox{position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:60; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:20px; cursor:zoom-out}
@@ -1985,7 +2017,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
         <input type="password" id="inPass" placeholder="xxxx-xxxx-xxxx-xxxx" autocomplete="current-password" required>
       </div>
       <label class="hint"><input type="checkbox" id="inRemember" checked> Stay signed in on this computer</label>
-      <div style="margin-top:14px"><button class="btn primary" type="submit" id="btnLogin">Sign in</button></div>
+      <div class="form-actions"><button class="btn primary" type="submit" id="btnLogin">Sign in</button></div>
       <div class="err" id="loginErr"></div>
     </form>
     <!-- These are privacy CLAIMS, not prose: people decide whether to type an
@@ -2021,7 +2053,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
            first option reads "Following", which says what the control is. -->
       <div class="field feed-pick">
         <select id="inFeed"><option value="">Following</option></select>
-        <div class="field hidden" id="feedUrlBox" style="margin:8px 0 0">
+        <div class="field hidden field-indent" id="feedUrlBox">
           <input type="url" id="inFeedUrl" placeholder="https://bsky.app/profile/someone.bsky.social/feed/whats-hot">
           <span class="hint">Paste a link to a feed or a list.</span>
         </div>
@@ -2043,7 +2075,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
       </div>
       <label class="choice">
         <span><input type="radio" name="kind" value="post">From a specific post</span>
-        <div class="choice-body field" style="margin:8px 0 0">
+        <div class="choice-body field field-indent">
           <input type="url" id="inPost" placeholder="https://bsky.app/profile/someone.bsky.social/post/3k…">
           <span class="hint" id="postHint">Paste a post link. The feed starts there, with a few earlier posts above it for context. If you saw it as a repost, it finds the repost.</span>
         </div>
@@ -2054,7 +2086,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
       </label>
       <label class="choice">
         <span><input type="radio" name="kind" value="recent">The most recent posts</span>
-        <div class="choice-body field" style="margin:8px 0 0">
+        <div class="choice-body field field-indent">
           <input type="number" id="inRecent" min="1" max="2000" value="200">
           <span class="hint">Reads this many of the newest posts and shows them oldest first. Best for feeds that rank posts rather than ordering them by time, where “from a date” doesn’t mean much.</span>
         </div>
@@ -2068,7 +2100,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
         </label>
         <label class="choice">
           <span><input type="radio" name="endKind" value="post">At a specific post</span>
-          <div class="choice-body field" style="margin:8px 0 0">
+          <div class="choice-body field field-indent">
             <input type="url" id="inEndPost" placeholder="https://bsky.app/profile/someone.bsky.social/post/3k…">
             <span class="hint">The feed ends with this post (or its repost, if that's how you saw it).</span>
           </div>
@@ -2085,7 +2117,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
     <p id="progStage"></p>
     <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
     <div class="prog-stats" id="progStats"></div>
-    <div style="margin-top:16px"><button class="btn" type="button" id="btnCancel">Cancel</button></div>
+    <div class="panel-actions"><button class="btn" type="button" id="btnCancel">Cancel</button></div>
   </section>
 
   <!-- Feed -->
@@ -2110,7 +2142,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.1.4";
+const APP_VERSION = "1.1.6";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -2349,10 +2381,17 @@ function setSetting(key, value) {
    has to happen: a rebuild (the markup differs), or just putting the
    reading spot back (every post moved). Both are kept by applyLook. */
 let wasTiled = false, wasCols = 1, resizeDebounce;
+/* Does the system ask for a dark page right now? */
+const prefersDark = () => !!window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+/* The theme actually in force. "Match system" is resolved HERE rather than in
+   the stylesheet, so the dark palette only has to be written once (see the
+   design tokens). The cost is that the page has to notice the system changing
+   its mind, which the listener below does. */
+function effectiveTheme() { return settings.theme === "system" ? (prefersDark() ? "dark" : "light") : settings.theme; }
 /* Pushes appearance settings into the document: theme attribute and CSS variables. */
 function applyLook() {
   const r = document.documentElement;
-  if (settings.theme === "system") r.removeAttribute("data-theme"); else r.setAttribute("data-theme", settings.theme);
+  r.setAttribute("data-theme", effectiveTheme());
   r.style.setProperty("--fs", settings.fontSize + "px");
   r.style.setProperty("--col", settings.columnWidth + "px");
   // "Show images whole": a root flag the media CSS keys off, plus how much
@@ -2373,6 +2412,14 @@ function applyLook() {
   r.toggleAttribute("data-tile-wide", tiling && whole && settings.mediaWidth > 1);
   requestAnimationFrame(() => r.style.setProperty("--bar-h", $("#bar").offsetHeight + "px"));
 }
+
+/* Follow the system's light/dark setting while "Match system" is chosen. The
+   stylesheet used to do this on its own with a media query; now that the
+   palette is written once and keyed off data-theme, this is what keeps a page
+   that is already open in step. */
+window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", () => {
+  if (settings.theme === "system") applyLook();
+});
 
 /* ============================== state ============================== */
 /* All mutable app state lives here, so it's easy to see what can change.
@@ -2644,6 +2691,12 @@ async function signOut() {
 }
 
 /* ============================== feed items ============================== */
+/* Is this a real post view, rather than one of the #notFoundPost or
+   #blockedPost stubs the API puts in a thread where a post used to be? */
+const isPV = x => x?.$type === "app.bsky.feed.defs#postView";
+/* A thread node's own `post` isn't a union member, so the API leaves its
+   $type off: check it has a uri rather than asking what it is. */
+const isTVP = x => x?.$type === "app.bsky.feed.defs#threadViewPost" && !!x.post?.uri;
 /* A feedViewPost whose `reason` is reasonRepost was put in the feed by a
    repost; `reason.by` is the reposter and `reason.indexedAt` is when. */
 const isRepost = fi => fi?.reason?.$type === "app.bsky.feed.defs#reasonRepost";
@@ -3802,7 +3855,10 @@ function shareUrl(p) {
   if (!/^[a-z0-9.-]+(:\d+)?$/i.test(host)) return { url, proxied: false };
   return { url: url.replace("https://bsky.app/", `https://${host}/`), proxied: host !== "bsky.app" ? host : false };
 }
-function profileUrl(a) { return `https://bsky.app/profile/${a.handle && a.handle !== "handle.invalid" ? a.handle : a.did}`; }
+/* bsky.app profile addresses, in one place like the post ones above.
+   A DID is percent-encoded except for its colons, which bsky.app 404s on. */
+const profileLinkFor = actor => `https://bsky.app/profile/${encodeURIComponent(actor ?? "").replace(/%3A/gi, ":")}`;
+function profileUrl(a) { return profileLinkFor(a.handle && a.handle !== "handle.invalid" ? a.handle : a.did); }
 /* The name / handle / time line. A post and a quoted post draw the same one
    and used to build it separately, which is how the quote's version drifted
    into carrying its avatar inline. The differences are the arguments:
@@ -3835,7 +3891,7 @@ function richText(text, facets) {
     const seg = esc(dec.decode(bytes.slice(s, e)));
     const feat = f.features[0]; let href = null;
     if (feat.$type === "app.bsky.richtext.facet#link") href = safeUrl(feat.uri);
-    else if (feat.$type === "app.bsky.richtext.facet#mention") href = `https://bsky.app/profile/${encodeURIComponent(feat.did).replace(/%3A/gi, ":")}`;  // bsky.app 404s on a percent-encoded did
+    else if (feat.$type === "app.bsky.richtext.facet#mention") href = profileLinkFor(feat.did);
     else if (feat.$type === "app.bsky.richtext.facet#tag") href = `https://bsky.app/hashtag/${encodeURIComponent(feat.tag)}`;
     out += href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${seg}</a>` : seg;
     pos = e;
@@ -4021,13 +4077,6 @@ function renderItem(it, i, ctx = "none") {
   el.innerHTML = html;
   return el;
 }
-
-/* Is this one of the thread shapes the API uses where a post might instead be
-   a #notFoundPost or #blockedPost stub? */
-const isPV = x => x?.$type === "app.bsky.feed.defs#postView";
-/* A thread node's own `post` isn't a union member, so the API leaves its
-   $type off: check it has a uri rather than asking what it is. */
-const isTVP = x => x?.$type === "app.bsky.feed.defs#threadViewPost" && !!x.post?.uri;
 
 /* The marker for posts missing between a thread's first post and the parent
    shown above a reply. The feed doesn't send those posts, so the button goes
@@ -5056,6 +5105,25 @@ function changedInGroup(name) {
   }
   return n;
 }
+/* One builder per setting type, keyed the way SETTINGS_SCHEMA names them.
+   It was a six-branch if/else, which meant the shared parts of a row -- the
+   id, the data-k the input listener reads, the disabled state -- were written
+   out six times and had already drifted (only "multi" laid its row out
+   differently, and it had to `continue` past the row markup to do it).
+   A builder gets the schema row, the current value, and `attrs`: the id,
+   data-k and disabled that every control needs. `wide: true` means the
+   control goes UNDER its label rather than beside it. */
+const SETTING_CONTROLS = {
+  bool: (s, v, a) => `<input type="checkbox" ${a}${v ? " checked" : ""}>`,
+  select: (s, v, a) => `<select ${a}>${s.options.map(([val, lab]) =>
+    `<option value="${esc(val)}"${val === v ? " selected" : ""}>${esc(lab)}</option>`).join("")}</select>`,
+  range: (s, v, a) => `<span class="range-row"><input type="range" ${a} min="${s.min}" max="${s.max}" step="${s.step}" value="${esc(v)}">` +
+    `<span class="val" data-val="${esc(s.key)}">${esc(v)}${esc(s.unit || "")}</span></span>`,
+  number: (s, v, a) => `<input type="number" ${a} min="${s.min}" max="${s.max}" value="${esc(v)}">`,
+  text: (s, v, a) => `<input type="text" ${a} value="${esc(v)}" placeholder="${esc(s.placeholder || "")}" spellcheck="false" autocomplete="off">`,
+  multi: { wide: true, build: (s, v, a) => `<div class="checks">${s.options.map(([val, lab]) =>
+    `<label><input type="checkbox" data-k="${esc(s.key)}" value="${esc(val)}"${(v || []).includes(val) ? " checked" : ""}>${esc(lab)}</label>`).join("")}</div>` },
+};
 function renderDrawer() {
   const d = $("#drawer");
   let html = `<h2>Settings <button class="btn" type="button" id="btnCloseDrawer">Done</button></h2><div class="hint">Changes apply right away and are saved on this computer. Catch-up v${esc(APP_VERSION)}</div>`;
@@ -5078,19 +5146,16 @@ function renderDrawer() {
     // value (see syncDependents): it is indented under its parent and greyed
     // out, rather than hidden, so you can see what the mode would give you.
     const dep = s.when ? ` sub-set${settings[s.when.key] === s.when.value ? "" : " off"}` : "";
-    let ctl = "";
     const dis = s.when && settings[s.when.key] !== s.when.value ? " disabled" : "";
-    if (s.type === "bool") ctl = `<input type="checkbox" id="${id}" data-k="${s.key}" ${v ? "checked" : ""}${dis}>`;
-    else if (s.type === "select") ctl = `<select id="${id}" data-k="${s.key}"${dis}>${s.options.map(([val, lab]) => `<option value="${val}" ${val === v ? "selected" : ""}>${esc(lab)}</option>`).join("")}</select>`;
-    else if (s.type === "range") ctl = `<span style="display:flex;align-items:center;gap:6px"><input type="range" id="${id}" data-k="${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${v}"${dis}><span class="val" data-val="${s.key}">${v}${s.unit || ""}</span></span>`;
-    else if (s.type === "number") ctl = `<input type="number" id="${id}" data-k="${s.key}" min="${s.min}" max="${s.max}" value="${v}"${dis}>`;
-    else if (s.type === "text") ctl = `<input type="text" id="${id}" data-k="${s.key}" value="${esc(v)}" placeholder="${esc(s.placeholder || "")}" spellcheck="false" autocomplete="off"${dis}>`;
-    else if (s.type === "multi") {
-      ctl = `<div class="checks">${s.options.map(([val, lab]) => `<label><input type="checkbox" data-k="${s.key}" value="${val}" ${(v || []).includes(val) ? "checked" : ""}>${esc(lab)}</label>`).join("")}</div>`;
-      html += `<div class="set multi" data-row="${s.key}"><label><span class="set-name">${esc(s.label)}</span>${s.sub ? `<span class="sub">${esc(s.sub)}</span>` : ""}</label>${ctl}</div>`;
-      continue;
-    }
-    html += `<div class="set${dep}" data-row="${s.key}"><label for="${id}"><span class="set-name">${esc(s.label)}</span>${s.sub ? `<span class="sub">${esc(s.sub)}</span>` : ""}</label>${ctl}</div>`;
+    const entry = SETTING_CONTROLS[s.type];
+    const build = typeof entry === "function" ? entry : entry?.build;
+    if (!build) continue;                       // an unknown type draws nothing
+    const ctl = build(s, v, `id="${id}" data-k="${esc(s.key)}"${dis}`);
+    // A checkbox list stacks under its label and labels its own boxes, so it
+    // gets no `for` and carries .multi.
+    const wide = typeof entry === "object" && entry.wide;
+    const label = `<label${wide ? "" : ` for="${id}"`}><span class="set-name">${esc(s.label)}</span>${s.sub ? `<span class="sub">${esc(s.sub)}</span>` : ""}</label>`;
+    html += `<div class="set${wide ? " multi" : dep}" data-row="${esc(s.key)}">${label}${ctl}</div>`;
   }
   endGroup();
   html += `<details class="group"><summary>Reset</summary><div class="group-body"><button class="btn" type="button" id="btnResetSettings">Restore default settings</button><button class="btn" type="button" id="btnClearPos">Forget my reading position</button></div></details>`;
