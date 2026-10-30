@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.2.1
+  Version 1.2.2
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -301,6 +301,14 @@ TILED MODE ("Tile posts side by side", settings.tile)
       again when a picture inside it lands, and the items on screen are
       checked on every scroll frame (fixIfShort / sweepSpans). Neither ever
       shortens a span.
+      Spans being right is not enough on its own: an engine will only give a
+      grid so many lines (Gecko stops at 10,000), and at 2px a row that is
+      a band about 20,000px tall -- which one busy hour of posts with
+      pictures reaches. Everything past the limit is pinned to the last line
+      and painted outside the band. So a band found with content below its
+      own box is given rows twice as tall and re-counted (fitBand), which is
+      the same layout over fewer lines. Row height is therefore per band
+      (--tile-row set on the band, rowOf), not one number for the feed.
       A span must cover the item's MARGIN box: the tiles have no margins of
       their own (flow-root keeps the posts' inside), but the dividers do, and
       measuring only their border box made their band too short to hold them,
@@ -605,6 +613,30 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-10-30
+
+### Fixed
+
+- **Tiled, the hour banners overlapped the posts.** 1.2.1 fixed a real fault
+  but not this one, and three attempts before it missed as well, because the
+  overlap is not what it looks like: every row count involved is correct. The
+  columns work by telling the grid how many rows tall each post is, over rows
+  of 2px, and a browser will only give one grid so many lines -- Firefox
+  stops at 10,000, which caps a band of posts at about 20,000px. One busy
+  hour with pictures in it goes past that, and every post after the limit is
+  pinned to the last line and drawn outside the band, across the column
+  beside it and over the next hour banner. Nothing about measuring the posts
+  again could help, and it never appeared in Chrome, whose limit is far
+  higher. A band found with posts below its own bottom edge is now given rows
+  twice as tall and re-counted, as often as it takes: the same layout over
+  fewer lines. It keys off "something is outside the band" rather than off
+  any particular browser's limit, so an engine with a different one is
+  handled without the page knowing the number. A band that never overflows is
+  untouched, and the only cost to one that does is that a tile can sit a few
+  pixels lower than it strictly needs to.
+  Measured in Firefox: two bands reading exactly 19998px with 1573px and
+  956px of posts hanging out of the bottom, every span correct.
+
 ## [1.2.1] - 2026-10-30
 
 ### Fixed
@@ -623,6 +655,7 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
   re-taken when a picture inside a post loads, when the typeface lands, and,
   for the posts actually on screen, on every scroll frame. A row count is
   only ever raised, never lowered, so nothing jumps around as you read.
+  (This one turned out not to be the overlap people were seeing; see 1.2.2.)
 
 ## [1.2.0] - 2026-10-29
 
@@ -1676,7 +1709,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v1.2.1 · Bluesky</title>
+<title>Catch-up v1.2.2 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -2537,7 +2570,7 @@ body{transition:padding-right .18s ease}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.2.1";
+const APP_VERSION = "1.2.2";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -4653,7 +4686,11 @@ function itemHeight(el) {
   const cs = getComputedStyle(el);
   return el.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
 }
-function spanFor(el) { return Math.max(1, Math.ceil(itemHeight(el) / TILE_ROW)); }
+/* How tall one row of THIS item's band is. Normally TILE_ROW, but a band
+   that has hit the engine's limit on grid lines is given coarser rows (see
+   fitBand), and every span in it is then counted in those. */
+function rowOf(el) { return Number(el?.parentElement?.dataset.row) || TILE_ROW; }
+function spanFor(el) { return Math.max(1, Math.ceil(itemHeight(el) / rowOf(el))); }
 function spanOf(el) { return parseInt(String(el.style.gridRow).replace("span ", ""), 10) || 0; }
 function setSpan(el) { el.style.gridRow = "span " + spanFor(el); }
 const tileObserver = typeof ResizeObserver === "undefined" ? null
@@ -4679,6 +4716,41 @@ function disconnectTiles() { tileObserver?.disconnect(); }
        bounded by what fits in the window rather than by the length of the
        feed, and does nothing at all while every span is already right. */
 function fixIfShort(el) { if (spanFor(el) > spanOf(el)) setSpan(el); }
+/* A grid can only have so many lines. Gecko stops at 10,000 (kMaxLine), so
+   a band of 2px rows cannot be taller than about 20,000px: once an hour's
+   posts pass that, every further tile is pinned to the last line and
+   painted BELOW the band, across the column beside it and over the next
+   hour banner, and no amount of re-measuring helps because every span is
+   already right. Measured in the wild: two bands reading exactly 19998px
+   with 1573px and 956px of posts hanging out of the bottom. Blink's limit
+   is far higher, which is why this never showed up in Chrome.
+   The answer is not to need the rows. A band that is found with content
+   below its own box is given rows twice as tall and its items re-counted in
+   them, as often as it takes -- so the row count halves each time while the
+   layout stays the same shape. Keyed off "content is outside the band"
+   rather than off any engine's number, so an engine with a different limit
+   (or none) is handled by the same code without knowing anything about it.
+   The cost is granularity: spans round up to the row size, so a band on 8px
+   rows can leave up to 7px under a tile. Only bands that would otherwise
+   break pay it, and a 20,000px band is not somewhere 7px shows. */
+const MAX_TILE_ROW = 64;     // 9,999 rows of these is ~640,000px of band
+function fitBand(band) {
+  for (let guard = 0; guard < 6; guard++) {
+    const bottom = band.getBoundingClientRect().bottom;
+    let past = 0;
+    for (const el of band.children) {
+      // The day banner is sticky: while stuck it is painted away from where
+      // it lives, which is not the overflow being looked for.
+      if (getComputedStyle(el).position === "sticky") continue;
+      past = Math.max(past, el.getBoundingClientRect().bottom - bottom);
+    }
+    const row = rowOf(band.firstElementChild);
+    if (past <= 1 || row >= MAX_TILE_ROW) return;
+    band.dataset.row = row * 2;
+    band.style.setProperty("--tile-row", row * 2 + "px");
+    for (const el of band.children) setSpan(el);
+  }
+}
 function sweepSpans({ all = false } = {}) {
   if (!tileOn()) return;
   const h = window.innerHeight;
@@ -4688,6 +4760,9 @@ function sweepSpans({ all = false } = {}) {
   for (const band of feedEl().children) {
     if (!band.classList.contains("band") || !near(band.getBoundingClientRect())) continue;
     for (const el of band.children) if (near(el.getBoundingClientRect())) fixIfShort(el);
+    // After the spans, not before: a band only counts as overflowing once
+    // everything in it is counted properly.
+    fitBand(band);
   }
 }
 /* The sweep above only looks at what is on or near the screen, because it
@@ -5000,6 +5075,9 @@ function renderMore() {
   feedEl().append(frag);
   state.rendered = end;
   for (const el of placed) measureTile(el);   // heights are only real in the DOM
+  // A batch is 150 posts by default, which can take a band past the number
+  // of grid lines an engine allows all by itself (see fitBand).
+  for (const band of new Set(placed.map(el => el.parentElement))) fitBand(band);
   observeVideos(feedEl());
   updateEndcap();
 }

@@ -484,12 +484,87 @@ test("when the scrolling stops, the whole feed is checked", async () => {
   const far = items[items.length - 1];
   Object.defineProperty(far, "offsetHeight", { value: 1000, configurable: true });
   far.style.gridRow = "span 1";
-  // Out of the near-the-screen sweep's reach (jsdom lays nothing out, so say
-  // so directly rather than pretending to scroll past it).
-  far.getBoundingClientRect = () => ({ top: 99999, bottom: 99999, left: 0, right: 0, width: 0, height: 0 });
+  // Out of the near-the-screen sweep's reach: well above the window, the way
+  // a post you scrolled past an hour ago is. (jsdom lays nothing out, so say
+  // so directly rather than pretending to scroll.) Above rather than below,
+  // because an item below its own band is overflow, which fitBand would
+  // rightly act on.
+  far.getBoundingClientRect = () => ({ top: -99999, bottom: -99000, left: 0, right: 100, width: 100, height: 999 });
   page.window.dispatchEvent(new page.window.Event("scroll"));
   await h.wait(80);
   assert.equal(far.style.gridRow, "span 1", "the per-frame sweep leaves what it can't see");
   await h.wait(500);   // the settle sweep is debounced
   assert.equal(far.style.gridRow, "span 500", "the settle sweep covers it anyway");
+});
+
+/* A grid can only have so many lines: Gecko stops at 10,000, so a band of
+   2px rows cannot be taller than about 20,000px, and a busy hour of posts
+   with pictures goes past that. Every further tile is then pinned to the
+   last line and painted below the band, over the column beside it and over
+   the next hour banner -- with every span perfectly correct, which is why
+   it survived three rounds of fixing the spans. Measured in Firefox: two
+   bands reading exactly 19998px with posts hanging out of the bottom.
+   jsdom lays nothing out, so these stage the geometry directly. */
+const rects = (el, top, bottom) => {
+  el.getBoundingClientRect = () => ({ top, bottom, left: 0, right: 100, width: 100, height: bottom - top });
+};
+
+test("a band whose posts fall out of the bottom is given taller rows", async () => {
+  const page = await h.loadPage({ settings: TILED, server });
+  await page.startDate(start);
+  const band = page.$("#feed > .band");
+  const tile = band.querySelector(".tile");
+  rects(band, 0, 1000);
+  // Past the bottom of its band until the band is re-rowed, then inside it.
+  Object.defineProperty(tile, "offsetHeight", { value: 1000, configurable: true });
+  tile.getBoundingClientRect = () => ({ top: 0, bottom: band.dataset.row ? 1000 : 1500, left: 0, right: 100, width: 100, height: 1000 });
+  page.window.dispatchEvent(new page.window.Event("scroll"));
+  await h.wait(80);
+  assert.equal(band.dataset.row, "4", "the row height is doubled");
+  assert.equal(band.style.getPropertyValue("--tile-row"), "4px", "and handed to the CSS");
+  assert.equal(tile.style.gridRow, "span 250", "spans are re-counted in the new rows (1000 / 4px)");
+});
+
+test("a band that fits is left on the ordinary rows", async () => {
+  const page = await h.loadPage({ settings: TILED, server });
+  await page.startDate(start);
+  const band = page.$("#feed > .band");
+  page.window.dispatchEvent(new page.window.Event("scroll"));
+  await h.wait(80);
+  assert.equal(band.dataset.row, undefined, "nothing is coarsened without cause");
+});
+
+test("re-rowing a band stops rather than doubling for ever", async () => {
+  // An overflow this can't cure (something else entirely) must not spin.
+  const page = await h.loadPage({ settings: TILED, server });
+  await page.startDate(start);
+  const band = page.$("#feed > .band");
+  const tile = band.querySelector(".tile");
+  rects(band, 0, 1000);
+  rects(tile, 0, 9999);
+  Object.defineProperty(tile, "offsetHeight", { value: 1000, configurable: true });
+  page.window.dispatchEvent(new page.window.Event("scroll"));
+  await h.wait(80);
+  assert.equal(band.dataset.row, "64", "it gives up at the biggest row it will use");
+});
+
+test("a batch that overflows its band is re-rowed as it lands", async () => {
+  // Not only on scroll: a batch is 150 posts by default, which can take a
+  // band past the line limit on its own, before anyone has scrolled.
+  const many = { timeline: Array.from({ length: 60 }, (_, i) => h.item(h.post("B" + i, a, -600 + i))) };
+  const page = await h.loadPage({ settings: { ...TILED, batchSize: 25 }, server: many });
+  await page.startDate(h.BASE - 700 * h.MIN);
+  // Stage the geometry the engine would produce with a band out of lines:
+  // tiles painted below the band that holds them, until it is re-rowed.
+  const real = page.window.Element.prototype.getBoundingClientRect;
+  page.window.Element.prototype.getBoundingClientRect = function () {
+    const box = (top, bottom) => ({ top, bottom, left: 0, right: 100, width: 100, height: bottom - top });
+    if (this.classList?.contains("band")) return box(0, 1000);
+    if (this.classList?.contains("tile")) return box(0, this.closest(".band")?.dataset.row ? 1000 : 1500);
+    return real.call(this);
+  };
+  const band = page.$("#feed > .band");
+  assert.equal(band.dataset.row, undefined, "nothing is coarsened before the batch lands");
+  page.eval("renderMore()");
+  assert.equal(band.dataset.row, "4", "the new batch's band is re-rowed without waiting for a scroll");
 });
