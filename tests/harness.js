@@ -136,11 +136,29 @@ function viewRecord(p) {
  *                 derived from `timeline` by author/reposter)
  *   posts:        { uri: postView } served by getPosts (default: from timeline)
  *   handles:      { handle: did } for resolveHandle
+ *   wellKnown:    { host: did } served at https://<host>/.well-known/atproto-did,
+ *                 the first thing handle resolution tries. Absent hosts 404,
+ *                 which is what a domain that doesn't publish its DID does.
+ *   dns:          { handle: did } served as a DNS-over-HTTPS TXT answer for
+ *                 _atproto.<handle>, the second thing tried. Any resolver
+ *                 host answers; absent handles get an empty answer.
+ *   oldestFirst:  true = this server lists collections oldest-first by
+ *                 default (reverse then gives newest-first). The spec leaves
+ *                 the direction to the server, so the page has to cope.
+ *   repos:        { did: { "collection.nsid": [recordValue, ...] } } -- the
+ *                 repositories protocol mode reads. rkeys are r0, r1, ...
+ *                 in the order given; listRecords sorts newest-first by
+ *                 createdAt and pages with a numeric cursor. An
+ *                 app.bsky.actor.profile collection is served at rkey "self".
+ *   didDocs:      { did: didDocument } served by the did:plc directory (any
+ *                 host, so a mirror can be tested) and by did:web's
+ *                 /.well-known/did.json. Defaults to a document pointing at
+ *                 https://pds.example.
  *   offline:      true = every request fails like a blocked connection
  *   handlers:     { "nsid.method": (params, body) => response | {status, error} }
  *                 overrides for anything
  */
-function makeServer(opts, calls) {
+function makeServer(opts, calls, requests) {
   const follows = opts.follows || [1, 2, 3, 4, 5].map(n => actor(n));
   const sortAt = fi => Date.parse(fi.reason?.indexedAt || fi.post.indexedAt);
   // Computed on every request, so tests can add posts to opts.timeline later
@@ -231,7 +249,29 @@ function makeServer(opts, calls) {
       // `calls` only keeps method names: record the query on the server object
       // the test passed in, so the test can read it back.
       (opts.listRecordsQueries ||= []).push(p.toString());
-      if (p.get("collection") !== "app.bsky.feed.like") return { records: [] };
+      const coll = p.get("collection");
+      // Protocol mode reads repositories directly: follows from the user's
+      // own, posts and reposts from each account's. `repos` is
+      // { did: { "collection": [records] } }; every record's rkey comes from
+      // its index, and newest-first is the default order like a real server.
+      if (coll !== "app.bsky.feed.like") {
+        const repo = (opts.repos || {})[p.get("repo")]?.[coll];
+        if (!repo) return { records: [] };
+        const made = repo.map((value, i) => ({ uri: `at://${p.get("repo")}/${coll}/r${i}`, cid: "c" + i, value }));
+        // `oldestFirst` makes this server list a collection the other way
+        // round by default, the way the spec allows: `reverse` reverses
+        // whatever the server's own order is, so a client that wants
+        // newest-first has to notice and ask again. Without this the page's
+        // detection of that could never be exercised.
+        const dir = opts.oldestFirst ? -1 : 1;
+        made.sort((a, b) => dir * (Date.parse(b.value.createdAt) - Date.parse(a.value.createdAt)));
+        if (p.get("reverse") === "true") made.reverse();
+        const lim = Number(p.get("limit") || 50);
+        const from = Number(p.get("cursor") || 0);
+        const slice = made.slice(from, from + lim);
+        const next = from + lim;
+        return { records: slice, ...(next < made.length ? { cursor: String(next) } : {}) };
+      }
       const uris = p.get("reverse") === "true" ? [...(opts.likes || [])].reverse() : (opts.likes || []);
       const n = Number(p.get("limit") || 50);
       return { records: uris.slice(0, n).map((uri, i) => ({ uri: `at://${ME.did}/app.bsky.feed.like/like${i}`, cid: "c", value: { subject: { uri, cid: "c" }, createdAt: iso(0) } })) };
@@ -242,20 +282,62 @@ function makeServer(opts, calls) {
       if (i >= 0) records.splice(i, 1);
       return {};
     },
+    // Proves a saved token still works, without asking an AppView anything.
+    "com.atproto.server.getSession": () => ({ did: ME.did, handle: ME.handle }),
     "com.atproto.repo.getRecord": p => {
       const uri = `at://${p.get("repo")}/${p.get("collection")}/${p.get("rkey")}`;
       const r = records.find(x => x.uri === uri);
-      return r ? { uri, cid: "c", value: r.record } : { status: 400, error: "RecordNotFound", message: `Could not locate record: ${uri}` };
+      if (r) return { uri, cid: "c", value: r.record };
+      // Anything in a simulated repository (protocol mode): a post being
+      // reposted or quoted, or an account's own profile record.
+      const repo = (opts.repos || {})[p.get("repo")]?.[p.get("collection")];
+      if (repo) {
+        const rkey = p.get("rkey");
+        const value = rkey === "self" ? repo[0] : repo[Number(String(rkey).replace(/^r/, ""))];
+        if (value) return { uri, cid: "c", value };
+      }
+      return { status: 400, error: "RecordNotFound", message: `Could not locate record: ${uri}` };
     },
     ...(opts.handlers || {}),
   };
   const fetchFn = async function fetch(url, init = {}) {
     const u = new URL(url);
     const nsid = u.pathname.replace(/^\/xrpc\//, "");
-    calls.push(u.host === "plc.directory" ? "plc.directory" : nsid);
+    calls.push(u.pathname.startsWith("/did:") ? "plc.directory" : nsid);
+    // The full request, for tests about WHERE a call went and what it carried
+    // (page.requests). `calls` records only the method name, so on its own it
+    // cannot tell a correctly routed request from a misrouted one.
+    requests.push({ host: u.host, path: u.pathname, nsid, headers: init.headers || {}, search: u.searchParams });
     if (opts.offline) throw new TypeError("Failed to fetch");
     const json = (status, obj) => ({ ok: status < 400, status, headers: { get: () => null }, json: async () => obj, text: async () => JSON.stringify(obj) });
-    if (u.host === "plc.directory") return json(200, { service: [{ id: "#atproto_pds", serviceEndpoint: "https://pds.example" }] });
+    const text = (status, body) => ({ ok: status < 400, status, headers: { get: () => null }, json: async () => JSON.parse(body), text: async () => body });
+    // The did:plc directory, at whichever host the page was told to use, and
+    // did:web's own document. Both answer with a DID document.
+    const didDoc = did => (opts.didDocs || {})[did] || { service: [{ id: "#atproto_pds", serviceEndpoint: "https://pds.example" }] };
+    if (u.pathname.startsWith("/did:")) return json(200, didDoc(decodeURIComponent(u.pathname.slice(1))));
+    // did:web, both forms: the plain one lives at /.well-known/did.json, and
+    // the path form (did:web:host:a:b) at /a/b/did.json. The did is rebuilt
+    // from the URL so a test can key didDocs by the identifier itself.
+    if (u.pathname.endsWith("/did.json")) {
+      const segs = u.pathname.slice(1, -"/did.json".length).split("/").filter(Boolean);
+      const did = segs.length && segs[0] !== ".well-known"
+        ? "did:web:" + [u.host, ...segs].join(":")
+        : "did:web:" + u.host;
+      return json(200, didDoc(did));
+    }
+    // A DNS-over-HTTPS resolver answering for _atproto.<handle>. Quoted, the
+    // way Cloudflare returns TXT.
+    if (/\/dns-query$|\/resolve$/.test(u.pathname)) {
+      const name = String(u.searchParams.get("name") || "").replace(/^_atproto\./, "").replace(/\.$/, "");
+      const did = (opts.dns || {})[name];
+      return json(200, did ? { Status: 0, Answer: [{ name, type: 16, data: `"did=${did}"` }] } : { Status: 0, Answer: [] });
+    }
+    // A handle's own domain publishing its DID. Off unless a test asks for it,
+    // because a domain that doesn't serve this file is the normal case.
+    if (u.pathname === "/.well-known/atproto-did") {
+      const did = opts.wellKnown?.[u.host];
+      return did ? text(200, did) : json(404, { error: "NotFound" });
+    }
     const route = routes[nsid];
     if (!route) return json(404, { error: "MethodNotImplemented" });
     let body; try { body = init.body ? JSON.parse(init.body) : undefined; } catch {}
@@ -290,6 +372,7 @@ async function waitFor(fn, { timeout = 4000, step = 20, message = "condition" } 
  */
 async function loadPage({ url = "https://example.test/", session = true, settings = {}, storage = {}, server = {} } = {}) {
   const calls = [];
+  const requests = [];         // every request, with host and headers (page.requests)
   const clip = [];
   const observers = [];        // IntersectionObservers, in construction order
   const resizeObservers = [];  // ResizeObservers (the tiled layout's row spans)
@@ -297,7 +380,7 @@ async function loadPage({ url = "https://example.test/", session = true, setting
   const dom = new JSDOM(PAGE_HTML, {
     url, runScripts: "dangerously", pretendToBeVisual: true,
     beforeParse(w) {
-      w.fetch = makeServer(server, calls);
+      w.fetch = makeServer(server, calls, requests);
       w.__records = w.fetch.records;
       w.TextEncoder = TextEncoder; w.TextDecoder = TextDecoder;
       w.structuredClone = structuredClone;
@@ -344,7 +427,7 @@ async function loadPage({ url = "https://example.test/", session = true, setting
   await wait(30);
 
   const pageObj = {
-    window: w, document: d, calls, clip, observers, resizeObservers, scrolls, $, $$, visible,
+    window: w, document: d, calls, requests, clip, observers, resizeObservers, scrolls, $, $$, visible,
     eval: code => w.eval(code),
     /** Evaluates an expression in the page and returns a plain copy (use this
      *  for arrays/objects: values from the page's realm fail deepStrictEqual). */

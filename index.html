@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.1.8
+  Version 1.2.0
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -65,9 +65,16 @@ WHAT THIS IS
   you can read forward in time by scrolling down. You can like, repost, copy
   links, and watch videos inline. No server, no build step, no install.
 
-  Opening the page fetches NOTHING but Bluesky's own services. The typeface
-  is embedded in the file, and so is the tab icon, so a copy saved to disk
-  looks the same offline.
+  Opening the page fetches nothing but the servers of the network it reads:
+  your own account's server, an AppView and that AppView's picture and video
+  hosts, and plc.directory to find your account's server. With "Build the
+  catch-up without an AppView" on there is no AppView and no CDN at all:
+  posts and pictures come from the server holding each account, though the
+  directory is still used to find those servers. Which AppView is a
+  setting (see "which servers we talk to"); left empty, it's whichever one
+  your own server picks, which for a bsky.social account is Bluesky's. The
+  typeface is embedded in the file, and so is the tab icon, so a copy saved
+  to disk looks the same offline.
   The one thing still fetched from elsewhere is optional and on demand:
     - hls.js from jsDelivr, for inline video in browsers that can't play HLS
       natively (Chrome/Firefox). Safari and iOS never fetch it. Elsewhere it
@@ -76,15 +83,28 @@ WHAT THIS IS
       videos fall back to a "watch on bsky.app" link.
 
 HOW IT WORKS (high-level data flow)
-  1. Sign-in   login() -> resolves the handle's PDS (personal data server) via
-               public.api.bsky.app + plc.directory, then calls
+  1. Sign-in   login() -> resolves the handle to a DID (resolveHandleDid: the
+               handle's _atproto DNS record read through a DNS-over-HTTPS
+               resolver first, as the protocol requires, then the handle's own
+               domain, then the chosen AppView, then public.api.bsky.app),
+               looks its PDS (personal data
+               server) up in the DID document -- via the configured did:plc
+               directory, or the domain's own /.well-known/did.json for
+               did:web, which needs no directory at all -- then calls
                com.atproto.server.createSession on that PDS. The session JWTs
                (never the app password) are kept in localStorage if
-               "Stay signed in" is ticked.
+               "Stay signed in" is ticked. Naming a server on the sign-in
+               screen skips all of that: nothing is resolved and the page
+               talks only to the address given.
   2. Requests  All authenticated calls go through xrpc(), which talks to the
-               user's PDS. The PDS proxies app.bsky.* calls to the Bluesky
-               AppView. xrpc() handles pacing (requests/minute), retries,
-               429 rate-limit pauses, and access-token refresh.
+               user's PDS. app.bsky.* calls are reads that only an AppView can
+               answer, so the PDS proxies them on -- to its own default
+               AppView, or to the one named in the `atproto-proxy` header when
+               the `appView` setting says which (see "which servers we talk
+               to"). com.atproto.* calls are the user's own repository and are
+               never proxied anywhere. xrpc() handles pacing
+               (requests/minute), retries, 429 rate-limit pauses, and
+               access-token refresh.
   3. Fetching  A catch-up reads one feed: the Following timeline (the
                default), a custom feed, or a list. All three return the same
                app.bsky.feed.defs#feedViewPost shape, so only the request
@@ -93,6 +113,12 @@ HOW IT WORKS (high-level data flow)
                thing that means much on a feed that ranks posts rather than
                ordering them by time.
                gather() decides how to get posts back to a timestamp:
+                 c) "protocol" (settings.protocolOnly, Following feed only):
+                    no AppView at all -- read the follow records out of the
+                    user's own repository, then each account's posts and
+                    reposts out of theirs, with com.atproto.repo.listRecords
+                    against the server its DID document names. See
+                    fetchProtocol, and the changelog for what it gives up.
                  a) "timeline": page app.bsky.feed.getTimeline backwards.
                     Fast, but the server may stop serving old pages.
                  b) "rebuild": fetch the follow list (getFollows), then page
@@ -570,6 +596,144 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.2.0] - 2026-10-29
+
+Divesting from Bluesky the company while staying on the network it runs on.
+Nothing here changes which posts you see; it changes which servers are asked
+for them. The AppView becomes a choice, identity stops needing Bluesky's API
+at all, and there is now a mode that reads a catch-up with no AppView
+whatsoever — off by default, and a good deal less than the usual path, because
+it exists so that independence is available rather than compulsory.
+
+### Added — reading without an AppView
+
+- **"Build the catch-up without an AppView"** (Settings → Advanced). Reads
+  each account's posts straight from the server holding them, using only the
+  protocol's own endpoints, which every server on the network implements.
+  Follows come from your own repository, posts and reposts from each
+  account's, quoted posts from whoever wrote them, and pictures from the
+  repositories rather than a CDN. Nothing on the screen involves an AppView.
+- A readout row saying how the next catch-up will be put together.
+- **Settings moves the page aside instead of covering it**, so a change to
+  the look can be seen as it is made. Only when there is room: if holding
+  the page aside would cost it a column, it stays put and the drawer
+  covers it rather than re-flowing the feed under you. Changing the
+  column settings while it is open re-decides that either way. The
+  settings panel is also a little wider, for the longer explanations.
+- Links into the protocol's documentation throughout Settings → Advanced:
+  inline in each setting's explanation, and as a line of further reading
+  under it. Every destination is checked and named in one place, so a
+  setting can only ever point at documentation.
+
+### What it gives up, which is the point of saying so here
+
+An AppView exists because aggregating a network is real work, and this does
+none of it. With the mode on there are no like, repost or reply counts; no
+context for replies; **no labels, so "Adult or graphic media" stops working**;
+and handles are the ones each account claims about itself rather than ones
+checked. It also starts out not knowing what you have already liked or
+reposted, though both still work. Times are self-reported too — nothing witnessed these posts, so a
+record is sorted by when it was read rather than the date it carries, which
+stops one dated next year from sitting at the top for ever.
+
+It is also slower: roughly twice the requests of rebuilding from follows, and
+they go to hundreds of different servers, so expect a minute or two rather
+than seconds. Custom feeds and lists are things an
+AppView computed and cannot be read this way; those still come the usual way,
+and the feed says so.
+
+And it is not a clean break: your identities are still looked up in the
+did:plc directory, once per account, which is Bluesky's. Those lookups are
+cached for a week so a second catch-up asks for none of them, but the mode
+removes the AppView, not the directory.
+
+- **Requests are paced per server, not across all of them together.** A rate
+  limit belongs to a server, which has no idea what you are asking of anyone
+  else, so "max requests per minute" is now counted against each one
+  separately and a 429 pauses only the server that sent it. This barely
+  matters when everything goes to one host, but reading repositories talks
+  to dozens: measured over 800 follows at the default setting, a catch-up
+  that would have taken about six and a half minutes takes **one minute
+  forty** — the queues no longer wait behind each other. How many requests
+  are in flight at once is still capped by "Parallel requests".
+
+### Added — identity
+
+- **Handles resolve through DNS.** A handle can publish its account's
+  identifier as a DNS record, which is the protocol's primary method and one
+  Bluesky has nothing to do with. Browsers can't read DNS directly, so a
+  DNS-over-HTTPS resolver answers over the web instead; Cloudflare's is the
+  default and the setting takes any other, or can be emptied to ask nobody.
+  Measured: this reaches handles on their own domains, which the
+  previous method could not, because browsers refuse to read most sites'
+  files from another site. It is asked before the handle's own site, which
+  is the order the protocol requires when a handle publishes both.
+- **Name your own server when signing in.** If you know the server holding
+  your account, say so and nothing is looked up anywhere at all: not your
+  site, not a resolver, not an AppView, not any public API. This is the
+  shortest path there is, and the only one that involves nobody but you and
+  your own server. An address that can't be read is refused rather than
+  quietly replaced with Bluesky's, and says what to try instead.
+- **A setting for the did:plc directory**, so a mirror can be used instead of
+  the one Bluesky PBC runs.
+- A third mark in the readout. "Run by Bluesky" and "the open protocol" are
+  not the only possibilities: a DNS resolver is a third party you chose, and
+  saying so plainly is better than filing it under either.
+
+### Changed
+
+- did:web accounts are resolved properly, including the path form
+  (`did:web:example.com:user:alice`). These accounts need no directory at
+  all, which makes did:web the one identity method that owes Bluesky nothing.
+- The readout names the directory actually in use, and says whether it is
+  Bluesky's or a mirror.
+
+### Added — choosing your servers
+
+- An **AppView** setting (Settings → Advanced). The AppView is the server that
+  assembles feeds, threads and profiles out of the network; until now the page
+  silently used whichever one your own server picks, which for a bsky.social
+  account is Bluesky's. Name another by hostname or service DID and every
+  feed, thread and profile is read from there instead. Your posts, likes and
+  follows are unaffected: those have always gone to your own server and still
+  do.
+- A **web front-end** setting. "Open", "Reply" and copied links can point at
+  any front-end for the same network, not only bsky.app. Pasted links from any
+  front-end are now understood too, so a feed, list or post link from
+  somewhere else works in the start screen.
+- A readout at the foot of **Advanced** naming what this copy is actually
+  talking to: your account and its server, the AppView in use, the picture and
+  video hosts, how your identity resolves, and where this page learned your
+  DID when you signed in. Anything it can't know says so and says why, rather
+  than guessing or going quiet. Each row links to the relevant part of the AT
+  Protocol documentation, for anyone who wants to follow the thread.
+- Each of those rows is marked with who runs it: Bluesky's butterfly, or a
+  globe for the open protocol. Four butterflies in a row is a clearer answer
+  to "how much of this is one company?" than any amount of prose, and the
+  marks are links to Bluesky's and the protocol's own documentation. Nothing
+  is marked unless it's known, so an unmarked row never implies "independent".
+
+### Changed
+
+- Handle resolution no longer needs Bluesky's public API. It asks the handle's
+  own domain first (/.well-known/atproto-did), then the chosen AppView, and
+  only falls back to public.api.bsky.app if neither answers.
+- The thumbnails of a quote inside a quote -- the one place the page builds
+  picture URLs itself -- follow the chosen AppView, and are left out rather
+  than fetched from Bluesky when the AppView's picture host can't be worked
+  out. Every other picture already used an address the AppView handed over.
+- The "About this page and your privacy" note now says which servers this copy
+  is actually set to use, instead of promising it only ever talks to Bluesky.
+
+### Fixed
+
+- Being unable to reach any server at sign-in said the handle was misspelled.
+  It now says the connection failed, which is what happened.
+- An AppView that can't be reached now says so, and names the setting to
+  check. A wrong hostname makes your own server answer 500, which the general
+  retry path treated as a passing glitch: eight attempts over several minutes,
+  ending in "Bluesky returned an error". It gets one retry now.
 
 ## [1.1.8] - 2026-10-28
 
@@ -1485,7 +1649,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v1.1.8 · Bluesky</title>
+<title>Catch-up v1.2.0 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -1550,6 +1714,10 @@ site with this release.
 :root{
   --bg:#EDF0F4; --surface:#FFFFFF; --surface-2:#F5F7FA; --ink:#1B2430; --muted:#5F6B7A; --line:#D9DFE7;
   --accent:#3550C8; --accent-ink:#FFFFFF; --like:#D6336C; --repost:#23865F; --anchor:#FFF4C2; --anchor-line:#E3B505; --hour-bg:#DFE5F6;
+  /* Who-runs-what marks in the Protocol readout: Bluesky's blue, and the AT
+     Protocol's amber (sampled from its own globe mark), darkened here so both
+     stay readable as small glyphs on a light background. */
+  --bsky-mark:#0B61C9; --atproto-mark:#8A6A06;
   --shadow:0 1px 0 rgba(27,36,48,.06);
   --fs:16px; --col:640px;
   /* The tallest a picture may be: 90% of the window below the top bar, so
@@ -1567,6 +1735,7 @@ site with this release.
   color-scheme:dark;
   --bg:#0F141B; --surface:#171E27; --surface-2:#1E2732; --ink:#E3E8EF; --muted:#8E9AAB; --line:#2A3441;
   --accent:#8EA6FF; --accent-ink:#0F141B; --like:#FF6B9A; --repost:#4CC495; --anchor:#3A3312; --anchor-line:#C9A227; --hour-bg:#1C2640;
+  --bsky-mark:#4C8DFF; --atproto-mark:#D9A520;
   --shadow:none;
 }
 /* ---------- base ---------- */
@@ -2021,7 +2190,15 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .embed-unknown{border:1px dashed var(--line); border-radius:10px; padding:8px 10px; color:var(--muted); font-size:.9em}
 /* ---------- settings drawer (built dynamically from SETTINGS_SCHEMA) ---------- */
 .drawer-scrim{position:fixed; inset:0; background:rgba(0,0,0,.3); z-index:40}
-.drawer{position:fixed; top:0; right:0; bottom:0; width:min(380px, 100vw); background:var(--surface); border-left:1px solid var(--line); z-index:41; overflow-y:auto; padding:16px 18px 40px}
+.drawer{position:fixed; top:0; right:0; bottom:0; width:min(440px, 100vw); background:var(--surface); border-left:1px solid var(--line); z-index:41; overflow-y:auto; padding:16px 18px 40px}
+/* While the drawer is open the page moves aside instead of hiding behind it,
+   so a change to the look can be seen as it is made. Padding on <body> is
+   what does it: the bar is sticky rather than fixed and main is centred with
+   auto margins, so both re-centre in what is left with nothing else to keep
+   in step. Only applied when it costs no columns -- see canShiftForDrawer. */
+body{transition:padding-right .18s ease}
+:root[data-drawer] body{padding-right:var(--drawer-w)}
+:root[data-drawer] .drawer-scrim{background:transparent}
 .drawer h2{font-size:1.2em; margin:0 0 4px; display:flex; justify-content:space-between; align-items:center}
 /* Setting groups. Closed by default; <details> gives keyboard and screen
    reader behaviour for free, so there's no JS behind the toggling. */
@@ -2033,6 +2210,55 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .drawer details.group > summary:hover{color:var(--accent)}
 .group-sum{margin-left:auto; font-size:.76em; font-weight:400; color:var(--accent)}
 .group-body{padding-bottom:12px}
+/* The Protocol group's read-only readout of what this copy is actually
+   talking to (schema rows marked `info`, built by protocolReadout). Not
+   settings: a flat list of fact/value pairs, with the value allowed to wrap
+   and break, because a DID or a long hostname has nowhere good to break. */
+/* Two columns for the term and its value, but the explanation and the
+   further reading run the FULL width, under the term as well as beside it --
+   the drawer is narrow and keeping prose in one half of it wasted the other.
+   `display:contents` on the <dd> is what allows that: the dd's own box goes
+   away and its children become grid items in their own right, so they can be
+   placed per-child while the markup stays an ordinary <dl>. Inherited styles
+   (the muted italic of an unknown row) still reach them. */
+/* The term column is capped rather than sized to the longest term: letting
+   "Catch-up assembled by" set the width left the values breaking mid-word
+   (did:web:api.bsky.app#bsky_a / ppview). A long term wraps instead, which
+   costs one line on two rows and gives every value room to break at a
+   sensible place. */
+.infra{display:grid; grid-template-columns:minmax(0,7.5em) 1fr; column-gap:12px; row-gap:0; font-size:.84em; padding:4px 0 10px}
+.infra dt{color:var(--muted); margin-top:11px}
+.infra dt:first-of-type{margin-top:0}
+.infra dd{display:contents}
+.infra .val{grid-column:2; margin-top:11px; overflow-wrap:anywhere}
+.infra dd:first-of-type .val{margin-top:0}
+.infra .note{grid-column:1 / -1; display:block; color:var(--muted); font-size:.92em; margin-top:2px; overflow-wrap:anywhere}
+.infra dd.none{color:var(--muted); font-style:italic}
+/* Further reading for a row, pointing at the protocol's own documentation.
+   Small and quiet: it's an invitation, not part of the answer. */
+.infra .docs{grid-column:1 / -1; display:block; font-size:.92em; margin-top:3px}
+.infra .docs a{color:var(--muted); text-decoration:underline; text-underline-offset:2px}
+.infra .docs a:hover{color:var(--ink)}
+.infra-intro{font-size:.84em; color:var(--muted); padding:8px 0 2px}
+/* Who runs this piece: Bluesky's butterfly, or the protocol's at-sign. Sits
+   on the value line, before the value, and is tinted so the two read apart at
+   a glance without having to recognise either mark. */
+/* The mark sits beside the FIRST line of the value, not above it: a long
+   value (a service DID, a long hostname) wraps under itself rather than
+   pushing the icon onto a line of its own. */
+.infra .val{display:flex; gap:5px}
+.infra .val > span:last-child{min-width:0; overflow-wrap:anywhere}
+.infra .op{flex:none; display:inline-flex; align-self:flex-start; margin-top:1px; border-radius:3px}
+.infra .op svg{width:13px; height:13px; display:block}
+.infra .op:hover{opacity:.75}
+.infra .op-bluesky{color:var(--bsky-mark)}
+.infra .op-atproto{color:var(--atproto-mark)}
+.infra .op-other{color:var(--muted)}
+/* The optional "your server" row on the sign-in form. */
+.field-advanced{margin:2px 0 10px}
+.field-advanced summary{font-size:.86em; color:var(--muted); cursor:pointer}
+.field-advanced summary:hover{color:var(--ink)}
+.field-advanced .field{margin-top:8px}
 /* A setting that only applies while another one has a particular value (the
    schema's `when`): indented under its parent so the nesting is visible, and
    dimmed while it isn't in effect. The control is disabled too, in
@@ -2053,6 +2279,12 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .set{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:7px 0; border-bottom:1px solid var(--line)}
 .set label{font-size:.92em}
 .set .sub{display:block; font-size:.8em; color:var(--muted)}
+/* Links inside a setting's explanation, and the further-reading line under
+   it. Underlined rather than coloured: the drawer is dense, and a row of
+   accent-coloured words would read as more important than the setting. */
+.set .sub a{color:inherit; text-decoration:underline; text-underline-offset:2px}
+.set .sub a:hover{color:var(--ink)}
+.set .sub .docs{display:block; margin-top:4px}
 .set select, .set input[type=number]{border:1px solid var(--line); background:var(--surface-2); border-radius:6px; padding:4px 6px; max-width:160px}
 .set input[type=number]{width:80px}
 .set input[type=text]{border:1px solid var(--line); background:var(--surface-2); border-radius:6px; padding:4px 6px; width:140px}
@@ -2124,11 +2356,11 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
   <!-- Sign in -->
   <section class="panel hidden" id="viewLogin">
     <h1>Sign in to Bluesky</h1>
-    <p>Sign in with an app password, not your main password. Create one on bsky.app under <a href="https://bsky.app/settings/app-passwords" target="_blank" rel="noopener">Settings → Privacy and security → App passwords</a>.</p>
+    <p>Sign in with an app password, not your main password. Create one on <span class="web-host">bsky.app</span> under <a data-weblink="/settings/app-passwords" href="https://bsky.app/settings/app-passwords" target="_blank" rel="noopener">Settings → Privacy and security → App passwords</a>.</p>
     <!-- Short, always-visible safety note; the full explanation is in the
          <details> block under the form. Keep both accurate if the page ever
          starts talking to new servers or storing new data. -->
-    <div class="callout"><strong><a href="https://bsky.app/settings/app-passwords" target="_blank" rel="noopener">Make a new app password</a> just for this page</strong> (for example, name it “Catch-up”). Don't reuse one from another app, and leave “Allow access to your direct messages” unchecked; this page doesn't need it. If anything ever seems off, you can revoke that one password without affecting anything else.</div>
+    <div class="callout"><strong><a data-weblink="/settings/app-passwords" href="https://bsky.app/settings/app-passwords" target="_blank" rel="noopener">Make a new app password</a> just for this page</strong> (for example, name it “Catch-up”). Don't reuse one from another app, and leave “Allow access to your direct messages” unchecked; this page doesn't need it. If anything ever seems off, you can revoke that one password without affecting anything else.</div>
     <form id="loginForm" autocomplete="on">
       <div class="field">
         <label for="inHandle">Handle</label>
@@ -2138,6 +2370,19 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
         <label for="inPass">App password</label>
         <input type="password" id="inPass" placeholder="xxxx-xxxx-xxxx-xxxx" autocomplete="current-password" required>
       </div>
+      <!-- Optional, and the most direct route there is: name your server and
+           nothing is looked up anywhere. No site is asked, no DNS resolver,
+           no AppView, no public API -- the page goes straight to the server
+           you named. Left empty, sign-in works it out (resolveHandleDid).
+           Collapsed by default: most people neither know nor need it. -->
+      <details class="field-advanced">
+        <summary>I know which server holds my account</summary>
+        <div class="field">
+          <label for="inPds">Your server</label>
+          <input type="url" id="inPds" placeholder="https://bsky.social" autocomplete="off" spellcheck="false">
+          <span class="hint">Nothing is looked up when this is filled in: the page talks only to this address.</span>
+        </div>
+      </details>
       <label class="hint"><input type="checkbox" id="inRemember" checked> Stay signed in on this computer</label>
       <div class="form-actions"><button class="btn primary" type="submit" id="btnLogin">Sign in</button></div>
       <div class="err" id="loginErr"></div>
@@ -2153,7 +2398,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
       <ul>
         <li><strong>Where this page comes from.</strong> It's an open-source project by <a href="https://choccy.gay" target="_blank" rel="noopener">choccy</a>. The source, the full change history and every past version live on <a id="aboutRepo" href="https://github.com/choccccy/bsky-catch-up" target="_blank" rel="noopener">GitHub</a> &mdash; you're running <a id="aboutRelease" href="https://github.com/choccccy/bsky-catch-up/releases" target="_blank" rel="noopener">version <span id="aboutVersion"></span></a>. It's free to use, copy and change under the <a href="https://github.com/choccccy/bsky-catch-up/blob/main/LICENSE" target="_blank" rel="noopener">MIT licence</a>. Found a bug, or want something it doesn't do? <a href="https://github.com/choccccy/bsky-catch-up/issues" target="_blank" rel="noopener">Open an issue</a>.</li>
         <li><strong>You can keep your own copy.</strong> The whole thing is one HTML file: <a id="aboutDownload" href="https://github.com/choccccy/bsky-catch-up/releases" target="_blank" rel="noopener">download version <span id="aboutDlVersion"></span></a> (or just save this page) and open it straight from your disk. It works exactly the same, needs no server or install, and keeps working even if this site ever goes away. Everything is in that one file, documentation included: how it works, every setting and the full history of changes are written as a comment at the top, so you can open it in any text editor and read it.</li>
-        <li><strong>It runs entirely in your browser.</strong> There's no server behind this page. It connects only to Bluesky's own services (your account's server, Bluesky's public API, and plc.directory to look up which server hosts your account), and, only when you play a video, jsDelivr for the video player library. The typeface and the icon are built into the file, so nothing else is ever fetched. Your password and posts are never sent anywhere else.</li>
+        <li><strong>It runs entirely in your browser.</strong> There's no server behind this page. It connects to your own account's server (where your password is sent, and nowhere else), to an AppView for reading feeds and threads &mdash; by default whichever one your account's server uses, or any other you name under Settings → Advanced &mdash; and to that AppView's picture and video hosts. Signing in may also ask the site your handle is named after, a DNS-over-HTTPS resolver (Cloudflare's unless you change it) and the did:plc directory, to work out which server holds your account; naming that server yourself skips all three. Only when you play a video, it also fetches the video player library from jsDelivr. The typeface and the icon are built into the file, so nothing else is ever fetched. <span id="aboutServers"></span></li>
         <li><strong>Why a separate app password, then?</strong> Because the page is a file that can be copied and edited, a unique password limits the damage if a copy was ever tampered with or your computer is compromised. App passwords can't change your password or email, or delete your account, and you can revoke each one individually.</li>
         <li><strong>“Stay signed in” stores a sign-in token, not your password,</strong> in this browser's local storage for this file. Settings and your reading position are stored there too. Uncheck it on a shared computer, and use “Sign out” when you're done.</li>
         <li><strong>Likes and reposts are real.</strong> They're posted to your actual account and are public, just as if you'd done them on bsky.app.</li>
@@ -2265,7 +2510,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.1.8";
+const APP_VERSION = "1.2.0";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -2308,6 +2553,19 @@ function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.re
 
 /* Inline SVG icons (stroke uses currentColor so CSS colour states apply). */
 const ICON = {
+  /* Marks for the Protocol readout, saying who runs each piece. The
+     butterfly is Bluesky's own, traced from the mark they serve, and is
+     used here only to LABEL their infrastructure as theirs -- this page is
+     not a Bluesky product and says so on the sign-in screen. The at-sign is
+     a globe, for the AT Protocol, in the amber of its own mark. That mark is
+     really an ASCII-art globe, which is lovely at avatar size and illegible
+     at 13px (measured: it collapses to a smudge), so this is a plain globe
+     in its colour rather than a bad copy of it. Both are inlined like every
+     other icon: a readout about not depending on Bluesky must not fetch a
+     picture from Bluesky. */
+  bsky: '<svg viewBox="0 0 512 512" fill="currentColor" aria-hidden="true"><g transform="translate(0,512) scale(0.1,-0.1)"><path d="M390 4706 c-136 -38 -201 -106 -247 -261 -25 -85 -24 -350 1 -645 2 -19 7 -71 10 -115 4 -44 9 -96 11 -115 2 -19 6 -71 10 -115 6 -84 23 -243 30 -285 2 -14 6 -52 10 -85 6 -53 13 -98 29 -171 11 -54 63 -166 111 -240 108 -167 281 -302 470 -369 28 -9 59 -21 70 -26 30 -13 181 -46 250 -55 33 -4 113 -8 177 -8 64 -1 114 -4 110 -7 -6 -4 -65 -17 -197 -43 -11 -2 -47 -11 -80 -21 -33 -9 -73 -20 -90 -24 -50 -14 -180 -68 -245 -103 -91 -49 -173 -119 -219 -188 -50 -75 -61 -112 -68 -217 -12 -180 93 -411 310 -681 222 -277 442 -450 663 -524 88 -29 233 -31 309 -4 180 64 333 229 473 511 77 155 189 454 247 664 19 67 29 76 39 34 9 -39 27 -100 91 -317 148 -494 305 -754 516 -850 74 -34 109 -40 219 -39 108 1 202 27 325 91 92 48 267 161 295 192 3 3 25 21 50 41 52 42 151 143 205 209 20 25 44 54 53 65 28 33 122 179 122 189 0 5 6 17 14 25 8 9 28 57 46 106 108 309 -13 558 -355 727 -130 65 -292 118 -435 144 -73 14 -54 19 68 20 254 1 468 53 660 160 241 135 421 396 447 649 4 38 8 72 10 75 2 5 5 28 20 168 3 23 7 61 10 85 2 23 7 74 11 112 3 39 7 86 9 105 2 19 7 76 10 125 4 50 8 106 10 125 20 204 26 480 13 558 -26 153 -80 247 -168 292 -203 104 -452 40 -817 -209 -131 -90 -162 -114 -248 -186 -319 -270 -683 -685 -967 -1105 -91 -134 -218 -344 -218 -360 0 -23 -18 -7 -39 36 -27 58 -135 231 -210 339 -64 93 -211 295 -226 311 -5 6 -21 26 -35 44 -14 18 -30 38 -35 44 -6 6 -39 46 -74 90 -124 152 -370 410 -511 536 -19 17 -44 39 -55 49 -218 194 -582 408 -762 446 -57 13 -189 13 -233 1z"/></g></svg>',
+  other: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>',
+  atproto: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.2"/><ellipse cx="12" cy="12" rx="4" ry="9.2"/><path d="M3 12h18M5 6.6h14M5 17.4h14"/></svg>',
   reply: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1.1-4.6A8 8 0 1 1 21 12z"/></svg>',
   repost: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></svg>',
   like: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 1 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"/></svg>',
@@ -2332,6 +2590,30 @@ function defaultPreloadVideos() {
   if ((mem && mem <= 4) || (cores && cores <= 4)) return 1;
   return 3;
 }
+/* Documentation a setting or a readout row can point at, by name. Settings
+   name a destination rather than writing a URL, so every link in the drawer
+   is one of these, every one has been checked, and there is a single place
+   to fix one that moves. Nothing outside this map can be linked to from a
+   setting's text (see subHtml), which is what makes it safe to let that text
+   carry markup at all. */
+const DOC = {
+  protocol: "https://atproto.com/",
+  glossary: "https://atproto.com/guides/glossary",
+  identity: "https://atproto.com/guides/identity",
+  repos: "https://atproto.com/guides/data-repos",
+  repoSpec: "https://atproto.com/specs/repository",
+  selfHost: "https://atproto.com/guides/self-hosting",
+  did: "https://atproto.com/specs/did",
+  handles: "https://atproto.com/specs/handle",
+  lexicon: "https://atproto.com/specs/lexicon",
+  xrpc: "https://atproto.com/specs/xrpc",
+  blobs: "https://atproto.com/specs/blob",
+  aturi: "https://atproto.com/specs/at-uri-scheme",
+  plc: "https://web.plc.directory/spec/v0.1/did-plc",
+  plcMirror: "https://atproto.com/blog/plc-replicas",
+  services: "https://docs.bsky.app/docs/protocol-services#the-protocol-services",
+  bskyApi: "https://docs.bsky.app/docs/bluesky-api",
+};
 /* Default values for every setting. Saved settings are merged over these at
    load time, so adding a new key here is backwards-compatible. */
 const DEFAULTS = {
@@ -2341,6 +2623,9 @@ const DEFAULTS = {
   wholeImages: "app", mediaWidth: 1, wholeAlt: true, wholeVideo: true, wholeLinkThumbs: true,
   contextCount: 12, scrollTo: "anchor", trackPosition: true, fetchMethod: "auto",
   concurrency: 6, rpm: 500, batchSize: 150,
+  appView: "", webHost: "bsky.app",
+  dnsResolver: "https://cloudflare-dns.com/dns-query", plcDirectory: "https://plc.directory",
+  protocolOnly: false,
 };
 /* Settings are compared by their JSON, so array settings (multi) compare by
    content rather than by identity. isDefaultValue is the one definition of
@@ -2481,16 +2766,41 @@ const SETTINGS_SCHEMA = [
   { key: "confirmRepost", link: true, label: "Ask before reposting", sub: "Shows a small menu instead of reposting on one click", type: "bool" },
   { key: "confirmFollow", link: true, label: "Ask before following", sub: "Shows a small menu instead of following on one click. Unfollowing asks the same way.", type: "bool" },
   { key: "galleryProxy", link: true, label: "Copy gallery links via an embed proxy", sub: "Bluesky's own link previews don't show galleries. When on, “Copy link” on gallery posts uses the proxy below instead of bsky.app.", type: "bool" },
-  { key: "galleryProxyHost", link: true, label: "Embed proxy for gallery links", sub: "The site that replaces bsky.app in copied links, e.g. xbsky.app. Leave empty to use bsky.app.", type: "text", placeholder: "xbsky.app" },
+  { key: "galleryProxyHost", link: true, label: "Embed proxy for gallery links", sub: "The site that replaces the front-end above in copied links, e.g. xbsky.app. Leave empty to use the front-end itself.", type: "text", placeholder: "xbsky.app",
+    docs: [["at:// addresses", "aturi"]] },
   { group: "Catching up" },
   { key: "contextCount", link: true, label: "Earlier posts shown above a start post", type: "number", min: 0, max: 100, apply: "render" },
   { key: "scrollTo", link: true, label: "When the feed opens, show", type: "select", options: [["anchor", "The start post"], ["context", "The earliest context post"]] },
   { key: "trackPosition", label: "Remember how far I've read", type: "bool" },
-  { key: "fetchMethod", link: true, label: "How to load posts", sub: "Auto uses the timeline, and rebuilds from your follows if the timeline doesn't reach back far enough", type: "select", options: [["auto", "Auto"], ["timeline", "Timeline only"], ["rebuild", "Always rebuild from follows"]] },
+  { key: "fetchMethod", link: true, label: "How to load posts", sub: "Auto uses the timeline, and rebuilds from your follows if the timeline doesn't reach back far enough", type: "select", options: [["auto", "Auto"], ["timeline", "Timeline only"], ["rebuild", "Always rebuild from follows"]],
+    needs: () => !settings.protocolOnly,
+    needsWhy: "Not used while “Build the catch-up without an AppView” is on, which has its own way of gathering posts." },
   { group: "Advanced" },
+  { key: "appView", label: "AppView", sub: "An [AppView](services) is the server that assembles feeds, threads and profiles out of the network. Leave this empty and your own server picks one for you — for a bsky.social account, Bluesky’s. Give a hostname (api.bsky.app) or a full [service DID](did) (did:web:api.bsky.app#bsky_appview) to choose. Your posts, likes and follows never come here: those always go to your own server.", type: "text", placeholder: "api.bsky.app",
+    docs: [["What an AppView is", "services"], ["How requests work", "xrpc"], ["Lexicons", "lexicon"]] },
+  // Deliberately NOT link: true, unlike galleryProxyHost. This one decides
+  // where "Reply" and "Open" send you, so a shared catch-up link could point
+  // every post at a convincing copy of a front-end and collect the password
+  // typed into it. The proxy host above only rewrites links you copy out
+  // yourself, which is why that one can travel and this one can't.
+  { key: "webHost", label: "Web front-end for links", sub: "The site that “open”, “reply” and copied links point at. Any front-end for the same network works — a post is named by an [at:// address](aturi) that every one of them can show. Leave empty to use bsky.app.", type: "text", placeholder: "bsky.app", apply: "render",
+    docs: [["at:// addresses", "aturi"], ["The network", "protocol"]] },
+  { key: "dnsResolver", label: "DNS resolver for handles", sub: "A [handle](handles) can publish its account’s [identifier](did) as a DNS record, which browsers can’t read directly — so one of these answers the question over HTTPS instead. Used only at sign-in, and asked before the handle’s own site, as the protocol requires. Empty means don’t ask anyone: sign-in then falls back to an AppView, or to Bluesky’s public API.", type: "text", placeholder: "https://cloudflare-dns.com/dns-query",
+    docs: [["How handles resolve", "handles"], ["Identity", "identity"]] },
+  { key: "plcDirectory", label: "Directory for did:plc identities", sub: "The register that says which server holds your account. Bluesky PBC runs the only canonical [did:plc](plc) one, but it can be [mirrored](plcMirror) — name a mirror here, your own or somebody else’s, and lookups go there instead. That changes who you read from, not who keeps the register. Accounts on [did:web](did) skip it entirely, which makes did:web the one identity method that needs nothing of Bluesky’s.", type: "text", placeholder: "https://plc.directory",
+    docs: [["Running a mirror", "plcMirror"], ["The did:plc method", "plc"], ["DIDs", "did"], ["Identity", "identity"]] },
+  // The losses are listed in full here on purpose. Every one of them is
+  // something you would otherwise discover by noticing it missing, and a feed
+  // quietly leaving things out is worse than one that says what it leaves out.
+  { key: "protocolOnly", label: "Build the catch-up without an AppView", sub: "Reads each account’s posts straight out of the [repository](repos) holding them, using only the protocol’s own [endpoints](xrpc). Slower, and a good deal less: no like, repost or reply counts; no context for replies; no labels, so “Adult or graphic media” stops working; handles are the ones each account claims, unverified; and it can’t tell what you’ve already liked or reposted, though liking and reposting still work. Pictures come straight from the repository as [blobs](blobs) rather than from a CDN. Your identities are still looked up in the directory above, so this drops the AppView, not that.", type: "bool",
+    docs: [["Repositories", "repos"], ["How requests work", "xrpc"], ["Blobs", "blobs"]] },
   { key: "concurrency", label: "Parallel requests", sub: "Used when rebuilding from follows", type: "number", min: 1, max: 16 },
-  { key: "rpm", label: "Max requests per minute", sub: "Bluesky rate-limits around 3,000 per 5 minutes", type: "number", min: 60, max: 3000 },
+  { key: "rpm", label: "Max requests per minute, per server", sub: "Counted against each server separately, which is how rate limits work — a server has no idea what you are asking of anyone else. Bluesky allows around 3,000 per 5 minutes. Reading repositories talks to dozens of servers at once, so this is a cap on each of those queues rather than on the run as a whole; how many requests are in flight together is set by “Parallel requests” above.", type: "number", min: 60, max: 3000,
+    docs: [["How requests work", "xrpc"]] },
   { key: "batchSize", label: "Posts added per scroll batch", type: "number", min: 25, max: 1000 },
+  // Not a setting: what this copy is actually talking to, printed under
+  // the controls that decide it (see protocolReadout / infoHtml).
+  { info: true, rows: () => protocolReadout() },
 ];
 /* Schema row by setting key. Indexed once: the drawer's input handler looks a
    row up on every keystroke, and link parsing does it per parameter. */
@@ -2626,6 +2936,100 @@ const state = {
 const me = () => state.session?.did;
 
 /* ============================== network ============================== */
+/* ---------- which servers we talk to ----------
+   atproto separates the protocol from the company that started it. Signing in
+   and everything written to the user's own repository -- likes, reposts,
+   follows -- are com.atproto.* calls against the user's OWN server, so they
+   need no Bluesky machine at all. The app.bsky.* reads (timelines, threads,
+   profiles) need an AppView: a server that indexes the whole network and
+   assembles views out of it. A PDS proxies those reads to whichever AppView it
+   is configured with, unless the request names a different one in the
+   `atproto-proxy` header -- which is the one lever that lets this page choose.
+   These helpers turn the two server settings into something safe to put in a
+   header or a URL. Anything unparseable falls back to the default rather than
+   to a broken request, the same way shareUrl() treats its proxy host. */
+/* The bare host out of a setting that may hold a host or a whole pasted URL
+   ("https://x.example/foo" -> "x.example"). null if it isn't a host at all. */
+function hostFromSetting(value) {
+  let host = String(value ?? "").trim();
+  if (!host) return null;
+  try { host = new URL(/^https?:\/\//i.test(host) ? host : "https://" + host).host; } catch { return null; }
+  return /^[a-z0-9.-]+(:\d+)?$/i.test(host) ? host : null;
+}
+/* The site that post, profile and hashtag links point at. */
+function webLinkHost() { return hostFromSetting(settings.webHost) || DEFAULTS.webHost; }
+/* The chosen AppView's host, or null for "whatever this account's server
+   picks". A service DID is accepted too, but only did:web carries a host, so a
+   did:plc AppView gives null here -- it still works as a proxy target below,
+   it just can't tell us where its pictures live. */
+function appViewHost() {
+  const v = String(settings.appView ?? "").trim();
+  if (!v) return null;
+  if (v.startsWith("did:")) {
+    const m = /^did:web:([^#/?]+)/.exec(v);
+    return m ? hostFromSetting(decodeURIComponent(m[1])) : null;
+  }
+  return hostFromSetting(v);
+}
+/* The value for the `atproto-proxy` header: a service DID, then a # and the
+   name of the service on it. A hostname becomes did:web, which is how an
+   AppView reached by name identifies itself. null = send no header, i.e. let
+   the account's server choose, which is what it did before this setting
+   existed. */
+function appViewTarget() {
+  const v = String(settings.appView ?? "").trim();
+  if (!v) return null;
+  if (v.startsWith("did:")) {
+    if (!/^did:[a-z]+:[A-Za-z0-9._%:-]+(#[A-Za-z0-9._-]+)?$/.test(v)) return null;
+    return v.includes("#") ? v : `${v}#bsky_appview`;
+  }
+  const host = hostFromSetting(v);
+  // A did:web can't contain a bare colon: a port is percent-encoded.
+  return host ? `did:web:${host.replace(":", "%3A")}#bsky_appview` : null;
+}
+/* The hosts that serve an AppView's pictures and video. No part of the
+   protocol names them, so there is nothing to look up: Bluesky's AppView at
+   api.bsky.app serves pictures from cdn.bsky.app and video from
+   video.bsky.app, and the AppViews forked from it keep that
+   "api." -> "cdn."/"video." arrangement. So the leading label is swapped when
+   there is one to swap, and otherwise we answer "unknown" (null) rather than
+   guess. Only the thumbnails of deeply nested quotes are built from these (see
+   mediaSummaryHtml); they're decoration, and leaving one out is better than
+   both a broken picture and a quiet request to Bluesky after someone asked
+   this page not to make any. */
+function mediaHost(prefix) {
+  // "No AppView chosen" and "an AppView chosen whose host can't be worked
+  // out" are different answers. Only the first means Bluesky's CDN: a
+  // did:plc AppView has no host in its identifier, and falling back there
+  // would send pictures to Bluesky while the reads went elsewhere.
+  if (!appViewTarget()) return `${prefix}.bsky.app`;
+  const host = appViewHost();
+  if (!host) return null;
+  return /^api\./i.test(host) ? prefix + host.slice(3) : null;
+}
+/* An https:// endpoint out of a setting that holds one, or null. Used for the
+   two settings that name a whole service rather than a bare host (a DNS-over-
+   HTTPS resolver has a path, and the directory is addressed as an origin), so
+   a pasted URL is kept intact rather than reduced to its host like
+   hostFromSetting does. Anything that isn't a plain https URL is refused:
+   these are used to look up WHO YOU ARE, and sending a handle somewhere
+   unintended is the one mistake worth being strict about. */
+function endpointFromSetting(value) {
+  const v = String(value ?? "").trim();
+  if (!v) return null;
+  let u; try { u = new URL(/^https?:\/\//i.test(v) ? v : "https://" + v); } catch { return null; }
+  if (u.protocol !== "https:" || !/^[a-z0-9.-]+(:\d+)?$/i.test(u.host)) return null;
+  return u.origin + u.pathname.replace(/\/+$/, "");
+}
+/* The DNS-over-HTTPS resolver asked for a handle's _atproto TXT record, or
+   null for "don't ask anyone". */
+function dohEndpoint() { return endpointFromSetting(settings.dnsResolver); }
+/* That resolver's host, for naming it in messages and the readout. */
+function dohHost() { const e = dohEndpoint(); return e ? new URL(e).host : null; }
+/* Where did:plc identities are looked up. Falls back to the default rather
+   than to nothing: without a directory a did:plc account can't sign in at
+   all, so a typo here must not strand someone. */
+function plcDirectory() { return endpointFromSetting(settings.plcDirectory) || DEFAULTS.plcDirectory; }
 /* ---------- connection errors ----------
    fetch() rejects with an unhelpful TypeError ("Failed to fetch") when a
    server can't be reached at all: no internet, DNS failure, a CORS/CSP block,
@@ -2658,20 +3062,50 @@ async function netFetch(url, opts = {}, where = "Bluesky's servers", timeoutMs =
    retry happens; shown in the progress stats so a stalled fetch isn't silent. */
 let netNote = null;
 
-/* Global request pacer. Spaces out request *starts* so we never exceed
-   settings.rpm requests per minute across all parallel workers, and lets a
-   429 response pause everyone (pauseFor) until the rate limit resets. */
+/* Request pacer, one lane per server. Spaces out request *starts* so we never
+   exceed settings.rpm requests per minute TO ANY ONE SERVER, and lets a 429
+   from one server pause only that server.
+   Per server rather than overall because that is what a rate limit actually
+   is: a server has no idea how many requests you are making to anyone else.
+   One shared queue made no odds while everything went to one host, but
+   reading repositories talks to dozens, and pacing those as though they were
+   a single server made the whole run as slow as its busiest lane for no
+   reason. What stops this becoming a flood across all of them at once is the
+   concurrency setting, which caps how many requests are in flight however
+   many lanes are open. */
 const pacer = {
-  next: 0, pauseUntil: 0,
-  async wait(signal) {
+  // host -> {next, pauseUntil}. One entry per server spoken to, so a few
+  // dozen at most even in protocol mode.
+  lanes: new Map(),
+  lane(host) {
+    let l = this.lanes.get(host);
+    if (!l) { l = { next: 0, pauseUntil: 0 }; this.lanes.set(host, l); }
+    return l;
+  },
+  async wait(signal, host) {
+    const l = this.lane(hostOf(host));
     const interval = 60000 / Math.max(30, numSetting("rpm"));
     const now = Date.now();
-    const t = Math.max(now, this.next, this.pauseUntil);
-    this.next = t + interval;
+    const t = Math.max(now, l.next, l.pauseUntil);
+    l.next = t + interval;
     if (t > now) await sleep(t - now, signal);
   },
-  pauseFor(ms) { this.pauseUntil = Math.max(this.pauseUntil, Date.now() + ms); },
+  pauseFor(ms, host) {
+    const l = this.lane(hostOf(host));
+    l.pauseUntil = Math.max(l.pauseUntil, Date.now() + ms);
+  },
+  /* The longest pause in force anywhere, for the progress line. */
+  pausedUntil() { return Math.max(0, ...[...this.lanes.values()].map(l => l.pauseUntil)); },
 };
+/* The lane a URL or host string belongs to. Anything unparseable shares one
+   lane, which is the cautious way round: unknown things queue together
+   rather than each getting a free one. */
+function hostOf(urlOrHost) {
+  const v = String(urlOrHost ?? "");
+  if (!v) return "(unknown)";
+  try { return new URL(v).host; } catch {}
+  return /^[a-z0-9.:-]+$/i.test(v) ? v : "(unknown)";
+}
 /* Access tokens are short-lived. When one expires, swap the refresh token for
    a new pair. Concurrent callers share one in-flight refresh (`refreshing`)
    so parallel workers don't all try to refresh at once. */
@@ -2705,21 +3139,27 @@ let rateNote = null;
    actions like likes and reposts), which go out immediately. */
 async function xrpc(method, params = {}, { post = false, body = null, signal, retries = 5, priority = false } = {}) {
   const s = state.session;
+  // Only the app.bsky.* reads are proxied on to an AppView. A com.atproto.*
+  // call is the user's own repository on their own server, and must never be
+  // sent anywhere else, whatever this setting says. Worked out once per call
+  // so the 5xx branch below can tell a proxy failure from an ordinary one.
+  const proxy = method.startsWith("app.bsky.") ? appViewTarget() : null;
   const url = new URL(`${s.pds}/xrpc/${method}`);
   if (!post) for (const [k, v] of Object.entries(params)) {
     if (v == null) continue;
     if (Array.isArray(v)) v.forEach(x => url.searchParams.append(k, x)); else url.searchParams.set(k, v);
   }
-  let attempt = 0, refreshed = false;
+  let attempt = 0, refreshed = false, appViewFails = 0;
   for (;;) {
     // priority = a user action (like, repost): skip the pacer's queue and any
     // rate-limit pause, so it's sent right away; if Bluesky rate-limits it,
     // fail immediately (below) instead of waiting silently.
-    if (!priority) await pacer.wait(signal);
+    if (!priority) await pacer.wait(signal, s.pds);
     let res;
     try {
       const headers = { Authorization: `Bearer ${s.accessJwt}` };
       if (post) headers["Content-Type"] = "application/json";
+      if (proxy) headers["atproto-proxy"] = proxy;
       res = await netFetch(url, { method: post ? "POST" : "GET", headers, body: post ? JSON.stringify(body) : undefined, signal });
     } catch (e) {
       if (isAbort(e) || signal?.aborted) throw e;
@@ -2741,13 +3181,25 @@ async function xrpc(method, params = {}, { post = false, body = null, signal, re
       const e = new Error(`Bluesky is limiting how fast this account can make changes right now${secs ? `; try again in about ${secs} seconds` : "; try again in a minute"}.`);
       e.status = 429; e.code = "RateLimitExceeded"; throw e;
     }
+    // A 5xx on a proxied read usually means the PDS could not reach the
+    // AppView we named -- a wrong hostname in the setting looks exactly like
+    // this (measured: bsky.network answers 500). Retrying that eight times
+    // takes minutes and then blames Bluesky for the user's typo, so it gets
+    // one retry and a message pointing at the setting that's actually wrong.
+    if (res.status >= 500 && proxy && ++appViewFails > 1) {
+      const e = new Error(`Couldn't reach the AppView “${settings.appView}” (your server answered ${res.status}). Check the AppView under Settings → Advanced, or clear it to use your own server's choice.`);
+      e.status = res.status; e.code = "AppViewUnreachable"; throw e;
+    }
     if (res.status === 429 || res.status >= 500) {
       if (++attempt > 8) throw new Error(res.status === 429 ? "Bluesky kept rate-limiting requests. Lower “Max requests per minute” in Settings and try again." : `Bluesky returned an error (${res.status}). Try again shortly.`);
       const reset = Number(res.headers.get("ratelimit-reset"));
       let wait = reset > 1e9 ? reset * 1000 - Date.now() : Math.min(60000, 2000 * 2 ** attempt);
       wait = Math.max(1500, Math.min(wait, 5 * 60000));
-      pacer.pauseFor(wait);
-      if (res.status === 429) rateNote = Date.now() + wait;
+      pacer.pauseFor(wait, s.pds);
+      // The progress line shows the longest pause in force anywhere, not
+      // just this one: with several lanes paused, the soonest to clear says
+      // nothing useful about when the run will move again.
+      if (res.status === 429) rateNote = Math.max(rateNote || 0, pacer.pausedUntil());
       continue;
     }
     const e = new Error(err.message || err.error || `Request failed (${res.status})`);
@@ -2755,33 +3207,151 @@ async function xrpc(method, params = {}, { post = false, body = null, signal, re
   }
 }
 
-/* Finds which server (PDS) hosts an account. Handles did:plc (via
-   plc.directory) and did:web (via /.well-known/did.json). Needed so people on
-   self-hosted or non-bsky.social servers can sign in. */
+/* Turns a handle into a DID without depending on any one company's API.
+   Tried in order, first real answer wins:
+     1. the handle's own domain, which can publish its DID at
+        /.well-known/atproto-did. No third party is involved at all. Most
+        domains don't allow cross-origin reads, so this usually fails; it is
+        one cheap request and gets a short timeout for that reason.
+     2. the chosen AppView, if there is one and it has a host.
+     3. public.api.bsky.app, so a page nobody has configured behaves exactly
+        as it always did.
+   A source that answers with something that isn't a DID is skipped rather
+   than believed: this runs before sign-in, so nothing here is authenticated.
+   Being unable to reach anything at all is NOT the same as a handle that
+   doesn't exist, and must not be reported as a misspelling, so a connection
+   failure from a source we expected to reach is kept and rethrown. Source 1
+   is marked optional for exactly that reason: a domain that doesn't serve
+   this file is the normal case, not a fault worth reporting. */
+let lastResolvedVia = null;
+/* Reads a DID out of a DNS-over-HTTPS answer for _atproto.<handle>. The record
+   is TXT, holding "did=did:plc:...". Resolvers hand TXT back quoted
+   (Cloudflare) or bare (Google), and a long value can arrive split into
+   several quoted chunks, so quotes are stripped and the pieces joined before
+   anything is believed. */
+function didFromDnsJson(text) {
+  let j; try { j = JSON.parse(text); } catch { return null; }
+  for (const a of j?.Answer || []) {
+    const data = String(a?.data ?? "");
+    const joined = (data.match(/"[^"]*"/g) || [data]).map(x => x.replace(/^"|"$/g, "")).join("");
+    const m = /^did=(did:[a-z]+:\S+)$/.exec(joined.trim());
+    if (m) return m[1];
+  }
+  return null;
+}
+async function resolveHandleDid(handle) {
+  const asDid = v => (typeof v === "string" && /^did:[a-z]+:\S+$/.test(v.trim()) ? v.trim() : null);
+  const fromJson = t => { try { return asDid(JSON.parse(t).did); } catch { return null; } };
+  const xrpcUrl = host => `https://${host}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`;
+  const tries = [];
+  const looksLikeDomain = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(handle);
+  // 1. The handle's DNS record, read over HTTPS. A browser can't query DNS,
+  //    so a resolver answers for it: a third party, but one you choose, and
+  //    not the company this page is trying to stop depending on.
+  //    This goes FIRST because the protocol says so -- when a handle
+  //    publishes both a DNS record and the file below, the DNS record wins.
+  //    Asking the file first would be cheaper (measured: PDS-hosted handles
+  //    like *.bsky.social publish no DNS record at all, so for them this
+  //    query always comes back empty and costs ~40-110ms and one request to
+  //    the resolver). It is done the spec's way anyway: a domain that
+  //    publishes both and has let the file go stale is a real situation, and
+  //    being right about who someone is matters more than saving a request.
+  const doh = dohEndpoint();
+  if (looksLikeDomain && doh) tries.push({
+    url: `${doh}?name=${encodeURIComponent("_atproto." + handle)}&type=TXT`,
+    opts: { headers: { accept: "application/dns-json" } },
+    where: new URL(doh).host, timeoutMs: 10000, read: didFromDnsJson, optional: true,
+  });
+  // 2. The handle's own site. No third party at all, and the only source here
+  //    that is the handle's own server. Measured: most domains don't allow
+  //    cross-origin reads so this simply fails, which is why it is optional
+  //    and gets a short timeout; *.bsky.social handles DO answer.
+  if (looksLikeDomain) tries.push({ url: `https://${handle}/.well-known/atproto-did`, where: handle, timeoutMs: 5000, read: asDid, optional: true });
+  const appView = appViewHost();
+  if (appView) tries.push({ url: xrpcUrl(appView), where: appView, timeoutMs: 15000, read: fromJson });
+  tries.push({ url: xrpcUrl("public.api.bsky.app"), where: "Bluesky's servers", timeoutMs: 15000, read: fromJson });
+  let netErr = null;
+  for (const t of tries) {
+    let r;
+    try { r = await netFetch(t.url, t.opts || {}, t.where, t.timeoutMs); }
+    catch (e) { if (e.network && !t.optional) netErr = e; continue; }
+    if (!r.ok) continue;
+    const did = t.read(await r.text().catch(() => ""));
+    // Which source answered is shown in the Protocol readout, so "where did
+    // this page learn who I am" has an answer on screen.
+    if (did) { lastResolvedVia = t.where; return did; }
+  }
+  if (netErr) throw netErr;
+  throw new Error(`Couldn't find the handle “${handle}”. Check the spelling.`);
+}
+
+/* Finds which server (PDS) hosts an account. Handles did:plc (via the
+   configured directory) and did:web (via the domain's own
+   /.well-known/did.json, which involves no registry at all). Needed so people
+   on self-hosted or non-bsky.social servers can sign in. */
+/* Fetches an identity's DID document: did:plc from the configured directory,
+   did:web from the domain in the identifier itself (which needs no directory
+   at all). A did:web domain can carry a path --
+   did:web:example.com:user:alice -> /user/alice/did.json -- while the plain
+   form means /.well-known/did.json. Returns null rather than throwing, so
+   callers that look up many identities at once can skip the ones that fail.
+   `where` names the host in connection errors. */
+async function fetchDidDoc(did, where) {
+  if (did.startsWith("did:plc:")) {
+    const dir = plcDirectory();
+    return (await netFetch(`${dir}/${did}`, {}, where || `${new URL(dir).host} (used to look up which server holds an account)`, 15000)).json().catch(() => null);
+  }
+  if (did.startsWith("did:web:")) {
+    const parts = did.slice(8).split(":").map(decodeURIComponent);
+    const host = parts[0].replace(/%3A/gi, ":");
+    const path = parts.length > 1 ? parts.slice(1).map(encodeURIComponent).join("/") + "/did.json" : ".well-known/did.json";
+    return (await netFetch(`https://${host}/${path}`, {}, where || host, 15000)).json().catch(() => null);
+  }
+  return null;
+}
+/* The server holding an identity's repository, out of its DID document. */
+const pdsFromDoc = (doc, did) => {
+  const svc = (doc?.service || []).find(x => x.id === "#atproto_pds" || x.id === `${did}#atproto_pds`);
+  return svc ? String(svc.serviceEndpoint).replace(/\/+$/, "") : null;
+};
+/* The handle an identity claims, out of its DID document. Claimed, not
+   proved: a handle is only real if resolving it leads back to this DID, and
+   nothing here checks that. Shown with that in mind -- protocol mode marks
+   these as unverified rather than presenting them as confirmed. */
+const handleFromDoc = doc => {
+  const aka = (doc?.alsoKnownAs || []).find(x => String(x).startsWith("at://"));
+  return aka ? String(aka).slice(5) : null;
+};
 async function resolvePds(identifier) {
   let did = identifier;
-  if (!did.startsWith("did:")) {
-    const r = await netFetch(`https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(identifier)}`, {}, "Bluesky's servers", 15000);
-    if (!r.ok) throw new Error(`Couldn't find the handle “${identifier}”. Check the spelling.`);
-    did = (await r.json()).did;
-  }
-  let doc;
-  if (did.startsWith("did:plc:")) doc = await (await netFetch(`https://plc.directory/${did}`, {}, "plc.directory (used to look up your account's server)", 15000)).json().catch(() => null);
-  else if (did.startsWith("did:web:")) doc = await (await netFetch(`https://${did.slice(8)}/.well-known/did.json`, {}, did.slice(8), 15000)).json().catch(() => null);
-  const svc = (doc?.service || []).find(x => x.id === "#atproto_pds" || x.id === `${did}#atproto_pds`);
-  if (!svc) throw new Error("Couldn't find your account's server.");
-  return { did, pds: svc.serviceEndpoint.replace(/\/+$/, "") };
+  if (!did.startsWith("did:")) did = await resolveHandleDid(identifier);
+  const doc = await fetchDidDoc(did, did.startsWith("did:plc:") ? `${new URL(plcDirectory()).host} (used to look up your account's server)` : undefined);
+  const pds = pdsFromDoc(doc, did);
+  if (!pds) throw new Error("Couldn't find your account's server.");
+  return { did, pds };
 }
 
 /* Signs in with handle + app password. Accepts "@name", "name" (assumed
    .bsky.social), a full handle, or a DID. If PDS lookup fails for a reason
    other than "handle not found", falls back to bsky.social, which also works
    as an entryway for accounts hosted on Bluesky's own PDSes. */
-async function login(handle, password, remember) {
+async function login(handle, password, remember, server = "") {
+  // Cleared here rather than in resolveHandleDid, because the paths that
+  // skip resolving entirely -- signing in with a DID, or naming a server --
+  // would otherwise report the previous attempt's source as this one's.
+  lastResolvedVia = null;
   handle = handle.trim().replace(/^@/, "");
   if (!handle.includes(".") && !handle.startsWith("did:")) handle += ".bsky.social";
   let pds = "https://bsky.social";
-  try { pds = (await resolvePds(handle)).pds; } catch (e) { if (/Couldn't find the handle/.test(e.message)) throw e; }
+  // Naming a server skips discovery altogether: nothing is asked of the
+  // handle's site, a DNS resolver, an AppView or any public API. A bad
+  // address here is NOT papered over with the bsky.social fallback below --
+  // silently signing someone in somewhere other than where they said would
+  // defeat the point of the field.
+  const named = endpointFromSetting(server);
+  if (String(server ?? "").trim() && !named) throw new Error("That server address doesn't look right. It should look like https://your-server.example — or leave it empty, or try https://bsky.social, and the page will work the rest out.");
+  if (named) pds = named;
+  else try { pds = (await resolvePds(handle)).pds; } catch (e) { if (/Couldn't find the handle/.test(e.message)) throw e; }
   // If the lookup above failed only because a server was unreachable, we still
   // try bsky.social; if that's unreachable too, netFetch throws a clear message.
   const res = await netFetch(`${pds}/xrpc/com.atproto.server.createSession`, {
@@ -2792,7 +3362,7 @@ async function login(handle, password, remember) {
     if (j.error === "AuthenticationRequired" || res.status === 401) throw new Error("That handle and app password don't match.");
     throw new Error(j.message || `Sign-in failed (${res.status}).`);
   }
-  state.session = { did: j.did, handle: j.handle, pds, accessJwt: j.accessJwt, refreshJwt: j.refreshJwt };
+  state.session = { did: j.did, handle: j.handle, pds, accessJwt: j.accessJwt, refreshJwt: j.refreshJwt, resolvedVia: lastResolvedVia || (named ? `the server you named (${new URL(named).host})` : "the handle you typed") };
   if (remember) LS.set("session", state.session); else LS.del("session");
 }
 /* Drops everything held about the signed-in account, in one place so nothing
@@ -2867,8 +3437,27 @@ function mergeItems(...lists) {
   return [...m.values()].sort((a, b) => a.t - b.t || (a.key < b.key ? -1 : 1));
 }
 
-/* Fetches the signed-in user's profile for the start screen (avatar, follow count). */
+/* Whether this catch-up will be built from repositories. The setting only
+   applies to the Following feed: a custom feed or list is something an
+   AppView computed, and there is nothing to read it out of. */
+const protocolRun = src => !!settings.protocolOnly && src?.kind === "timeline";
+/* Fetches the signed-in user's profile for the start screen (avatar, follow
+   count). In protocol mode this comes out of your own repository instead, so
+   that turning the mode on doesn't leave one AppView call behind on a screen
+   that is otherwise free of them. There is no follow count in a profile
+   record -- it is an aggregate, which is exactly what this mode gives up. */
 async function loadProfile() {
+  if (settings.protocolOnly) {
+    try {
+      const r = await xrpc("com.atproto.repo.getRecord", { repo: me(), collection: "app.bsky.actor.profile", rkey: "self" });
+      const cid = blobCid(r?.value?.avatar);
+      state.profile = {
+        did: me(), handle: state.session.handle, displayName: r?.value?.displayName,
+        avatar: cid ? blobUrl(state.session.pds, me(), cid) : undefined,
+      };
+    } catch { state.profile = { did: me(), handle: state.session.handle }; }
+    return;
+  }
   try { state.profile = await xrpc("app.bsky.actor.getProfile", { actor: me() }); } catch { state.profile = null; }
 }
 /* Loads every account the user follows into state.follows (DID -> profile).
@@ -2996,6 +3585,250 @@ async function fetchRebuild(until, signal, onProgress) {
   return { items: out, failures };
 }
 
+/* ---------- strategy (c): read the repositories themselves ----------
+   No AppView anywhere. Every request below is com.atproto.*, the protocol's
+   own endpoints, which every server implements -- so this works against any
+   server on the network without asking Bluesky to assemble anything.
+   What it gives up is listed in the protocolOnly setting and again in the
+   note above the feed; the short version is that an AppView exists because
+   aggregating a network is real work, and nothing here does that work.
+   The one thing it does NOT escape is the directory: a did:plc identity is
+   still looked up in plc.directory, once per account followed. That is more
+   Bluesky traffic than normal mode, not less, which is exactly why the
+   lookups are cached below. */
+
+/* did -> {pds, handle, at}. Where an account lives changes very rarely, so
+   this is kept across sessions: a second catch-up does no directory lookups
+   at all, which is what makes the request count of this mode bearable.
+   Entries expire because a stale server means that account's posts quietly
+   stop appearing, which looks like them having gone quiet. */
+const IDENTITY_TTL = 7 * 24 * 3600 * 1000;
+let identityCache = null;
+function identityStore() {
+  if (!identityCache) identityCache = LS.get("identities", {}) || {};
+  return identityCache;
+}
+function cachedIdentity(did) {
+  const e = identityStore()[did];
+  return e && Date.now() - e.at < IDENTITY_TTL ? e : null;
+}
+/* Writing the whole map for every account resolved meant N writes of a map
+   growing to N entries -- quadratic, on the slowest part of a first run over
+   a few thousand follows. The write is coalesced instead: the map is updated
+   at once, saved shortly after things go quiet, and flushed when the catch-up
+   finishes. */
+let identitySaveTimer = 0;
+function saveIdentities() { clearTimeout(identitySaveTimer); identitySaveTimer = 0; LS.set("identities", identityCache); }
+function rememberIdentity(did, info) {
+  identityStore()[did] = { ...info, at: Date.now() };
+  if (!identitySaveTimer) identitySaveTimer = setTimeout(saveIdentities, 2000);
+}
+/* The server and claimed handle for one account, from cache or its document.
+   Returns null if the identity can't be resolved; callers skip that account
+   rather than failing the whole catch-up. */
+async function identityFor(did, signal) {
+  const hit = cachedIdentity(did);
+  if (hit) return hit;
+  // The directory, or the account's own domain for did:web -- not this
+  // account's server, which is a different queue entirely.
+  await pacer.wait(signal, did.startsWith("did:web:") ? "https://" + did.slice(8).split(":")[0] : plcDirectory());
+  state.stats.requests++;
+  const doc = await fetchDidDoc(did).catch(() => null);
+  const pds = pdsFromDoc(doc, did);
+  if (!pds) return null;
+  const info = { pds, handle: handleFromDoc(doc) || "handle.invalid" };
+  rememberIdentity(did, info);
+  return info;
+}
+/* One com.atproto.* call against somebody else's server. Unauthenticated:
+   these endpoints are public, and sending this account's token to another
+   server would be both unnecessary and unwise. */
+async function repoGet(pds, method, params, signal) {
+  const url = new URL(`${pds}/xrpc/${method}`);
+  for (const [k, v] of Object.entries(params)) if (v != null) url.searchParams.set(k, v);
+  await pacer.wait(signal, pds);
+  const res = await netFetch(url, { signal }, new URL(pds).host, 15000);
+  state.stats.requests++;
+  if (!res.ok) { const e = new Error(`${method} failed (${res.status})`); e.status = res.status; throw e; }
+  return res.json();
+}
+/* A blob (picture, video) straight from the repository that holds it. */
+const blobUrl = (pds, did, cid) => `${pds}/xrpc/com.atproto.sync.getBlob?did=${encodeURIComponent(did)}&cid=${encodeURIComponent(cid)}`;
+/* Splits at://did/collection/rkey. */
+function parseAtUri(uri) {
+  const m = /^at:\/\/([^/]+)\/([^/]+)\/([^/?#]+)/.exec(String(uri || ""));
+  return m ? { did: m[1], collection: m[2], rkey: m[3] } : null;
+}
+/* Turns a raw post record into the feedViewPost shape the rest of the page
+   already understands, so merging, filtering and rendering need no special
+   case for this mode.
+   indexedAt is set to when WE fetched it, not to anything the record claims.
+   sortAtOf() sorts by the earlier of indexedAt and createdAt, so this alone
+   stops a record dated next year from sitting at the top of every catch-up
+   for ever -- there is no server here to have stamped it honestly. */
+function protoPost(did, info, rec, fetchedAt) {
+  return {
+    uri: `at://${did}/app.bsky.feed.post/${rec.rkey}`,
+    cid: rec.cid,
+    author: { did, handle: info.handle, displayName: info.displayName, avatar: info.avatar, __claimed: true },
+    record: rec.value,
+    indexedAt: new Date(fetchedAt).toISOString(),
+    __pds: info.pds,             // where its pictures live (see blobUrl)
+  };
+}
+/* Pages one collection of one repository, newest first, calling back for
+   every record until they predate `until`.
+   The order a server lists a collection in is NOT guaranteed: record keys
+   sort chronologically, but the spec warns that "cannot be relied on in
+   general", and which direction listRecords defaults to is a server's
+   choice. So the first page is inspected, and if it came back oldest-first
+   the whole thing is asked for again the other way round. Getting this
+   wrong would not error -- it would silently return an empty catch-up. */
+async function pageCollection(pds, did, collection, until, signal, onRecord) {
+  let cursor, reverse;
+  for (let page = 0; page < 500; page++) {
+    const r = await repoGet(pds, "com.atproto.repo.listRecords", { repo: did, collection, limit: 100, cursor, reverse }, signal);
+    const recs = (r.records || []).map(x => ({ uri: x.uri, cid: x.cid, value: x.value, rkey: parseAtUri(x.uri)?.rkey, t: Date.parse(x.value?.createdAt) }));
+    if (!recs.length) return;
+    if (page === 0 && reverse === undefined && recs.length > 1 && recs[0].t < recs[recs.length - 1].t) {
+      reverse = true; cursor = undefined; continue;      // oldest-first: ask the other way
+    }
+    if (reverse === undefined) reverse = false;
+    let oldest = Infinity;
+    for (const rec of recs) {
+      if (!rec.rkey) continue;
+      if (rec.t < oldest) oldest = rec.t;
+      if (rec.t >= until) await onRecord(rec);
+    }
+    if (!r.cursor || oldest < until) return;
+    cursor = r.cursor;
+  }
+}
+/* Builds a catch-up out of repositories. Same shape as fetchRebuild:
+   {items, failures}, so gather() can treat the two alike. */
+async function fetchProtocol(until, signal, onProgress) {
+  const fetchedAt = Date.now();
+  const mine = me();
+  // 1. Who you follow, from your OWN repository rather than an AppView's
+  //    idea of it. These are the records your likes and follows are written
+  //    to anyway, so this is the same list by definition.
+  const dids = [];
+  let cursor;
+  for (let page = 0; page < 200; page++) {
+    const r = await xrpc("com.atproto.repo.listRecords", { repo: mine, collection: "app.bsky.graph.follow", limit: 100, cursor }, { signal });
+    for (const rec of r.records || []) {
+      const s = rec.value?.subject;
+      if (typeof s === "string" && s.startsWith("did:")) dids.push(s);
+    }
+    if (!r.cursor || !(r.records || []).length) break;
+    cursor = r.cursor;
+  }
+  if (!dids.includes(mine)) dids.push(mine);          // your own posts, as the Following feed does
+
+  const out = [], failures = [];
+  const people = new Map();      // did -> {pds, handle, displayName, avatar}
+  const posts = new Map();       // uri -> post, for reposts and quotes
+  let done = 0, idx = 0;
+
+  /* Identity plus whatever profile the account publishes about itself. The
+     profile is one more request per account and is allowed to fail: a
+     missing display name costs a name, a missing identity costs the posts. */
+  function personFor(did) {
+    if (people.has(did)) return people.get(did);        // the promise, as in postFor
+    const p = (async () => {
+      const info = await identityFor(did, signal);
+      if (!info) return null;
+      const person = { ...info };
+      const prof = await repoGet(info.pds, "com.atproto.repo.getRecord",
+        { repo: did, collection: "app.bsky.actor.profile", rkey: "self" }, signal).catch(() => null);
+      if (prof?.value) {
+        person.displayName = prof.value.displayName || undefined;
+        const cid = blobCid(prof.value.avatar);
+        if (cid) person.avatar = blobUrl(info.pds, did, cid);
+      }
+      return person;
+    })();
+    people.set(did, p);
+    return p;
+  }
+  /* One post, by at:// URI, from the repository that holds it. Used for the
+     thing a repost points at and the thing a quote quotes. */
+  /* The PROMISE is cached, not the result. Caching a null placeholder before
+     awaiting meant every other worker asking for the same post at the same
+     moment saw "already looked at, nothing there" and gave up -- two
+     accounts quoting the same post, and only one of them showed it; two
+     reposts of it, and one vanished entirely. Workers now wait on the same
+     lookup instead. */
+  function postFor(uri) {
+    if (posts.has(uri)) return posts.get(uri);
+    const p = (async () => {
+      const ref = parseAtUri(uri);
+      if (!ref || ref.collection !== "app.bsky.feed.post") return null;
+      const person = await personFor(ref.did).catch(() => null);
+      if (!person) return null;
+      const r = await repoGet(person.pds, "com.atproto.repo.getRecord",
+        { repo: ref.did, collection: ref.collection, rkey: ref.rkey }, signal).catch(() => null);
+      if (!r?.value) return null;
+      return protoPost(ref.did, person, { rkey: ref.rkey, cid: r.cid, value: r.value }, fetchedAt);
+    })();
+    posts.set(uri, p);
+    return p;
+  }
+  /* The post a record quotes, if it quotes one, attached so the renderer can
+     show it rather than the bare words "Quotes another post". */
+  async function attachQuote(p) {
+    const e = p.record?.embed;
+    const rec = e?.$type === "app.bsky.embed.record" ? e.record
+      : e?.$type === "app.bsky.embed.recordWithMedia" ? e.record?.record : null;
+    if (rec?.uri) p.__quoted = await postFor(rec.uri).catch(() => null);
+  }
+
+  async function gatherFrom(did) {
+    const person = await personFor(did);
+    if (!person) throw new Error("no identity for " + did);
+    await pageCollection(person.pds, did, "app.bsky.feed.post", until, signal, async rec => {
+      const p = protoPost(did, person, rec, fetchedAt);
+      await attachQuote(p);
+      out.push(mkItem({ post: p }));
+    });
+    await pageCollection(person.pds, did, "app.bsky.feed.repost", until, signal, async rec => {
+      const p = await postFor(rec.value?.subject?.uri);
+      if (!p) return;
+      await attachQuote(p);
+      // reason.indexedAt is what reposts sort by, and nothing here witnessed
+      // the repost, so it is clamped to now the same way posts are.
+      out.push(mkItem({
+        post: p,
+        reason: { $type: "app.bsky.feed.defs#reasonRepost", uri: rec.uri, by: { did, handle: person.handle, displayName: person.displayName, avatar: person.avatar, __claimed: true },
+          indexedAt: new Date(Math.min(fetchedAt, rec.t || fetchedAt)).toISOString() },
+      }));
+    });
+  }
+  async function worker() {
+    while (idx < dids.length) {
+      const did = dids[idx++];
+      try { await gatherFrom(did); }
+      catch (e) { if (isAbort(e) || signal?.aborted) throw e; failures.push(did); }
+      done++; onProgress?.({ done, total: dids.length, count: out.length });
+    }
+  }
+  const n = Math.max(1, Math.min(16, numSetting("concurrency")));
+  await Promise.all(Array.from({ length: n }, worker));
+  // The follow list the filters use. Keyed off `dids` -- the follow records
+  // read out of your own repository -- and NOT off everyone `people` ended
+  // up holding: that map also fills with the authors of reposted and quoted
+  // posts, who you need not follow. Counting them as followed put an
+  // "Unfollow" button on a stranger, and made "Hide people I follow" and the
+  // reply rule treat them as yours.
+  const followed = new Set(dids);
+  const known = await Promise.all([...people].map(async ([d, p]) => [d, await Promise.resolve(p).catch(() => null)]));
+  state.follows = new Map(known
+    .filter(([d, p]) => p && d !== mine && followed.has(d))
+    .map(([d, p]) => [d, { did: d, handle: p.handle, displayName: p.displayName, avatar: p.avatar }]));
+  saveIdentities();            // don't leave a run's lookups unsaved
+  return { items: out, failures };
+}
+
 /* Chooses and runs a fetch strategy per settings.fetchMethod, reporting
    progress to the progress screen (setProgress is a no-op when that screen
    isn't visible, e.g. during "Load newer posts").
@@ -3007,6 +3840,25 @@ async function gather(src, until, max, signal, label) {
   // anything for the Following feed. A custom feed or list that runs out
   // just says so.
   const canRebuild = src.kind === "timeline";
+  // Reading the repositories themselves only reconstructs the Following
+  // feed: a custom feed or a list is something an AppView computed, and
+  // there is nothing to read it out of. So the setting applies to the
+  // Following feed and is ignored elsewhere, with the note saying so.
+  if (settings.protocolOnly) {
+    if (!canRebuild) {
+      note = `${src.name || "This feed"} is put together by an AppView, so it can't be read from repositories. This one came the usual way.`;
+    } else {
+      setProgress({ title: label, stage: "Finding the accounts you follow…", fraction: 0 });
+      const r = await fetchProtocol(until, signal, p => setProgress({
+        fraction: p.done / p.total,
+        stage: `Reading ${p.total.toLocaleString()} repositories…`,
+        stats: `${p.done.toLocaleString()} of ${p.total.toLocaleString()} accounts · ${p.count.toLocaleString()} posts · ${state.stats.requests.toLocaleString()} requests`,
+      }));
+      note = "Read straight from each account's own server, with no AppView: no counts, no context for replies, no labels, handles are the ones each account claims, and it doesn't know what you've already liked.";
+      if (r.failures.length) note += ` ${r.failures.length} ${plural(r.failures.length, "account")} couldn't be read.`;
+      return { items: r.items, method: "protocol", note };
+    }
+  }
   const fm = canRebuild ? settings.fetchMethod : "timeline";
   if (fm !== "rebuild") {
     setProgress({ title: label, stage: canRebuild ? "Reading your Following timeline…" : `Reading ${src.name || "the feed"}…` });
@@ -3056,8 +3908,8 @@ async function parseFeedInput(input, signal) {
   const text = String(input || "").trim();
   const direct = feedSourceFromUri(text);
   if (direct) return direct;
-  const m = text.match(/^(?:https?:\/\/)?(?:[\w.-]*\.)?bsky\.app\/profile\/([^/]+)\/(feed|lists)\/([^/?#\s]+)/i);
-  if (!m) throw new Error("That doesn't look like a feed or list link. It should look like bsky.app/profile/name/feed/abc123.");
+  const m = text.replace(/^https?:\/\//i, "").match(/^[\w.-]+\/profile\/([^/]+)\/(feed|lists)\/([^/?#\s]+)/i);
+  if (!m) throw new Error(`That doesn't look like a feed or list link. It should look like ${webLinkHost()}/profile/name/feed/abc123.`);
   let did = decodeURIComponent(m[1]);
   if (!did.startsWith("did:")) did = (await xrpc("com.atproto.identity.resolveHandle", { handle: did }, { signal })).did;
   return m[2].toLowerCase() === "feed"
@@ -3100,8 +3952,9 @@ async function loadSavedFeeds(signal) {
                                (anything unrecognisable comes back unchanged)
      postUrl(post)             a post view, which can offer a handle
    Only this pair writes the address out, so there is one thing to change if
-   bsky.app ever moves. */
-const postLinkFor = (actor, rkey) => `https://bsky.app/profile/${actor}/post/${rkey}`;
+   bsky.app ever moves -- or, since 1.2.0, if the reader points the webHost
+   setting at a different front-end for the same network. */
+const postLinkFor = (actor, rkey) => `https://${webLinkHost()}/profile/${actor}/post/${rkey}`;
 const postLinkFrom = s => { const r = parsePostRef(s); return r ? postLinkFor(r.actor, r.rkey) : s; };
 /* Parses a post reference from either a bsky.app URL
    (https://bsky.app/profile/<handle-or-did>/post/<rkey>) or an at:// URI.
@@ -3110,7 +3963,9 @@ function parsePostRef(s) {
   s = (s || "").trim();
   let m = s.match(/^at:\/\/([^/]+)\/app\.bsky\.feed\.post\/([^/?#\s]+)/);
   if (m) return { actor: m[1], rkey: m[2] };
-  m = s.match(/bsky\.app\/profile\/([^/]+)\/post\/([^/?#\s]+)/);
+  // Any host, not just bsky.app: whoever set webHost to another front-end
+  // will be pasting that one's links.
+  m = s.replace(/^https?:\/\//i, "").match(/^[\w.-]+\/profile\/([^/]+)\/post\/([^/?#\s]+)/);
   if (m) return { actor: decodeURIComponent(m[1]), rkey: m[2] };
   return null;
 }
@@ -3120,7 +3975,7 @@ function parsePostRef(s) {
    time) and highlights that instead. */
 async function resolvePostAnchor(input, signal) {
   const ref = parsePostRef(input);
-  if (!ref) throw new Error("That doesn't look like a Bluesky post link. It should look like bsky.app/profile/name/post/abc123.");
+  if (!ref) throw new Error(`That doesn't look like a Bluesky post link. It should look like ${webLinkHost()}/profile/name/post/abc123.`);
   let did = ref.actor;
   if (!did.startsWith("did:")) did = (await xrpc("com.atproto.identity.resolveHandle", { handle: did }, { signal })).did;
   const uri = `at://${did}/app.bsky.feed.post/${ref.rkey}`;
@@ -3278,6 +4133,18 @@ const LINK_ALIASES = {
   keys: {},
   values: {},
 };
+/* A setting's explanation, with links. The text is escaped first and only
+   then may [words](name) become a link, where `name` must be a key of DOC --
+   so the markup can only ever produce a link to documentation that is listed
+   there, and a stray bracket in ordinary prose is left as a bracket. */
+function subHtml(text) {
+  return esc(text).replace(/\[([^\]]+)\]\(([a-zA-Z]+)\)/g, (whole, words, name) =>
+    DOC[name] ? `<a href="${esc(DOC[name])}" target="_blank" rel="noopener">${words}</a>` : whole);
+}
+/* The further-reading line under a setting: [label, DOC name] pairs. */
+const docLinksHtml = docs => !docs?.length ? "" :
+  `<span class="docs">${docs.filter(([, n]) => DOC[n]).map(([label, n]) =>
+    `<a href="${esc(DOC[n])}" target="_blank" rel="noopener">${esc(label)}</a>`).join(" · ")}</span>`;
 const linkable = sc => sc.key && sc.link === true;
 /* Setting value -> link text (see CATCH-UP LINKS for the format). */
 function settingToParam(sc, v) { return sc.type === "bool" ? (v ? "1" : "0") : sc.type === "multi" ? (v || []).join(",") : String(v); }
@@ -3452,8 +4319,12 @@ async function startCatchup(kind, value, end = null, feed = null) {
     // The follow list is only needed to decide which replies to show, and to
     // rebuild the Following feed when the timeline runs out. Loading it for a
     // custom feed with another reply setting is a lot of requests for nothing.
-    const needFollows = settings.replies === "followed" || (src.kind === "timeline" && settings.fetchMethod !== "timeline")
-      || (settings.hideFollowed !== "off" && hideFollowedFits(src));
+    // Protocol mode reads the follow list out of your own repository as its
+    // first step and builds state.follows from what it actually read, so
+    // asking an AppView for it here would be both a second copy and a call
+    // this mode exists to avoid.
+    const needFollows = !protocolRun(src) && (settings.replies === "followed" || (src.kind === "timeline" && settings.fetchMethod !== "timeline")
+      || (settings.hideFollowed !== "off" && hideFollowedFits(src)));
     if (needFollows && !state.follows.size) {
       setProgress({ stage: "Loading the accounts you follow…" });
       await loadFollows(signal, n => setProgress({ stats: `${n.toLocaleString()} accounts` }));
@@ -3545,8 +4416,19 @@ function quotedRecordOf(p) {
   if (e.$type === "app.bsky.embed.recordWithMedia#view") return e.record?.record;
   return null;
 }
-/* True only for quotes of POSTS (not embedded feeds, lists or starter packs). */
-function isQuote(p) { const r = quotedRecordOf(p); return !!r && (r.$type?.startsWith("app.bsky.embed.record#view") ?? false); }
+/* True only for quotes of POSTS (not embedded feeds, lists or starter packs).
+   Without an AppView there is no embed VIEW to read, only the raw record, so
+   the raw embed is asked as well -- otherwise "Quote posts: off" quietly did
+   nothing in protocol mode. A raw app.bsky.embed.record always names a post
+   by at:// URI, so there is no feed-or-list case to exclude there. */
+function isQuote(p) {
+  const r = quotedRecordOf(p);
+  if (r) return r.$type?.startsWith("app.bsky.embed.record#view") ?? false;
+  const raw = p?.record?.embed, t = raw?.$type;
+  const uri = t === "app.bsky.embed.record" ? raw.record?.uri
+    : t === "app.bsky.embed.recordWithMedia" ? raw.record?.record?.uri : null;
+  return !!uri && parseAtUri(uri)?.collection === "app.bsky.feed.post";
+}
 /* What kinds of content a post has, for the "Only show posts with" filter.
    Looks at the post's own embed and, one level down, a quoted post's embed
    (what you see inside the quote counts too). "quote" = it quotes a post;
@@ -3579,7 +4461,27 @@ function postKinds(p) {
     }
   };
   scan(p.embed, false);
-  if (!p.embed) kinds.add("text");
+  // Without an AppView there are no embed views, only the raw record. The
+  // same description used for deeply nested quotes answers the filter here.
+  if (!p.embed && p.record?.embed) {
+    const raw = p.record.embed;
+    const m = rawMedia(raw);
+    // rawMedia merges images and galleries into one list, so which it was has
+    // to come from the record's own type rather than from how many there are:
+    // a gallery of two is still a gallery, and calling it "images" also lost
+    // it the gallery link proxy in shareUrl.
+    const media = raw.$type === "app.bsky.embed.recordWithMedia" ? raw.media : raw;
+    if (m.images.length) kinds.add(String(media?.$type).startsWith("app.bsky.embed.gallery") ? "gallery" : "images");
+    if (m.video) kinds.add(m.video.gif ? "gif" : "video");
+    // A Tenor link is how a GIF arrives; the embed-view branch above says the
+    // same, and disagreeing meant "Only show: GIFs" skipped them here.
+    if (m.link) {
+      let host = ""; try { host = new URL(m.link.uri).hostname; } catch {}
+      kinds.add(host === "media.tenor.com" ? "gif" : "link");
+    }
+    if (m.quotes) kinds.add("quote");
+  }
+  if (!p.embed && !p.record?.embed) kinds.add("text");
   return kinds;
 }
 
@@ -3643,12 +4545,51 @@ const feedEl = () => $("#feed");
    one of those, change the rule too. */
 const TILE_GAP = 16;        // -> --tile-gap, read by .band's column-gap
 const MAIN_PAD = 24;        // mirrors main{padding:… 12px …}, doubled; box-sizing includes it
+const DRAWER_W = 440;       // mirrors .drawer{width:min(440px, 100vw)}
+/* Least page width worth leaving beside the drawer. Below this the posts are
+   squeezed into a strip, which is worse than letting the drawer cover them.
+   The column rule below can't catch this on its own: on a narrow window one
+   column fits both before and after, so the counts match and nothing would
+   stop the shift. */
+const MIN_SHIFT_ROOM = 360;
+/* Whether the page is currently moved aside for the drawer. Everything that
+   measures the page asks pageWidth(), not the window, so one flag keeps the
+   tiling, the image sizes and the CSS agreeing with each other. */
+let drawerShifted = false;
+function windowWidth() { return document.documentElement.clientWidth || window.innerWidth; }
+function pageWidth() { return windowWidth() - (drawerShifted ? DRAWER_W : 0); }
+/* Can the page move aside without rearranging itself? Only if the same
+   number of columns fits either way: re-flowing the feed under the reader
+   while they reach for a setting is worse than the drawer covering a column.
+   So on a window exactly wide enough for two, nothing moves; on the same
+   window showing one, it does, because one still fits beside the drawer. */
+function canShiftForDrawer() {
+  const full = windowWidth(), left = full - DRAWER_W;
+  return left >= MIN_SHIFT_ROOM && effectiveCols(left) === effectiveCols(full);
+}
+/* Columns the feed would actually be laid out in at `width` -- which is one
+   whenever tiling is off or only one would fit, because tiling is additive
+   and a single column keeps the untiled markup (see tileOn). colsFor alone
+   answers "how many fit", which is a different question: it says two on a
+   window with tiling switched off, and comparing that would stop the page
+   moving aside for a layout that has no columns to lose. */
+function effectiveCols(width) {
+  const n = colsFor(width);
+  return settings.tile === true && n >= 2 ? n : 1;
+}
+/* How many columns fit in `width` px of page. Separate from tileCols so the
+   drawer can ask "how many would fit if I took 440 of them" without the page
+   having moved yet. */
+function colsFor(width) {
+  const avail = width - MAIN_PAD;
+  const n = Math.floor((avail + TILE_GAP) / (settings.columnWidth + TILE_GAP));
+  return Math.max(1, Math.min(numSetting("tileMax"), n));
+}
 function tileCols() {
   // clientWidth leaves out the scrollbar, which is the width the grid gets;
   // innerWidth is the fallback for anything that doesn't lay out (jsdom).
-  const avail = (document.documentElement.clientWidth || window.innerWidth) - MAIN_PAD;
-  const n = Math.floor((avail + TILE_GAP) / (settings.columnWidth + TILE_GAP));
-  return Math.max(1, Math.min(numSetting("tileMax"), n));
+  // pageWidth takes off the drawer when the page has moved aside for it.
+  return colsFor(pageWidth());
 }
 /* How wide the feed may get: n columns and the n-1 gaps BETWEEN them, plus
    main's side padding (box-sizing:border-box, so max-width has to cover it).
@@ -3711,8 +4652,8 @@ function settleScroll(el, want) {
    already in place: there is nothing left to measure by then. Runs again on
    the next frame and shortly after, since the row spans are re-measured
    asynchronously (tileObserver), as buildView does for the same reason. */
-function keepReadingSpot() {
-  const spot = readingSpot(); if (!spot) return;
+function keepReadingSpot(spot = readingSpot()) {
+  if (!spot) return;
   const el = feedEl().querySelector(`[data-key="${CSS.escape(spot.key)}"]`); if (!el) return;
   const h = window.innerHeight;
   // A sane offset is one that was on screen; anything else (a stale record)
@@ -4103,24 +5044,26 @@ function postUrl(p) {
   const who = p.author?.handle && p.author.handle !== "handle.invalid" ? p.author.handle : (p.author?.did || p.uri.split("/")[2]);
   return postLinkFor(who, p.uri.split("/").pop());
 }
-/* The link "Copy link" puts on the clipboard. Normally the bsky.app link,
+/* The link "Copy link" puts on the clipboard. Normally the ordinary web link,
    but for posts with a gallery (own or quoted) and settings.galleryProxy on,
    the host is swapped for an embed proxy (default xbsky.app), because
    Bluesky's own link previews in Discord etc. don't show galleries. The
-   proxy setting accepts a bare host or a pasted URL; only the host is used.
-   Empty or invalid falls back to bsky.app. Returns {url, proxied}. */
+   proxy setting accepts a bare host or a pasted URL; only the host is used
+   (hostFromSetting). Empty, invalid, or the same host we'd have used anyway
+   means no swap. Returns {url, proxied}. */
 function shareUrl(p) {
   const url = postUrl(p);
   if (!settings.galleryProxy || !postKinds(p).has("gallery")) return { url, proxied: false };
-  let host = String(settings.galleryProxyHost || "").trim();
-  if (!host) return { url, proxied: false };
-  try { host = new URL(/^https?:\/\//i.test(host) ? host : "https://" + host).host; } catch { return { url, proxied: false }; }
-  if (!/^[a-z0-9.-]+(:\d+)?$/i.test(host)) return { url, proxied: false };
-  return { url: url.replace("https://bsky.app/", `https://${host}/`), proxied: host !== "bsky.app" ? host : false };
+  const host = hostFromSetting(settings.galleryProxyHost);
+  // The host being replaced is whatever postLinkFor just used, NOT a literal
+  // "bsky.app": webHost can point the links somewhere else entirely.
+  const web = webLinkHost();
+  if (!host || host === web) return { url, proxied: false };
+  return { url: url.replace(`https://${web}/`, `https://${host}/`), proxied: host };
 }
-/* bsky.app profile addresses, in one place like the post ones above.
+/* Profile addresses, in one place like the post ones above.
    A DID is percent-encoded except for its colons, which bsky.app 404s on. */
-const profileLinkFor = actor => `https://bsky.app/profile/${encodeURIComponent(actor ?? "").replace(/%3A/gi, ":")}`;
+const profileLinkFor = actor => `https://${webLinkHost()}/profile/${encodeURIComponent(actor ?? "").replace(/%3A/gi, ":")}`;
 function profileUrl(a) { return profileLinkFor(a.handle && a.handle !== "handle.invalid" ? a.handle : a.did); }
 /* The name / handle / time line. A post and a quoted post draw the same one
    and used to build it separately, which is how the quote's version drifted
@@ -4155,7 +5098,7 @@ function richText(text, facets) {
     const feat = f.features[0]; let href = null;
     if (feat.$type === "app.bsky.richtext.facet#link") href = safeUrl(feat.uri);
     else if (feat.$type === "app.bsky.richtext.facet#mention") href = profileLinkFor(feat.did);
-    else if (feat.$type === "app.bsky.richtext.facet#tag") href = `https://bsky.app/hashtag/${encodeURIComponent(feat.tag)}`;
+    else if (feat.$type === "app.bsky.richtext.facet#tag") href = `https://${webLinkHost()}/hashtag/${encodeURIComponent(feat.tag)}`;
     out += href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${seg}</a>` : seg;
     pos = e;
   }
@@ -4175,9 +5118,23 @@ function ps(p) {
   let s = state.postState.get(p.uri);
   const full = !!p.viewer;              // only full post views have viewer state
   if (!s) {
-    s = { post: p, like: p.viewer?.like || null, repost: p.viewer?.repost || null, likeCount: p.likeCount || 0, repostCount: p.repostCount || 0, replyCount: p.replyCount || 0, quoteCount: p.quoteCount || 0, hydrated: full };
+    // In protocol mode nothing will ever hydrate this post (below), so it is
+    // marked settled right away: `hydrated` is what enables the like and
+    // repost buttons, and leaving it false would make the whole mode
+    // read-only, which is a bigger loss than the counts it saves. The
+    // cost is that it starts out not knowing what you already liked.
+    s = { post: p, like: p.viewer?.like || null, repost: p.viewer?.repost || null, likeCount: p.likeCount || 0, repostCount: p.repostCount || 0, replyCount: p.replyCount || 0, quoteCount: p.quoteCount || 0, hydrated: full || !!settings.protocolOnly };
     state.postState.set(p.uri, s);
-    if (!full) queueHydrate(p.uri);
+    // Hydrating fills in counts and viewer state with app.bsky.feed.getPosts
+    // -- an AppView call, made a moment after a post is first drawn. In
+    // protocol mode that would quietly undo the whole thing: the counts would
+    // reappear and so would the AppView. So the post is treated as already
+    // settled. Liking and reposting still work (they write records to your
+    // own repository), they just start out not knowing whether you had
+    // already liked it, which is the same trade as the missing counts.
+    // Measured before this existed: a real catch-up showed like and repost
+    // counts, which is what gave it away.
+    if (!full && !settings.protocolOnly) queueHydrate(p.uri);
   } else if (!s.hydrated && full) {
     applyServerState(s, p);
   }
@@ -4297,11 +5254,11 @@ function actionsHtml(p) {
   const pend = f => (s[f] === "pending" ? " pending" : "");
   const waitTitle = s.unavailable ? "This post isn't available" : "Checking whether you've already liked or reposted this…";
   return `${followBtnHtml(p.author || {})}
-    <a class="act" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Reply on bsky.app">${ICON.reply}${c(s.replyCount)}</a>
+    <a class="act" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Reply on ${esc(webLinkHost())}">${ICON.reply}${c(s.replyCount)}</a>
     <button class="act${s.repost ? " reposted" : ""}${wait}${pend("repost")}" type="button" data-act="repost" title="${s.repost === "pending" ? "Saving…" : s.hydrated ? (s.repost ? "Undo repost" : "Repost") : waitTitle}">${ICON.repost}${c(s.repostCount)}</button>
     <button class="act${s.like ? " liked" : ""}${wait}${pend("like")}" type="button" data-act="like" title="${s.like === "pending" ? "Saving…" : s.hydrated ? (s.like ? "Unlike" : "Like") : waitTitle}">${s.like ? ICON.liked : ICON.like}${c(s.likeCount)}</button>
     <button class="act right" type="button" data-act="copy" title="Copy link">${ICON.link}</button>
-    <a class="act" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Open on bsky.app">${ICON.open}</a>`;
+    <a class="act" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Open on ${esc(webLinkHost())}">${ICON.open}</a>`;
 }
 /* Markup for one post (avatar, header, text, embed, actions). Used for the
    main post and for reply parents. `t` overrides the displayed time (the
@@ -4319,7 +5276,8 @@ function postViewHtml(p, { extraClass = "", replyTo = null, t = null, feedT = nu
       ${headHtml(a, { href: postUrl(p), timeHtml: esc(fmtPostTime(time, feedT ?? time)), timeTitle: new Date(time).toLocaleString() })}
       ${replyTo ? `<div class="reply-to">Replying to ${esc(replyTo)}</div>` : ""}
       <div class="pv-text">${richText(rec.text, rec.facets)}</div>
-      ${p.embed ? `<div class="embed">${embedHtml(p.embed, p, 0)}</div>` : ""}
+      ${p.embed ? `<div class="embed">${embedHtml(p.embed, p, 0)}</div>`
+        : p.record?.embed ? `<div class="embed">${mediaSummaryHtml(p.record.embed, p)}</div>` : ""}
       <div class="actions" data-actions="${esc(p.uri)}">${actionsHtml(p)}</div>
     </div>
   </div>`;
@@ -4396,7 +5354,7 @@ function renderItem(it, i, ctx = "none") {
 function threadGapHtml(parent) {
   return `<div class="thread-gap" data-gap-uri="${esc(parent.uri)}">
     <button type="button" data-act="expand-gap">⋯ More replies in between. Show them</button>
-    <a href="${esc(postUrl(parent))}" target="_blank" rel="noopener" title="View the full thread on bsky.app">bsky.app</a>
+    <a href="${esc(postUrl(parent))}" target="_blank" rel="noopener" title="View the full thread on ${esc(webLinkHost())}">${esc(webLinkHost())}</a>
   </div>`;
 }
 /* Fills a thread gap in place: asks for the parent's ancestors and renders
@@ -4495,7 +5453,7 @@ const POST_INNER_PAD = 30;   // mirrors .post{padding:… 14px …} both sides +
 function cellWidthPx(cols, whole = wholeMode()) {
   const col = numSetting("columnWidth");
   const mult = whole ? numSetting("mediaWidth") : 1;
-  const viewport = (typeof window !== "undefined" && window.innerWidth) || col;
+  const viewport = (typeof window !== "undefined" && pageWidth()) || col;
   const card = Math.min(col * mult, viewport - 24);
   const inner = Math.max(120, card - POST_INNER_PAD);
   return cols > 1 ? (inner - 6 * (cols - 1)) / cols : inner;
@@ -4583,7 +5541,7 @@ function galleryHtml(e, p) {
   const cells = items.map((im, i) => {
     const count = `<span class="g-count">${i + 1}/${n}</span>`;
     if (im.$type && im.$type !== "app.bsky.embed.gallery#viewImage" || !im.fullsize) {
-      return `<div class="g-item g-unsupported"><a href="${esc(postUrl(p))}" target="_blank" rel="noopener">This item can't be shown here. Open on bsky.app</a>${count}</div>`;
+      return `<div class="g-item g-unsupported"><a href="${esc(postUrl(p))}" target="_blank" rel="noopener">This item can't be shown here. Open on ${esc(webLinkHost())}</a>${count}</div>`;
     }
     // aspect-ratio inline (the strip has always sized its items by it), plus
     // the same custom properties the whole-image cap needs; see --media-cap.
@@ -4651,13 +5609,18 @@ function externalHtml(x, p) {
    so a quote inside a quote arrives without them. The post's own record
    (viewRecord.value / postView.record) still has its raw embed, with blob
    references (content ids) for images and video, so we can describe the
-   attachments and build thumbnail URLs on Bluesky's CDN from the author's
+   attachments and build thumbnail URLs on the AppView's CDN from the author's
    DID and each blob's content id:
      images: https://cdn.bsky.app/img/feed_thumbnail/plain/<did>/<cid>@jpeg
              https://cdn.bsky.app/img/feed_fullsize/plain/<did>/<cid>@jpeg
      video:  https://video.bsky.app/watch/<did>/<cid>/thumbnail.jpg
    These are the URLs the AppView itself hands out; if a thumbnail fails to
-   load it's simply hidden and the label still says what's there. */
+   load it's simply hidden and the label still says what's there. The hosts
+   come from mediaHost(), which follows the appView setting and can answer
+   "unknown" for an AppView whose CDN can't be worked out -- the thumbnails
+   are then left out and only the labels are drawn. Every picture NOT in this
+   fallback path uses a URL the AppView handed us (see imgSrcAttrs), so those
+   follow the chosen AppView on their own. */
 function blobCid(b) { return b?.ref?.$link || (typeof b?.ref === "string" ? b.ref : null) || b?.cid || null; }
 /* Describes a raw record embed: {images:[{cid,alt}], video:{cid,gif}|null,
    link:{uri,title}|null, quotes, other}. */
@@ -4693,7 +5656,16 @@ function mediaLabels(m) {
   if (m.other && !labels.length) labels.push("An attachment");
   return labels;
 }
-const cdnImg = (kind, did, cid) => `https://cdn.bsky.app/img/${kind}/plain/${did}/${cid}@jpeg`;
+/* A picture for a raw (un-hydrated) embed. Normally that means the AppView's
+   CDN; in protocol mode the post carries the server that holds it, and the
+   blob is read straight out of that repository -- no CDN is involved at all.
+   The repository copy is the full-size original, so there are no two sizes
+   to choose between here. */
+const cdnImg = (kind, did, cid, pds) => {
+  if (pds) return blobUrl(pds, did, cid);
+  const h = mediaHost("cdn");
+  return h ? `https://${h}/img/${kind}/plain/${did}/${cid}@jpeg` : "";
+};
 /* Compact attachment summary for a post whose embed views are missing:
    up to 4 image thumbnails (zoomable, with the full set in the viewer) or a
    video thumbnail, plus a label line linking to the post. p = a post-like
@@ -4702,17 +5674,30 @@ function mediaSummaryHtml(rawEmbed, p) {
   const m = rawMedia(rawEmbed); const labels = mediaLabels(m);
   if (!labels.length) return "";
   const did = p.author?.did || p.uri.split("/")[2];
+  // In protocol mode the post says which server holds it, and the pictures
+  // come from there rather than from a CDN (see cdnImg).
+  const pds = p.__pds || null;
+  const videoHost = pds ? null : mediaHost("video");
   let thumbs = "";
-  if (m.images.length) {
+  if (m.images.length && (pds || mediaHost("cdn"))) {
     // All images are in the DOM (so the viewer can step through every one),
     // but only the first four are visible.
-    thumbs = m.images.map((im, i) => `<button class="mini-thumb${i >= 4 ? " hidden" : ""}" type="button" data-act="zoom" data-full="${esc(cdnImg("feed_fullsize", did, im.cid))}" data-alt="${esc(im.alt)}" title="${esc(im.alt || "View image")}"><img src="${esc(cdnImg("feed_thumbnail", did, im.cid))}" alt="${esc(im.alt)}" loading="lazy"></button>`).join("");
-  } else if (m.video?.cid) {
-    thumbs = `<a class="mini-thumb vid" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Watch on bsky.app"><img src="https://video.bsky.app/watch/${esc(did)}/${esc(m.video.cid)}/thumbnail.jpg" alt="" loading="lazy"></a>`;
+    thumbs = m.images.map((im, i) => `<button class="mini-thumb${i >= 4 ? " hidden" : ""}" type="button" data-act="zoom" data-full="${esc(cdnImg("feed_fullsize", did, im.cid, pds))}" data-alt="${esc(im.alt)}" title="${esc(im.alt || "View image")}"><img src="${esc(cdnImg("feed_thumbnail", did, im.cid, pds))}" alt="${esc(im.alt)}" loading="lazy"></button>`).join("");
+  } else if (m.video?.cid && videoHost) {
+    thumbs = `<a class="mini-thumb vid" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Watch on ${esc(webLinkHost())}"><img src="https://${esc(videoHost)}/watch/${esc(did)}/${esc(m.video.cid)}/thumbnail.jpg" alt="" loading="lazy"></a>`;
   }
-  const inner = `${thumbs ? `<div class="mini-thumbs">${thumbs}</div>` : ""}<a class="ms-label" href="${esc(postUrl(p))}" target="_blank" rel="noopener">${esc(labels.join(" · "))} · View on bsky.app</a>`;
-  return `<div class="media-summary">${thumbs ? wrapSensitive(inner, p) : inner}</div>`;
+  // A quote whose quoted post was actually fetched (protocol mode) shows it,
+  // rather than the bare words "Quotes another post".
+  const quoted = p.__quoted ? `<div class="embed">${quoteHtml(protoViewRecord(p.__quoted), 1)}</div>` : "";
+  const inner = `${thumbs ? `<div class="mini-thumbs">${thumbs}</div>` : ""}<a class="ms-label" href="${esc(postUrl(p))}" target="_blank" rel="noopener">${esc(labels.join(" · "))} · View on ${esc(webLinkHost())}</a>`;
+  return `<div class="media-summary">${thumbs ? wrapSensitive(inner, p) : inner}</div>${quoted}`;
 }
+/* Dresses a protocol-mode post as the #viewRecord shape quoteHtml draws, so
+   a quoted post can be shown with the same renderer as everywhere else. */
+const protoViewRecord = p => ({
+  $type: "app.bsky.embed.record#viewRecord",
+  uri: p.uri, cid: p.cid, author: p.author, value: p.record, indexedAt: p.indexedAt, __pds: p.__pds,
+});
 // Thumbnails that fail to load are hidden (the label still says what's there).
 document.addEventListener("error", ev => { if (ev.target?.closest?.(".mini-thumb")) ev.target.style.visibility = "hidden"; }, true);
 
@@ -4732,7 +5717,11 @@ function quoteHtml(r, depth) {
       // so ps() treats it as unhydrated.
       // embed: the quoted post's own attachment, so shareUrl() can tell
       // whether it's a gallery (only used for that, not for rendering).
-      const fake = { uri: r.uri, cid: r.cid, author: a, labels: r.labels, record: v, embed: r.embeds?.[0],
+      // __pds carries through: a quoted post read in protocol mode knows
+      // which server holds its pictures, and without this they would quietly
+      // come from the CDN instead (measured against a real feed: two images
+      // out of forty, which no test had covered).
+      const fake = { uri: r.uri, cid: r.cid, author: a, labels: r.labels, record: v, embed: r.embeds?.[0], __pds: r.__pds,
         likeCount: r.likeCount, repostCount: r.repostCount, replyCount: r.replyCount, quoteCount: r.quoteCount };
       // Attachments: full rendering for a first-level quote when the API sent
       // its embed views; otherwise (a quote inside a quote, or views missing)
@@ -4772,7 +5761,7 @@ function embedHtml(e, p, depth) {
     default:
       // New or unknown embed types: say so rather than silently showing
       // nothing (which is how gallery posts went unnoticed before 0.4.0).
-      return `<div class="embed-unknown">This post has an attachment this page can't show yet. <a href="${esc(postUrl(p))}" target="_blank" rel="noopener">View it on bsky.app</a></div>`;
+      return `<div class="embed-unknown">This post has an attachment this page can't show yet. <a href="${esc(postUrl(p))}" target="_blank" rel="noopener">View it on ${esc(webLinkHost())}</a></div>`;
   }
 }
 
@@ -4804,7 +5793,7 @@ function videoFailed(box) {
   // something to put back. attachVideo normally saves it; the no-player path
   // fails before it gets that far.
   if (box._placeholder == null) box._placeholder = box.innerHTML;
-  box.innerHTML = `<div class="video-fail">This video couldn't play here. <button type="button" class="linkbtn" data-act="retry">Try again</button> &middot; <a href="${esc(box.dataset.href)}" target="_blank" rel="noopener">Watch it on bsky.app</a></div>`;
+  box.innerHTML = `<div class="video-fail">This video couldn't play here. <button type="button" class="linkbtn" data-act="retry">Try again</button> &middot; <a href="${esc(box.dataset.href)}" target="_blank" rel="noopener">Watch it on ${esc(webLinkHost())}</a></div>`;
   box.dataset.failed = "1";
 }
 /* "Try again" after a failure: back to the placeholder, counters cleared, as
@@ -5369,6 +6358,9 @@ window.addEventListener("resize", () => {
   document.documentElement.style.setProperty("--bar-h", $("#bar").offsetHeight + "px");
   clearTimeout(resizeDebounce);
   resizeDebounce = setTimeout(() => {
+    // A window that has grown or shrunk may no longer have room to hold the
+    // page aside, or may have gained it; sort that out before measuring.
+    if (!isHidden("#drawer")) setDrawerShift(true);
     const now = tileOn(), cols = tileCols();
     if (now === wasTiled && (!now || cols === wasCols)) return;
     const flipped = now !== wasTiled, spot = readingSpot();
@@ -5442,7 +6434,12 @@ async function fillFeedPicker() {
   const sel = $("#inFeed"); if (!sel || sel.dataset.filled) return;
   sel.dataset.filled = "1";
   let saved = [];
-  try { saved = await loadSavedFeeds(); } catch { /* offline, or no preferences: Following still works */ }
+  // Saved feeds live in preferences, which only an AppView serves. In
+  // protocol mode the picker offers Following and the paste box, which is
+  // all this mode can read anyway.
+  if (!settings.protocolOnly) {
+    try { saved = await loadSavedFeeds(); } catch { /* offline, or no preferences: Following still works */ }
+  }
   const frag = document.createDocumentFragment();
   for (const f of saved) frag.appendChild(new Option(`${f.pinned ? "\u2605 " : ""}${f.name}${f.kind === "list" ? " (list)" : ""}`, f.uri));
   frag.appendChild(new Option("Paste a feed or list link\u2026", "url"));
@@ -5454,7 +6451,7 @@ function prepareStart() {
   $("#startErr").textContent = "";
   fillFeedPicker();
   const p = state.profile;
-  $("#whoBox").innerHTML = p ? `${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ""}<div><strong>${esc(p.displayName || p.handle)}</strong><div class="hint">@${esc(p.handle)} · following ${(p.followsCount ?? 0).toLocaleString()}</div></div>` : `<div class="hint">Signed in as @${esc(state.session?.handle)}</div>`;
+  $("#whoBox").innerHTML = p ? `${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ""}<div><strong>${esc(p.displayName || p.handle)}</strong><div class="hint">@${esc(p.handle)}${p.followsCount == null ? "" : ` · following ${p.followsCount.toLocaleString()}`}</div></div>` : `<div class="hint">Signed in as @${esc(state.session?.handle)}</div>`;
   const pos = LS.get("position:" + me());
   const resume = $("#choiceResume");
   resume.classList.toggle("hidden", !pos);
@@ -5480,7 +6477,7 @@ $("#btnLogin").addEventListener("click", async ev => {
   if (!$("#inHandle").value.trim() || !$("#inPass").value.trim()) { $("#loginErr").textContent = "Enter your handle and an app password."; return; }
   b.disabled = true; b.textContent = "Signing in…";
   try {
-    await login($("#inHandle").value, $("#inPass").value, $("#inRemember").checked);
+    await login($("#inHandle").value, $("#inPass").value, $("#inRemember").checked, $("#inPds").value);
     $("#inPass").value = "";
     await loadProfile();
     if (pendingHash) { const req = pendingHash; pendingHash = null; runHashRequest(req); }
@@ -5585,6 +6582,164 @@ const SETTING_CONTROLS = {
   multi: { wide: true, build: (s, v, a) => `<div class="checks">${s.options.map(([val, lab]) =>
     `<label><input type="checkbox" data-k="${esc(s.key)}" value="${esc(val)}"${(v || []).includes(val) ? " checked" : ""}>${esc(lab)}</label>`).join("")}</div>` },
 };
+/* What this copy of the page is actually talking to, as [term, value, note]
+   rows. Read fresh every time the drawer opens, so it describes the session
+   in front of you rather than the defaults.
+   The point of printing it: "which AppView am I on" has no answer anywhere in
+   a normal Bluesky client, and the whole reason the settings above exist is
+   that the answer used to be "whichever one your server picked, silently".
+   A null value renders as "not known", which is itself the honest answer for
+   an AppView this page hasn't been told about. */
+/* Hosts Bluesky PBC runs. Used only to label the readout, so being wrong
+   here misinforms rather than breaks anything -- but the whole point of the
+   readout is telling the two apart, so it is an explicit list rather than a
+   guess at the shape of a name. plc.directory is on it despite not being a
+   bsky.* domain: Bluesky operates the registry, which is exactly the sort of
+   thing this is meant to make visible. Anything not listed is treated as
+   someone else's, which is the safe direction to be wrong in: it never
+   claims an independent server is Bluesky's. */
+const BLUESKY_HOSTS = [/(^|\.)bsky\.app$/i, /(^|\.)bsky\.social$/i, /(^|\.)bsky\.network$/i, /(^|\.)bsky\.team$/i, /(^|\.)bsky\.chat$/i, /^plc\.directory$/i];
+const isBlueskyHost = host => !!host && BLUESKY_HOSTS.some(re => re.test(String(host)));
+/* "bluesky" | "atproto" | null, for the mark beside a readout row. null = we
+   don't know what's in use, so nothing is claimed either way. */
+function operatorOf(host) { return host == null ? null : isBlueskyHost(host) ? "bluesky" : "atproto"; }
+function protocolReadout() {
+  const s = state.session;
+  const rows = [];
+  // Every row that can read "not known" explains WHY it isn't known, because
+  // the reasons differ and they matter: an AppView nobody chose, a CDN that
+  // can't be worked out, and a session saved before this page started
+  // recording something are three different situations, and only the middle
+  // one means a feature is quietly doing less.
+  // The handle's own domain is what says whose namespace the account sits in:
+  // a bsky.social handle is Bluesky's, a domain you own is yours.
+  rows.push(["Account", s?.handle ?? null, s ? s.did : "Not signed in yet, so the rest of this describes what would be used rather than what is.",
+    [["Identity", "guides/identity"], ["Glossary", "guides/glossary"]], s ? operatorOf(s.handle) : null]);
+  rows.push(["Your server", s ? new URL(s.pds).host : null, s
+    ? "Holds your repository. Your password went here and nowhere else; your posts, likes and follows are written here."
+    : "Worked out from your DID when you sign in — this page never assumes it.",
+    [["Personal data servers", "guides/self-hosting"], ["Repositories", "specs/repository"]],
+    s ? operatorOf(new URL(s.pds).host) : null]);
+  const target = appViewTarget();
+  rows.push(["AppView", target || null, target
+    ? "Chosen by you. Feeds, threads and profiles are read from here."
+    : "Not chosen, so your server proxies these reads to whichever AppView it prefers — for a bsky.social account, Bluesky's.",
+    [["How requests work", "specs/xrpc"], ["Lexicons", "specs/lexicon"]], operatorOf(appViewHost())]);
+  const cdn = mediaHost("cdn"), vid = mediaHost("video");
+  rows.push(["Pictures and video", cdn || vid ? [cdn, vid].filter(Boolean).join(" · ") : null, cdn || vid
+    ? "Most picture addresses come from the AppView’s own answers. These two are the hosts this page has to work out for itself, for quotes nested too deep for the API to describe."
+    : "The chosen AppView isn't named api.something, so there's no telling where it keeps pictures. Nothing is guessed: thumbnails for deeply nested quotes are left out, and their descriptions shown instead.",
+    [["Blobs", "specs/blob"]], operatorOf(cdn || vid)]);
+  const did = s?.did || "";
+  const plcHost = new URL(plcDirectory()).host;
+  rows.push(["Identity", did.startsWith("did:web:") ? `${did.slice(8)} (did:web)` : did.startsWith("did:plc:") ? `${plcHost} (did:plc)` : null,
+    did.startsWith("did:plc:")
+      ? (isBlueskyHost(plcHost)
+          ? "The register that says which server holds your account. Bluesky PBC runs this one, and it is the single piece a did:plc account cannot route around — only mirror."
+          : "A mirror of the did:plc register, rather than the one Bluesky runs. The register itself is still Bluesky's; this reads a copy of it.")
+      : did.startsWith("did:web:")
+        ? "Served from your own domain, so no register is involved at all. This is the only identity method that owes Bluesky nothing."
+        : "Known once you sign in: it follows from the kind of identifier your account uses.",
+    [["DIDs", "specs/did"], ["Identity", "guides/identity"]],
+    !did.startsWith("did:") ? null : did.startsWith("did:web:") ? "atproto" : isBlueskyHost(plcHost) ? "bluesky" : "other"]);
+  rows.push(["Handle resolved by", s?.resolvedVia ?? null, s
+    ? (s.resolvedVia
+        ? "Where this page learned your DID when you signed in."
+        : "This session was saved before the page started recording it. Signing out and back in will fill it in.")
+    : "Recorded when you sign in: your own domain if it publishes a DID, otherwise the AppView, otherwise Bluesky's public API.",
+    [["How handles resolve", "specs/handle"]],
+    // resolvedVia holds a host, except for two phrases: the label netFetch
+    // uses for Bluesky's public API, and "the server you named", which is a
+    // sentence rather than a host. A DNS resolver is somebody else's, so it
+    // gets the third mark rather than being called "the open protocol".
+    !s?.resolvedVia ? null
+      : /bluesky/i.test(s.resolvedVia) ? "bluesky"
+      : /^the server you named/.test(s.resolvedVia) ? "atproto"
+      : isBlueskyHost(s.resolvedVia) ? "bluesky"
+      : s.resolvedVia === dohHost() ? "other"
+      : "atproto"]);
+  // What the NEXT catch-up will do, not what the last one did: this sits
+  // directly under the switch that decides it.
+  rows.push(["Catch-up assembled by", settings.protocolOnly ? "each account's own repository" : "an AppView",
+    settings.protocolOnly
+      ? "Read with the protocol's own endpoints, from the server holding each account. No AppView is involved, and neither is a CDN — pictures come from the repositories too. A custom feed or list is something an AppView computed, so those still come the usual way."
+      : "The usual way: an AppView gathers the network and hands over a timeline already assembled, with counts, reply context and labels. Turn on “Build the catch-up without an AppView” above to read repositories instead.",
+    [["Repositories", "specs/repository"], ["Lexicons", "specs/lexicon"]],
+    settings.protocolOnly ? "atproto" : operatorOf(appViewHost())]);
+  rows.push(["Links open at", webLinkHost(), '"Open", "Reply" and copied links go here. Any front-end for the same network shows the same posts.',
+    [["at:// addresses", "specs/at-uri-scheme"]], operatorOf(webLinkHost())]);
+  return rows;
+}
+SETTING_CONTROLS.info = { wide: true, build: () => "" };   // drawn by infoHtml, not as a control
+/* Further-reading links on a readout row. Paths only, always under
+   https://atproto.com/ (the protocol's own documentation, not Bluesky's
+   product docs) -- a row can't point anywhere else, so nothing here can turn
+   into a link to somewhere unexpected. */
+const ATPROTO_DOCS = "https://atproto.com/";
+const docsHtml = docs => !docs?.length ? "" :
+  `<span class="docs">${docs.map(([label, path]) => `<a href="${esc(ATPROTO_DOCS + path)}" target="_blank" rel="noopener">${esc(label)}</a>`).join(" · ")}</span>`;
+/* The mark saying who runs a piece of infrastructure. Carries its meaning in
+   words too, on hover and for screen readers, because a logo only tells you
+   something if you already recognise it and the row exists to inform. The
+   page has no visually-hidden class, so this follows what the rest of it
+   does and labels the element itself.
+   Each mark is also a link, and it goes to the page about THAT PIECE rather
+   than to a documentation front door: the question the icon raises is "what
+   is an AppView, and whose is this one?", and a homepage doesn't answer it.
+   So a row supplies its own pair of destinations and the operator picks which
+   one is used. Every URL here was checked.
+   Three kinds, not two: a DNS resolver is neither Bluesky's nor "the open
+   protocol", it's a third party you picked, and calling it either would be a
+   lie in a list whose whole job is saying who runs what. */
+const OPERATOR_MARK = {
+  bluesky: ["bsky", "Run by Bluesky"],
+  atproto: ["atproto", "Not Bluesky — the open protocol"],
+  other: ["other", "Not Bluesky — a third party you chose"],
+};
+const BSKY_DOCS = "https://docs.bsky.app/docs/";
+/* Where a mark points, per row and per who runs that row. A row with no entry
+   for the operator it ended up with draws no mark rather than a wrong link. */
+const MARK_DOCS = {
+  "Account": { bluesky: BSKY_DOCS + "advanced-guides/resolving-identities", atproto: ATPROTO_DOCS + "guides/identity" },
+  "Your server": { bluesky: BSKY_DOCS + "protocol-services#the-protocol-services", atproto: ATPROTO_DOCS + "guides/self-hosting", other: ATPROTO_DOCS + "guides/self-hosting" },
+  "AppView": { bluesky: BSKY_DOCS + "protocol-services#the-protocol-services", atproto: ATPROTO_DOCS + "specs/xrpc", other: ATPROTO_DOCS + "specs/xrpc" },
+  "Pictures and video": { bluesky: BSKY_DOCS + "bluesky-api", atproto: ATPROTO_DOCS + "specs/blob", other: ATPROTO_DOCS + "specs/blob" },
+  // did:plc's registry is Bluesky-operated and documented as its own method
+  // spec rather than anywhere in Bluesky's product docs. A mirror of it is
+  // someone else running the same spec, so it points at the same place.
+  "Identity": { bluesky: "https://web.plc.directory/spec/v0.1/did-plc", atproto: ATPROTO_DOCS + "specs/did", other: "https://web.plc.directory/spec/v0.1/did-plc" },
+  "Handle resolved by": { bluesky: BSKY_DOCS + "advanced-guides/resolving-identities", atproto: ATPROTO_DOCS + "specs/handle", other: ATPROTO_DOCS + "specs/handle" },
+  "Links open at": { bluesky: BSKY_DOCS + "starter-templates/clients", atproto: ATPROTO_DOCS + "specs/at-uri-scheme", other: ATPROTO_DOCS + "specs/at-uri-scheme" },
+  "Catch-up assembled by": { bluesky: BSKY_DOCS + "protocol-services#the-protocol-services", atproto: ATPROTO_DOCS + "guides/data-repos", other: ATPROTO_DOCS + "guides/data-repos" },
+};
+const operatorHtml = (op, term) => {
+  const m = OPERATOR_MARK[op]; if (!m) return "";
+  const href = MARK_DOCS[term]?.[op];
+  if (!href) return "";
+  const label = `${m[1]} — what this is`;
+  return `<a class="op op-${esc(op)}" href="${esc(href)}" target="_blank" rel="noopener" title="${esc(label)}" aria-label="${esc(label)}">${ICON[m[0]]}</a>`;
+};
+/* Just the rows, so a refresh can replace them without the intro coming
+   along: assigning the whole block to the <dl>'s outerHTML re-inserted the
+   intro paragraph on every keystroke, and the readout walked down the
+   drawer as you typed. */
+const infraRows = s => s.rows().map(([term, value, note, docs, op]) =>
+  `<dt>${esc(term)}</dt><dd${value == null ? ' class="none"' : ""}><span class="val">${operatorHtml(op, term)}<span>${esc(value ?? "not known")}</span></span>${note ? `<span class="note">${esc(note)}</span>` : ""}${docsHtml(docs)}</dd>`).join("");
+function infoHtml(s) {
+  return `<div class="infra-intro">Where this page is reading from right now. All of it runs on <a href="${esc(DOC.protocol)}" target="_blank" rel="noopener">the AT Protocol</a>, an open network that Bluesky is one set of servers on — not the whole of it. Each mark below links to who runs that piece.</div><dl class="infra">${infraRows(s)}</dl>`;
+}
+/* Settings the readout reports on. Keep in step with protocolReadout(). */
+const READOUT_SETTINGS = new Set(["appView", "webHost", "dnsResolver", "plcDirectory", "protocolOnly"]);
+/* Redraws just the readout, in place. The settings that change what it says
+   sit directly above it, so leaving it stale until the drawer is reopened
+   would make it look wrong at the exact moment someone is reading it. Only
+   the <dl> is replaced: re-rendering the whole drawer on a keystroke would
+   take focus off the field being typed into (see renderDrawer). */
+function refreshProtocolReadout() {
+  const dl = $("#drawer .infra"); if (!dl) return;
+  const row = SETTINGS_SCHEMA.find(s => s.info);
+  if (row) dl.innerHTML = infraRows(row);
+}
 /* Whether a setting is in effect at all: a `when` setting needs its parent at
    a particular value, a `needs` setting needs the feed it describes (see
    hideFollowedFits). Both the drawer's markup and syncDependents ask here, so
@@ -5611,6 +6766,9 @@ function renderDrawer() {
       groupOpen = true;
       continue;
     }
+    // A read-only readout rather than a setting: no key, so it skips all of
+    // the value/default/dependency machinery below.
+    if (s.info) { html += infoHtml(s); continue; }
     const v = settings[s.key]; const id = "set-" + s.key;
     // A setting with `when` only applies while another setting has a given
     // value (see syncDependents): it is indented under its parent and greyed
@@ -5628,7 +6786,7 @@ function renderDrawer() {
     // A checkbox list stacks under its label and labels its own boxes, so it
     // gets no `for` and carries .multi.
     const wide = typeof entry === "object" && entry.wide;
-    const label = `<label${wide ? "" : ` for="${id}"`}><span class="set-name">${esc(s.label)}</span>${s.sub ? `<span class="sub">${esc(s.sub)}</span>` : ""}</label>`;
+    const label = `<label${wide ? "" : ` for="${id}"`}><span class="set-name">${esc(s.label)}</span>${s.sub ? `<span class="sub">${subHtml(s.sub)}${docLinksHtml(s.docs)}</span>` : ""}</label>`;
     html += `<div class="set${wide ? " multi" : dep}" data-row="${esc(s.key)}">${label}${ctl}</div>`;
     if (s.needsWhy) html += `<div class="set-why${avail ? " hidden" : ""}" data-why="${esc(s.key)}">${esc(s.needsWhy)}</div>`;
   }
@@ -5655,10 +6813,25 @@ $("#drawer").addEventListener("input", ev => {
   if (s.type === "multi") v = $$(`#drawer [data-k="${s.key}"]:checked`).map(x => x.value);
   if (s.type === "number") { if (isNaN(v)) return; v = Math.max(s.min, Math.min(s.max, v)); }
   setSetting(s.key, v);
+  // Whether the page can be held aside depends on the column maths, which
+  // tile, tileMax and columnWidth all change -- so a setting altered while
+  // the drawer is open can make the current answer wrong in either
+  // direction. Re-decide before anything below measures the page: turning
+  // tiling on in a window that only has room for two columns once the
+  // drawer is out of the way has to put the page back first, or the feed
+  // lays out with one.
+  if (!isHidden("#drawer")) setDrawerShift(true);
   syncDependents();
   if (s.type === "range") $(`[data-val="${s.key}"]`).textContent = v + (s.unit || "");
   if (s.apply === "look" || s.apply === "both") applyLook();
   if (s.apply === "videos") schedulePreload();
+  // Links written into the page's own HTML (the sign-in screen) aren't drawn
+  // by the renderer, so they're rewritten here as well as at boot.
+  if (s.key === "webHost") applyWebHostLinks();
+  // Every setting the readout reports on, not just the two it started with:
+  // toggling the AppView mode left the row two lines below it still saying
+  // "an AppView", which is the staleness this exists to prevent.
+  if (READOUT_SETTINGS.has(s.key)) refreshProtocolReadout();
   // Tiling coming on or going off changes the markup, so the feed is rebuilt;
   // a change in the number of columns alone only moves the posts about.
   const flipped = tileOn() !== wasTiling, moved = flipped || tileCols() !== colsBefore;
@@ -5704,8 +6877,23 @@ function syncDependents() {
     if (sum) sum.textContent = n ? `${n} changed` : "";
   }
 }
-function openDrawer() { renderDrawer(); $("#drawer").classList.remove("hidden"); $("#scrim").classList.remove("hidden"); }
-function closeDrawer() { $("#drawer").classList.add("hidden"); $("#scrim").classList.add("hidden"); }
+/* Opening and closing the drawer moves the page aside and back, when there
+   is room to do it without costing a column (canShiftForDrawer). The column
+   count is unchanged by construction, so the markup is right as it stands
+   and only the reading spot needs putting back. */
+function setDrawerShift(on) {
+  const want = on && canShiftForDrawer();
+  if (want === drawerShifted) return;
+  const spot = readingSpot();
+  drawerShifted = want;
+  const r = document.documentElement;
+  r.style.setProperty("--drawer-w", DRAWER_W + "px");
+  r.toggleAttribute("data-drawer", want);
+  applyLook();                          // re-records wasTiled/wasCols for the resize handler
+  if (state.run && viewing("feed")) keepReadingSpot(spot);
+}
+function openDrawer() { renderDrawer(); $("#drawer").classList.remove("hidden"); $("#scrim").classList.remove("hidden"); setDrawerShift(true); }
+function closeDrawer() { $("#drawer").classList.add("hidden"); $("#scrim").classList.add("hidden"); setDrawerShift(false); }
 $("#btnSettings").addEventListener("click", openDrawer);
 $("#scrim").addEventListener("click", closeDrawer);
 
@@ -5733,8 +6921,26 @@ window.addEventListener("unhandledrejection", ev => {
    session with a cheap profile request (which also refreshes an expired
    access token via xrpc) and go to the start screen, or straight into the
    catch-up described by the address's #fragment, if any. */
+/* Points the links baked into the page's HTML at the chosen front-end. Only
+   the sign-in screen has any: the feed's links are built by postLinkFor and
+   profileLinkFor, which read the setting every time. An anchor opts in with
+   data-weblink="<path>", and .web-host spans get the host as text. */
+function applyWebHostLinks() {
+  const host = webLinkHost();
+  for (const a of $$("[data-weblink]")) a.href = `https://${host}${a.dataset.weblink}`;
+  for (const el of $$(".web-host")) el.textContent = host;
+}
 (async function boot() {
   applyLook();
+  applyWebHostLinks();
+  // Says, in the About block, which servers this copy is actually set to use,
+  // so the privacy note above it can't drift from the settings.
+  // Says what THIS copy is set to, so the claims above can't drift from the
+  // settings. Settings that send a handle somewhere are named; ones that
+  // don't apply are left out rather than listed as "default".
+  const chosen = [appViewHost() && `reads from ${appViewHost()}`, dohHost() && `asks ${dohHost()} to resolve handles`]
+    .filter(Boolean).join(", and ");
+  $("#aboutServers").textContent = `${chosen ? `Right now this page ${chosen}. ` : ""}Your password and posts are never sent anywhere but your own account's server.`;
   document.title = `Catch-up v${APP_VERSION} · Bluesky`;
   // Provenance links (top bar + "About" block), pointed at the running version.
   for (const id of ["aboutVersion", "barVersion", "aboutDlVersion"]) $("#" + id).textContent = APP_VERSION;
@@ -5753,7 +6959,13 @@ window.addEventListener("unhandledrejection", ev => {
   }
   state.session = s;
   try {
-    await xrpc("app.bsky.actor.getProfile", { actor: s.did }, { retries: 1 }).then(p => (state.profile = p));
+    // One call that both proves the saved token still works and fills the
+    // start screen. In protocol mode the profile comes from your own
+    // repository, so the token is checked with a com.atproto call instead --
+    // otherwise turning the mode on would leave one AppView request behind
+    // on every launch.
+    if (settings.protocolOnly) { await xrpc("com.atproto.server.getSession", {}, { retries: 1 }); await loadProfile(); }
+    else await xrpc("app.bsky.actor.getProfile", { actor: s.did }, { retries: 1 }).then(p => (state.profile = p));
     if (req) runHashRequest(req); else show("start");
   } catch (e) {
     if (e.network) {

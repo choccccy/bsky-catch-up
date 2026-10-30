@@ -200,3 +200,93 @@ test("every text-like field in the start form is actually styled", async () => {
       `#${el.id} is type=${el.type}, which no .field rule covers and which has no inline background`);
   }
 });
+
+/* ---------------------------------------------------------------- the drawer shifts the page */
+
+const widthTo = (page, px) => {
+  page.document.documentElement.style.width = px + "px";
+  Object.defineProperty(page.window, "innerWidth", { value: px, configurable: true });
+  Object.defineProperty(page.document.documentElement, "clientWidth", { value: px, configurable: true });
+};
+const shifted = page => page.document.documentElement.hasAttribute("data-drawer");
+
+test("opening settings moves the page aside when there is room", async () => {
+  const page = await h.loadPage({ settings: { columnWidth: 480, tile: false } });
+  widthTo(page, 1400);                      // 440 for the drawer leaves 960: plenty
+  page.eval("openDrawer()");
+  assert.ok(shifted(page), "the page moved aside");
+  assert.equal(page.eval("pageWidth()"), 1400 - 440, "and everything measuring the page knows it");
+  page.eval("closeDrawer()");
+  assert.ok(!shifted(page), "and moved back");
+  assert.equal(page.eval("pageWidth()"), 1400);
+});
+
+test("it does not move if that would cost a tiling column", async () => {
+  // A window just wide enough for two columns: shifting would leave one, so
+  // the feed would re-flow under the reader. Better to cover a column.
+  const page = await h.loadPage({ settings: { columnWidth: 480, tile: true, tileMax: 6 } });
+  widthTo(page, 1010);                      // fits 2 columns of 480; 570 left fits 1
+  assert.equal(page.eval("colsFor(1010)"), 2);
+  assert.equal(page.eval("colsFor(1010 - 440)"), 1);
+  page.eval("openDrawer()");
+  assert.ok(!shifted(page), "stayed put rather than dropping to one column");
+  assert.equal(page.eval("tileCols()"), 2, "and the feed still has both columns");
+});
+
+test("the same window does move when it is only showing one column", async () => {
+  // Exactly the case from the brief: one column in a window that could hold
+  // two still fits beside the drawer, so there is room to move it.
+  const page = await h.loadPage({ settings: { columnWidth: 480, tile: true, tileMax: 1 } });
+  widthTo(page, 1010);
+  assert.equal(page.eval("colsFor(1010)"), 1);
+  assert.equal(page.eval("colsFor(1010 - 440)"), 1, "one column fits either way");
+  page.eval("openDrawer()");
+  assert.ok(shifted(page), "so the page moved aside");
+});
+
+test("a window too narrow to spare the room is left alone", async () => {
+  // One column fits before and after, so the column rule alone would say
+  // yes; what stops it is that 360px of page is not worth reading in.
+  const page = await h.loadPage({ settings: { columnWidth: 480, tile: false } });
+  widthTo(page, 700);
+  assert.equal(page.eval("colsFor(700)"), page.eval("colsFor(700 - 440)"), "the counts do match");
+  page.eval("openDrawer()");
+  assert.ok(!shifted(page), "but 260px left over is not room");
+});
+
+test("resizing while open re-decides whether to move", async () => {
+  // tileMax 2, so the wide window is already at its cap and the 1160px left
+  // beside the drawer still holds both columns.
+  const page = await h.loadPage({ settings: { columnWidth: 480, tile: true, tileMax: 2 } });
+  widthTo(page, 1600);
+  page.eval("openDrawer()");
+  assert.ok(shifted(page), "wide window: moved aside");
+  widthTo(page, 1010);                      // now shifting would cost a column
+  page.window.dispatchEvent(new page.window.Event("resize"));
+  await h.waitFor(() => !shifted(page), { timeout: 2000, message: "the page to move back" });
+  assert.equal(page.eval("tileCols()"), 2, "and both columns are back");
+});
+
+test("turning tiling on while open puts the page back if it must", async () => {
+  // Found by an existing tiling test going red: the shift is decided when
+  // the drawer opens, but tile, tileMax and columnWidth all change the
+  // answer. Here one column fits beside the drawer, so the page moves
+  // aside; turning tiling on then needs the full width for two columns.
+  const page = await h.loadPage({ settings: { columnWidth: 480, tile: false, tileMax: 6 } });
+  widthTo(page, 1010);
+  page.eval("openDrawer()");
+  assert.ok(shifted(page), "moved aside while untiled");
+  await page.setSetting("tile", true);
+  assert.ok(!shifted(page), "and back again, because two columns need the room");
+  assert.equal(page.document.documentElement.hasAttribute("data-tile"), true, "so tiling really is on");
+  assert.equal(page.eval("tileCols()"), 2);
+});
+
+test("a setting that doesn't change the maths leaves the page where it is", async () => {
+  const page = await h.loadPage({ settings: { columnWidth: 480, tile: false } });
+  widthTo(page, 1400);
+  page.eval("openDrawer()");
+  assert.ok(shifted(page));
+  await page.setSetting("showCounts", false);
+  assert.ok(shifted(page), "still aside: counts have nothing to do with width");
+});

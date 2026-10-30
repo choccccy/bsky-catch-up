@@ -27,6 +27,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Cheap and first: proves every sabotage anchor still matches the page.
+      # Anchors are text from index.html, so a refactor can silently disarm a
+      # guard; this fails the push instead of letting it report SKIP in a run
+      # nobody does for weeks. Only checks the anchors -- the full sabotage
+      # run takes about 15 minutes and stays manual. See tests/README.md.
+      - name: Sabotage anchors still match
+        run: python3 sabotage.py --check
+        working-directory: tests
       - uses: actions/setup-node@v4
         with:
           node-version: '20'          # tests/package.json requires >=20

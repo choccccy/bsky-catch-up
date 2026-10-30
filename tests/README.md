@@ -22,6 +22,39 @@ a specific file:
 CATCHUP_HTML=../path/to/page.html npm test
 ```
 
+## Checking the tests can fail
+
+A test that cannot fail is worse than none: it reads like coverage and isn't.
+`sabotage.py` breaks each guard in the page on purpose, one at a time, in a
+copy of `index.html`, and checks that a test goes red.
+
+```sh
+cd tests
+python3 sabotage.py --check   # anchors only, about a second
+python3 sabotage.py           # the real thing, 15 minutes or so
+```
+
+Each entry is `(name, old, new)`, where `old` is text that must appear in
+`index.html` exactly once. That couples the list to the source, so a refactor
+can quietly stop an anchor matching -- the entry then reports `SKIP`, which
+proves nothing while looking like one more line of output. **Run `--check`
+after any refactor**, and don't trust an older full run until it passes. The
+workflow runs `--check` on every push for that reason.
+
+Two outcomes need attention:
+
+- `SKIP` -- the anchor no longer matches. Re-point it at the current source.
+- `GREEN` -- the guard was broken and every test still passed. Usually a
+  missing test. Occasionally a line is genuinely unobservable, because
+  something else already covers the case; give that entry a fourth element
+  saying why, and it reports as a lower-case `green` without failing the run.
+  A run that always ends in failure teaches people to ignore the failures
+  that matter. Don't reach for that fourth element to silence a green you
+  haven't explained.
+
+Add an entry whenever you add a guard: a validation, a fallback, an ordering
+that matters, a check that something is never sent somewhere.
+
 ## Layout
 
 - `harness.js` loads the page, simulates Bluesky (`makeServer`), and has
@@ -31,6 +64,8 @@ CATCHUP_HTML=../path/to/page.html npm test
   (`ids`, `article`, `banner`, `records`, `json`, ...).
 - `*.test.js` are the tests, grouped by area, using Node's built-in
   `node:test` runner.
+- `sabotage.py` checks the tests can fail (above). Needs Python 3 and no
+  packages.
 
 ## Limits
 
