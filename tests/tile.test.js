@@ -413,3 +413,83 @@ test("the tiled metrics are handed to the CSS, not written out twice", async () 
   assert.match(band, /grid-auto-rows:var\(--tile-row/, "the band reads the row height");
   assert.match(band, /column-gap:var\(--tile-gap/, "and the gap");
 });
+
+/* A span that is too SHORT is the visible failure: the item is painted
+   outside the rows it was given, over the posts beside and below it and over
+   the next band's hour banner. The ResizeObserver only speaks when an item's
+   box changes size, and only after the fact, so a span left short stays short
+   until the item happens to resize again -- which it may never do. These
+   cover the two passes that put it right anyway. jsdom does no layout, so
+   each forces a known offsetHeight and then does the thing that should
+   trigger a re-measure. */
+const tallest = page => {
+  const el = page.$$("#feed > .band > .tile")[0];
+  Object.defineProperty(el, "offsetHeight", { value: 1000, configurable: true });
+  return el;
+};
+
+test("scrolling puts right a span that has gone short", async () => {
+  const page = await h.loadPage({ settings: TILED, server });
+  await page.startDate(start);
+  const el = tallest(page);
+  assert.notEqual(el.style.gridRow, "span 500", "the span is stale to begin with");
+  page.window.dispatchEvent(new page.window.Event("scroll"));
+  await h.wait(80);                 // the handler is throttled to a frame
+  assert.equal(el.style.gridRow, "span 500", "the sweep covers the item's real height");
+});
+
+test("a picture landing late puts right its own tile", async () => {
+  const page = await h.loadPage({ settings: TILED, server });
+  await page.startDate(start);
+  const el = tallest(page);
+  const img = el.querySelector("img") || el.appendChild(page.document.createElement("img"));
+  // Media load events don't bubble; the page listens in the capture phase.
+  img.dispatchEvent(new page.window.Event("load"));
+  assert.equal(el.style.gridRow, "span 500", "the tile is measured again when its picture arrives");
+});
+
+test("a span that is already long enough is left alone", async () => {
+  // Re-measuring on every scroll frame must not fight the observer: only a
+  // SHORT span is a fault, a long one is a gap nobody sees.
+  const page = await h.loadPage({ settings: TILED, server });
+  await page.startDate(start);
+  const el = page.$$("#feed > .band > .tile")[0];
+  el.style.gridRow = "span 999";
+  page.window.dispatchEvent(new page.window.Event("scroll"));
+  await h.wait(80);
+  assert.equal(el.style.gridRow, "span 999", "a generous span stays");
+});
+
+test("one column never sweeps", async () => {
+  // Everything tiling touches has to be inert when only one column fits.
+  const page = await h.loadPage({ settings: NARROW, server });
+  await page.startDate(start);
+  const el = page.$$("#feed .post")[0];
+  el.style.gridRow = "span 1";
+  Object.defineProperty(el, "offsetHeight", { value: 1000, configurable: true });
+  page.window.dispatchEvent(new page.window.Event("scroll"));
+  await h.wait(80);
+  assert.equal(el.style.gridRow, "span 1", "untiled, nothing measures anything");
+});
+
+test("when the scrolling stops, the whole feed is checked", async () => {
+  // The per-frame sweep is rationed to what is near the screen. An item that
+  // grew while it was further away than that would keep a short span until
+  // the reader came back to it -- and its band would stay too short, which
+  // moves everything below. A moment after the scrolling stops, every item
+  // in the feed is compared with its own height instead.
+  const page = await h.loadPage({ settings: TILED, server });
+  await page.startDate(start);
+  const items = page.$$("#feed > .band > *");
+  const far = items[items.length - 1];
+  Object.defineProperty(far, "offsetHeight", { value: 1000, configurable: true });
+  far.style.gridRow = "span 1";
+  // Out of the near-the-screen sweep's reach (jsdom lays nothing out, so say
+  // so directly rather than pretending to scroll past it).
+  far.getBoundingClientRect = () => ({ top: 99999, bottom: 99999, left: 0, right: 0, width: 0, height: 0 });
+  page.window.dispatchEvent(new page.window.Event("scroll"));
+  await h.wait(80);
+  assert.equal(far.style.gridRow, "span 1", "the per-frame sweep leaves what it can't see");
+  await h.wait(500);   // the settle sweep is debounced
+  assert.equal(far.style.gridRow, "span 500", "the settle sweep covers it anyway");
+});

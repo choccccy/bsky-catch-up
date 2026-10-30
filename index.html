@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.2.0
+  Version 1.2.1
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -293,6 +293,14 @@ TILED MODE ("Tile posts side by side", settings.tile)
       with each item's row span measured in JS (setSpan, one ResizeObserver
       for everything that changes height later). Non-dense flow never
       backtracks, which is what keeps chronology descending.
+      A span that is too long is a gap nobody sees; a span that is too SHORT
+      is the overlap -- the item paints outside its rows, over the posts
+      beside and below it and over the next band's hour banner. The observer
+      only reports a size change after it has happened, and only if it
+      happens, so two passes catch up with it: the grid item is measured
+      again when a picture inside it lands, and the items on screen are
+      checked on every scroll frame (fixIfShort / sweepSpans). Neither ever
+      shortens a span.
       A span must cover the item's MARGIN box: the tiles have no margins of
       their own (flow-root keeps the posts' inside), but the dividers do, and
       measuring only their border box made their band too short to hold them,
@@ -596,6 +604,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.2.1] - 2026-10-30
+
+### Fixed
+
+- Tiled, posts and the hour banners could still be drawn on top of one
+  another: a banner covering the foot of the column above it, two posts
+  printed over each other, a card apparently cut off in the middle. The
+  columns are laid out by telling the grid how many rows tall each post is,
+  measured when the post is put on the page; anything that changed that
+  height afterwards was caught by a ResizeObserver, which reports a size
+  change *after* it has happened, and only if it happens again. So a post
+  that grew once -- the typeface finishing loading and re-wrapping every line
+  in the feed at once, a picture arriving with no shape declared for it --
+  kept the row count it had before, and everything below it in that column
+  was that much too high, until the page was rebuilt. The row count is now
+  re-taken when a picture inside a post loads, when the typeface lands, and,
+  for the posts actually on screen, on every scroll frame. A row count is
+  only ever raised, never lowered, so nothing jumps around as you read.
 
 ## [1.2.0] - 2026-10-29
 
@@ -1649,7 +1676,7 @@ site with this release.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v1.2.0 · Bluesky</title>
+<title>Catch-up v1.2.1 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -2510,7 +2537,7 @@ body{transition:padding-right .18s ease}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.2.1";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -4626,11 +4653,71 @@ function itemHeight(el) {
   const cs = getComputedStyle(el);
   return el.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
 }
-function setSpan(el) { el.style.gridRow = "span " + Math.max(1, Math.ceil(itemHeight(el) / TILE_ROW)); }
+function spanFor(el) { return Math.max(1, Math.ceil(itemHeight(el) / TILE_ROW)); }
+function spanOf(el) { return parseInt(String(el.style.gridRow).replace("span ", ""), 10) || 0; }
+function setSpan(el) { el.style.gridRow = "span " + spanFor(el); }
 const tileObserver = typeof ResizeObserver === "undefined" ? null
   : new ResizeObserver(entries => { for (const e of entries) setSpan(e.target); });
 function measureTile(el) { setSpan(el); tileObserver?.observe(el); }
 function disconnectTiles() { tileObserver?.disconnect(); }
+/* Keeping the spans right is worth two more passes than the observer above,
+   because the two failures are not symmetrical. A span that is too LONG
+   leaves a gap, which nobody notices; a span that is too SHORT means the
+   item is painted outside the rows it was given, over the posts beside and
+   below it and over the next band's divider -- the overlapping hour banner
+   this page has been chased around since 1.1.2.
+   The observer only speaks when an item's box CHANGES size, and only after
+   the change. So a span that is already short when the observer last heard
+   from the item stays short until the item happens to resize again, which
+   it may never do: the last picture in a post lands, the tile grows, the
+   frame is painted from the old row count, and if nothing else in that tile
+   ever moves again the mess sits there until the page is rebuilt. Hence:
+     - remeasureOnLoad: a picture or poster reporting in is re-measured on
+       the spot, which is the common case and costs nothing when idle;
+     - sweepSpans: every frame the feed scrolls, the items ON SCREEN are
+       checked against their own height and the short ones put right. It is
+       bounded by what fits in the window rather than by the length of the
+       feed, and does nothing at all while every span is already right. */
+function fixIfShort(el) { if (spanFor(el) > spanOf(el)) setSpan(el); }
+function sweepSpans({ all = false } = {}) {
+  if (!tileOn()) return;
+  const h = window.innerHeight;
+  // One screen of slack either side, so a span is put right just before it
+  // is scrolled into view rather than in front of the reader.
+  const near = r => all || (r.bottom > -h && r.top < 2 * h);
+  for (const band of feedEl().children) {
+    if (!band.classList.contains("band") || !near(band.getBoundingClientRect())) continue;
+    for (const el of band.children) if (near(el.getBoundingClientRect())) fixIfShort(el);
+  }
+}
+/* The sweep above only looks at what is on or near the screen, because it
+   runs on every scroll frame; an item that grew while it was further off
+   than that keeps a short span until the reader comes back to it, and the
+   band it is in stays too short in the meantime, which moves everything
+   below it. When the scrolling stops there is room to check the lot, so a
+   moment after the reader settles every grid item in the feed is compared
+   with its own height -- the same check, just not rationed. That is the one
+   that doesn't care how the span went wrong: a cause nobody has thought of
+   yet is still a span smaller than the item, and this finds it. */
+let settleSweep = 0;
+function sweepSpansSoon() { clearTimeout(settleSweep); settleSweep = setTimeout(() => sweepSpans({ all: true }), 400); }
+/* The page's typeface is built into the file, but the browser still loads it
+   asynchronously and paints in the fallback until it is ready
+   (font-display:swap), so the swap can land after a batch of posts has been
+   measured. It re-wraps every line in the feed at once, which is the single
+   biggest height change there is -- a long text post can come out half as
+   tall again, and it happens to every tile on the page in the same frame.
+   Worth one sweep of the whole feed rather than only what is on screen;
+   "loadingdone" rather than fonts.ready, because ready has usually resolved
+   before there is a feed to sweep. */
+document.fonts?.addEventListener?.("loadingdone", () => sweepSpans({ all: true }));
+/* Media loads don't bubble, so this listens in the capture phase. The target
+   may be anywhere inside a tile (a picture in a quoted post, a video
+   poster); what needs re-measuring is always the grid item it sits in. */
+document.addEventListener("load", ev => {
+  const el = ev.target?.closest?.(".band > *");
+  if (el && tileOn() && feedEl().contains(el)) fixIfShort(el);
+}, true);
 /* The reading spot, as last seen by the scroll handler: the post at the top
    of the screen and where its top edge was. */
 function readingSpot() { return state.clockKey ? { key: state.clockKey, offset: state.clockTop } : null; }
@@ -6342,7 +6429,7 @@ function updateClock() {
 let scrollRaf = 0;
 window.addEventListener("scroll", () => {
   if (scrollRaf) return;
-  scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; if (viewing("feed")) { maybeRenderMore(); updateClock(); schedulePreload(); } });
+  scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; if (viewing("feed")) { maybeRenderMore(); updateClock(); schedulePreload(); sweepSpans(); sweepSpansSoon(); } });
 }, { passive: true });
 /* Resizing changes the top bar's height and, with tiling on, how many
    columns fit. Laying the posts out again is the grid's own business
