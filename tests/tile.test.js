@@ -563,8 +563,19 @@ test("a batch that overflows its band is re-rowed as it lands", async () => {
     if (this.classList?.contains("tile")) return box(0, this.closest(".band")?.dataset.row ? 1000 : 1500);
     return real.call(this);
   };
-  const band = page.$("#feed > .band");
-  assert.equal(band.dataset.row, undefined, "nothing is coarsened before the batch lands");
+  // Which band the second batch lands in is NOT fixed: an hour divider
+  // starts a new one (renderMore sets state.band = null), these posts span
+  // exactly an hour, and h.BASE is "three hours ago" rounded to the minute
+  // -- so where the hour boundary falls inside the batch depends on the
+  // minute of the hour the suite is run at. Asserting on whichever band
+  // happened to be FIRST failed for 25 of the 60 possible minutes.
+  // The band that matters is the one the batch went into, which is also
+  // what this test is named after.
+  const bandsBefore = new Set(page.$$("#feed > .band"));
+  for (const b of bandsBefore) assert.equal(b.dataset.row, undefined, "nothing is coarsened before the batch lands");
   page.eval("renderMore()");
-  assert.equal(band.dataset.row, "4", "the new batch's band is re-rowed without waiting for a scroll");
+  const landed = page.$$("#feed > .band").filter(b => b.querySelector(".tile"));
+  const grew = landed.filter(b => !bandsBefore.has(b) || b.dataset.row);
+  assert.ok(grew.length, "the batch landed in some band");
+  for (const b of grew) assert.equal(b.dataset.row, "4", "the new batch's band is re-rowed without waiting for a scroll");
 });

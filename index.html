@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.2.2
+  Version 1.3.0
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -137,13 +137,18 @@ HOW IT WORKS (high-level data flow)
                context posts) and, if set, the end point. The result is
                state.view.
                One filter depends on the feed rather than the posts: "Hide
-               people I follow" (settings.hideFollowed) leaves only accounts
-               you don't already follow, which is what makes a ranked feed
-               like For You all fresh. It needs state.follows, and it is
-               IGNORED on the Following feed, where it would hide everything
-               -- hideFollowedFits / hideFollowedMode are the one definition
-               of that, used by the filter, the drawer (the schema's `needs`),
-               the note above the feed and startCatchup's needFollows.
+               people I follow" leaves only accounts you don't already follow,
+               which is what makes a ranked feed like For You all fresh. It
+               needs state.follows, and it is IGNORED on the Following feed,
+               where it would hide everything. Its value is per feed:
+               settings.hideFollowedBy remembers every feed it has been set on
+               and settings.hideFollowed is the fallback for one it hasn't, so
+               switching between Following and For You needs no setting
+               changed either way. hideFollowedFor is the one definition of
+               all of that -- used through hideFollowedMode by the filter, the
+               drawer (the schema's `needs` and `value`), the note above the
+               feed, and directly by startCatchup's needFollows, which asks
+               about the feed it is starting rather than the one on screen.
   6. Render    renderMore() appends state.view to the DOM in batches as the
                user scrolls (infinite scroll downward only). Posts are built
                as HTML strings; every interpolated value goes through esc().
@@ -170,7 +175,10 @@ HOW IT WORKS (high-level data flow)
                furthest-read post in localStorage ("Resume where I left off").
                "From the last post I liked" asks Bluesky instead, reading one
                record from your own repo, so it works on a device this page
-               has never run on before.
+               has never run on before. That like is read for where you were
+               READING, not for the date of the post it points at: see
+               latestLike(), repostTime() and the "like" branch of
+               startCatchup().
 
 ERROR HANDLING
   Failures must always be visible. netFetch() converts "can't reach the
@@ -212,12 +220,21 @@ CATCH-UP LINKS (URL #fragment)
     2026-10-01T13:00:00Z          with Z or an offset (+02:00): exact instant
     1790000000 / 1790000000000    Unix time in seconds / milliseconds
     https://bsky.app/profile/<handle-or-did>/post/<rkey>   (or at://...)
+    https://bsky.app/profile/<who>/post/<rkey>@1790000000  ...at that time
+  A post point may carry a time after an @ (Unix seconds or milliseconds):
+  the moment that post sat at in the feed that was read. A post read as
+  someone's repost was read at the REPOST's time, which is nowhere in the
+  post itself, so without this a shared link would start at the original
+  post's own date and read everything since. The post is still the one
+  highlighted; only where the reading starts comes from the time. Format 4
+  marks such links (see LINK_FORMAT).
   &v=<n> is the link format number (LINK_FORMAT); links without it are
   format 0. It lets later versions read older links correctly; see the
   maintainer notes below.
   Values may be URL-encoded. Starting any catch-up rewrites the fragment
   (history.replaceState, so no extra Back-button entries) in an
-  unambiguous form: UTC timestamps, post links as bsky.app URLs.
+  unambiguous form: UTC timestamps, post links as bsky.app URLs with the
+  time they were read.
   Fragments are never sent to a web server, so hosting this page doesn't
   reveal anyone's catch-up links in server logs.
   Code: readHashRequest(), runHashRequest(), writeHash(), applyLinkSettings(),
@@ -364,10 +381,66 @@ TILED MODE ("Tile posts side by side", settings.tile)
   browser for pictures about twice the size of the slot they land in. It
   measures the same in one column, so it predates tiling.
 
+  NARROW SCREENS (1.3.0)
+  The page was built for a desktop on purpose, and for a long time it had one
+  narrow-screen rule in it. On a phone two things were not merely ugly but
+  broken: the top bar's buttons needed ~380px and ran off the edge, where
+  html{overflow-x:clip} cut "Sign out" in half and left it partly untappable,
+  and the six buttons under every post needed 289px of a 234px row, so the
+  last one wrapped. There is now ONE breakpoint, @media (max-width:600px), at
+  the end of the stylesheet; the long comment above it is the real
+  documentation -- what was measured, what each rule is for, and what was
+  deliberately left alone. Two rules for anything added there:
+    - Nothing in that block may change a window at or above --col (640px by
+      default). The desktop layout is the design; the narrow block is the
+      same design made to fit a phone, not a second design. The way to check
+      is to read the computed values back at 1280px and 1920px and find the
+      old numbers, not to look at a screenshot.
+    - 600px is below --col for a reason: at any width the query matches, the
+      window is already squeezing the page below the measure it wants, so
+      there is no intended layout there to protect.
+  The gutter a post lines up against -- avatar plus the gap beside it -- is
+  now --av / --av-gap / --av-col on :root, because the narrow block has to
+  reach into it (the action row takes the gutter back to fit one row) and it
+  was previously five copies of "50" and one of "19".
+
+  There is a SECOND block beside it, @media (hover:none), and the difference
+  between the two keys is the thing to get right when adding to either:
+    width  (max-width:600px)  how much room there is. Sizes, layout, what
+                              fits beside what.
+    hover  (hover:none)       what is pointing at it. Press feedback instead
+                              of hover, no gallery arrows to click, no
+                              pull-to-refresh to stop. A touch laptop at
+                              1400px wants all of that and none of the
+                              narrow layout; a mouse on a 360px window wants
+                              the opposite. Asking the wrong one is how a
+                              desktop ends up with a phone's rules.
+  Hover itself is gated the same way -- each :hover rule a tap can reach is
+  wrapped in @media (hover:hover) where it is written, because a hover state
+  on a touch screen sticks to whatever was last touched. The :active rules in
+  the hover:none block are that gating's other half: taking hover away and
+  putting nothing back left a press doing nothing visible, which reads as a
+  press that missed and gets repeated.
+
+  THE REST OF THE PHONE WORK, which is not in either block:
+    - The Back button. Opening the lightbox or the drawer pushes a history
+      entry so Back shuts it instead of leaving the page (which, with
+      #from=... in the address, means re-running the whole catch-up). See
+      pushOverlay / dropOverlay; the pushed URL is deliberately identical to
+      the current one, so no hashchange fires.
+    - Swiping the lightbox: sideways to step, down to dismiss. See SWIPE_X /
+      SWIPE_Y / TAP_SLOP. Both ends in the same functions the arrows and the
+      keyboard use.
+    - theme-color, written by applyLook from --surface, and the manifest,
+      written by writeManifest -- "add to home screen" without a second file.
+    - env(safe-area-inset-*) on .bar, .bar-inner, main, .toast and .lightbox,
+      for a phone's rounded corners and gesture bar. 0px everywhere else.
+
 FILE LAYOUT
-  <style>    CSS, organised by area. Colours are CSS custom properties on
-             :root, redefined for dark mode (both the OS preference and the
-             explicit data-theme="dark" override).
+  <style>    CSS, organised by area, with the one narrow-screen breakpoint
+             LAST (see NARROW SCREENS above). Colours are CSS custom
+             properties on :root, redefined for dark mode (both the OS
+             preference and the explicit data-theme="dark" override).
   <body>     Four mutually exclusive "views" (login / start / progress / feed)
              toggled by show(), plus the settings drawer, lightbox and toast.
   <script>   Sections, in order (search for the "----------" headings):
@@ -450,6 +523,12 @@ EXTENDING
     that reads it fall back to the default on a feed it doesn't fit (see
     hideFollowedMode). The drawer alone isn't enough: saved settings and
     catch-up links can both arrive with it already on.
+  - A setting remembered per feed: keep the plain key as the fallback and add a
+    {uri -> value} map beside it, resolve the two in ONE function (see
+    hideFollowedFor) and give the schema row value()/set() so the drawer reads
+    and writes through it. Cap the map: nothing prunes it by itself. Don't make
+    the map link: true -- which feeds someone reads isn't theirs to share by
+    accident, and it would mean nothing to whoever opened the link.
   - New embed type: add a case to embedHtml() (and quoteHtml() for records),
     to postKinds() so the "Only show posts with" filter knows it, and to
     rawMedia()/mediaLabels() so deeply nested posts can summarize it.
@@ -612,6 +691,172 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.3.0] - 2026-10-30
+
+### Changed
+
+- **A feed that ranks its posts is now read in the order it ranked them.**
+  Everything fetched used to be sorted oldest-first by time, which is right
+  for Following and for lists, and wrong for For You, Discover and most
+  custom feeds: their whole point is an order of their own, and sorting by
+  timestamp threw it away. It showed up worst on "the most recent posts",
+  where "Load more" reads further down the ranking: those posts are not
+  older, so they were scattered up through everything already read instead
+  of arriving below it, which is where going further down a feed should put
+  them.
+  Nothing has to be chosen. Each catch-up looks at what the feed actually
+  returned: if the times only ever go backwards, it is chronological and
+  reads exactly as before, and if they jump about, it is ranked and is kept
+  in the order it was served. A minute of wobble is allowed either way,
+  because the time a post sorts by is not quite the one the feed sorted it
+  by, and a feed too short to tell is taken at its word as chronological.
+  Only "the most recent posts" can be in feed order: every other start point
+  is a point in time, and so are its context window and its "load newer
+  posts", none of which mean anything in an order that isn't time.
+  Reading a ranked feed, "Load more" now adds its posts below, and anything
+  already on screen stays exactly where it is -- including when the feed
+  re-ranks between reads and serves something new at the top.
+- **In feed order, the page stops pretending you're moving through time.**
+  No day or hour dividers (they would fire on every jump back and forth),
+  the strip under the clock counts posts instead of minutes, and the line
+  beside it names the feed whose order you're in. Every post still shows its
+  own timestamp. The saved reading position is left alone as well: how deep
+  into For You you got is not a place in your Following feed, and it has no
+  business overwriting one.
+- **"Hide people I follow" is now remembered for each feed.** It was one
+  value shared by every feed, which made it a chore exactly where it is most
+  useful: switching to For You meant turning it on by hand, and a list of
+  people you had deliberately gathered fought with For You over the same
+  setting. Now each feed keeps whatever you last set on it, and a feed you
+  have never set it on follows whatever you chose last -- so setting it once
+  on For You covers Discover too, while a list you turned it off on stays off.
+  Your Following feed is unchanged and needs nothing turned off: the filter
+  has never applied there, where it would empty the page, and the setting is
+  still greyed out with a line saying why.
+  Nothing to migrate: a value you already had goes on applying to every feed
+  as it did, and becomes that feed's own the first time you set it there. The
+  button on the note above the feed now shows everyone on *that* feed rather
+  than everywhere. A shared catch-up link still carries one value, which
+  applies to the feed the link names for that visit without disturbing what
+  you remember for it.
+- A feed that turns out to hold nothing but accounts you follow -- your own
+  mutuals as a list, say -- now says so above the empty page, instead of
+  reporting a number of hidden posts beside it and leaving you to put the two
+  together. Unlike the Following feed, this can only be known once the feed
+  has been read.
+- **"From the last post I liked" now starts where you were reading, not where
+  the post was written.** It used to take the post your newest like points at
+  and start at that post's own timestamp. For a like on a repost that is the
+  wrong date and sometimes wildly wrong: somebody reposts a thing from 2023,
+  you like it on the way past, and the catch-up started in 2023.
+  A like record can say how you met the post. The Bluesky app records the
+  repost you liked it through (the optional `via` in app.bsky.feed.like), so
+  when it's there the catch-up starts at that REPOST's time -- the moment the
+  thing actually went past you -- and the post is still the one highlighted,
+  with the usual context above it. The repost's own record is read out of the
+  reposter's repository for its time; if they have un-reposted it since, the
+  time inside the record's key is used instead, and anything that isn't a
+  plausible time is ignored rather than trusted.
+  `via` is only set for a like made on a repost in the Bluesky app, so for
+  everything else -- a like from a thread, a profile, search, another client
+  -- the post's own time is still the start, as before. Except when the post
+  is more than half a day older than the like itself: that like was made
+  somewhere other than your feed, its post's date says nothing about where
+  you got to, and your own like is the better guess, so the catch-up starts
+  there. It says which of these happened above the feed whenever it isn't the
+  obvious one.
+- **A catch-up link can carry the time a post was read at**, as
+  `#from=<post link>@<unix seconds>` (see CATCH-UP LINKS). A link to a
+  catch-up that started at a repost used to name only the post, so opening it
+  started at the post's own date and read everything since -- a different,
+  much longer catch-up than the one it was shared from. Now the link
+  reproduces what its author read: same start, same highlighted post. Link
+  format 4 marks these, so an older copy of the page says it was made by a
+  newer version instead of reporting the post as deleted.
+
+### Added
+
+- **"Show saved feeds that don't load"** (Settings → Catching up, off).
+  Feeds and lists saved in an account pile up over the years and are never
+  tidied up when one is deleted, and the picker used to list a dead one by
+  the rkey out of its at:// URI -- a string like `3momtuwbpqw2l`, which says
+  nothing to anybody. Anything that can't be named is now left out of the
+  picker, and this setting brings those back, labelled "Unavailable feed" or
+  "Unavailable list", for when one is worth trying anyway. They're hidden
+  rather than dropped because a momentary network failure looks the same
+  from here. A feed named by a catch-up link is always offered, dead or not.
+
+- **It reads properly on a phone now.** The page was built for a desktop and
+  still is -- nothing about it changes on a screen wide enough to hold the
+  reading column. Below that, it rearranges rather than just getting
+  narrower. The top bar's buttons become icons, which gives the clock back
+  the room it needs to tell you where you are; the buttons under a post are
+  half again as tall, for a thumb rather than a mouse pointer; a settings row
+  whose control is wide puts the control under its name instead of beside it,
+  so "Most columns" is a sentence again rather than one word per line; and
+  the lightbox's arrows stop swallowing a third of the screen. Buttons no
+  longer stay lit after you touch them, they light up while you hold them
+  instead, and a tall picture is sized to the screen you can actually see
+  rather than to the one behind the address bar.
+
+- **Pictures can be swiped.** In the image viewer, swipe sideways for the
+  next picture in a post and down to put it away. Tapping still closes it and
+  the arrows are still there; pinching to zoom is untouched, which is why a
+  two-fingered gesture is left alone entirely.
+
+- **Back closes what's on top of the screen** -- the image viewer, then the
+  settings -- instead of leaving the page. Leaving was the expensive thing:
+  a catch-up puts itself in the address, so coming back used to start the
+  whole thing over.
+
+- **It can go on your home screen.** Added like any other app, it opens
+  without the browser's address bar around it, under its own name and icon,
+  and the bar at the top of the screen takes the colour of the page instead
+  of sitting above it as a grey stripe. Still one file: the manifest that
+  does this is inside the page, like everything else here, so a copy saved to
+  disk is no different.
+
+### Fixed
+
+- **There was no way back to your Following feed.** Once a catch-up had read
+  a custom feed, choosing "Following" in the picker and starting again read
+  that custom feed over again: the picker's "Following" is the absence of a
+  feed, and an absent feed was being filled in from the run that had just
+  finished instead of meaning the timeline. A link naming no feed, opened in
+  the same visit, landed on the custom feed for the same reason. Found while
+  making "Hide people I follow" per feed, which is a setting about exactly
+  that journey.
+- **"Copy link with my settings" shared the wrong "Hide people I follow".**
+  A link names one feed, so it now carries what that feed is actually being
+  read with rather than the value kept for feeds in general -- the two can
+  differ once the filter has been set on more than one feed. A link made on
+  your Following feed no longer carries the filter at all, where it would
+  have done nothing anyway.
+- **One like could ask for years of feed.** Nothing caps a start in time, so
+  starting from a like on an old post -- a repost of one, or one found in
+  search -- fetched every post since that date, thousands of requests for a
+  catch-up nobody meant to ask for. The two start points above mean a like
+  can now only start somewhere you were plausibly reading.
+- **"Sign out" ran off the side of a phone screen.** The top bar needed about
+  380px for its buttons and a phone gives it 360 or less, so the last button
+  was cut off at the edge -- not just awkward to read, but partly impossible
+  to press -- and the clock beside it was squeezed down to nothing.
+- **The buttons under a post wrapped onto a second line** on any phone: they
+  needed 289px of a 234px row, so "open on Bluesky" dropped underneath on its
+  own. All six now sit on one line, with room to spare for a post with
+  four-figure likes.
+- **Pulling down at the top of the feed reloaded the page**, and since a
+  catch-up writes itself into the address, reloading meant fetching the whole
+  thing again -- minutes, and real data, for a gesture nobody meant to make
+  while reading downwards. It does nothing now.
+- **Small things were hard to hit.** The dismiss button on a notice was about
+  19px square; it and the others like it are thumb-sized on a phone now,
+  without anything moving on the page. The gallery arrows are gone on a touch
+  screen, where they only covered the picture you were swiping past.
+- **Pictures on a phone were measured against the wrong slot.** The page tells
+  the browser how wide a picture will be so it can pick the right size to
+  fetch, and that measurement still assumed the roomier card a desktop gets.
 
 ## [1.2.2] - 2026-10-30
 
@@ -813,7 +1058,8 @@ removes the AppView, not the directory.
   setting or a shared link is ignored rather than emptying the feed. While it's
   on, a note above the feed says so and how many posts it's holding back, with
   a button to show everyone again. It travels in catch-up links as
-  `&s.hideFollowed=posts` (or `=all`).
+  `&s.hideFollowed=posts` (or `=all`), which applies to the feed the link names
+  for that visit, over whatever that feed remembers.
 - A **Follow button**, first in the row of buttons under every post -- reposts
   and quoted posts included, so there's one place to look for it. It says which
   way round it is rather than coming and going: an outline when you don't
@@ -1708,8 +1954,35 @@ site with this release.
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Catch-up v1.2.2 · Bluesky</title>
+<!-- viewport-fit=cover lets the page paint into a phone's rounded corners and
+     under its gesture bar; every box that would otherwise land there pads
+     itself with env(safe-area-inset-*), which is 0px wherever there are no
+     insets, so this is a no-op on a desktop. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- The colour of the browser's own chrome around the page: Android's status
+     bar and Chrome's toolbar. Left empty here and written by applyLook(),
+     which is the one place the light/dark choice is resolved -- the same
+     reason the dark palette is written once. It tracks --surface, the top
+     bar's colour, so the chrome reads as a continuation of the bar. -->
+<meta name="theme-color" content="">
+<!-- iOS's half of "add to home screen": open without Safari's chrome, and let
+     the status bar sit over the page (the safe-area padding above keeps the
+     top bar clear of it). Android's half is the manifest, built at boot. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Catch-up">
+<!-- Android's half of "add to home screen": a launcher that opens without
+     browser chrome. A data: URL, not a manifest.json beside the page, because
+     this page is ONE file -- a separate manifest would reach only the hosted
+     copy and would be the first thing here that costs a request.
+     This one is real rather than a placeholder, so it is still right if the
+     script never runs; writeManifest() replaces it at boot with one that
+     knows the address the page is actually being served from and the icon
+     from the <link> below (which is why the icon is not written out here: that
+     base64 is 14KB, and it may appear in this file exactly once). -->
+<link rel="manifest" id="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Bluesky%20Catch-up%22%2C%22short_name%22%3A%22Catch-up%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230F141B%22%2C%22theme_color%22%3A%22%230F141B%22%7D">
+<title>Catch-up v1.3.0 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -1780,9 +2053,27 @@ site with this release.
   --bsky-mark:#0B61C9; --atproto-mark:#8A6A06;
   --shadow:0 1px 0 rgba(27,36,48,.06);
   --fs:16px; --col:640px;
+  /* The avatar and the gap beside it, which together make the gutter that
+     everything in a post lines up against: the "Reposted by" line, the
+     one-line parent reminder, the thread gap, the thread lines, and on a
+     narrow screen the action bar, which reclaims the gutter to fit its six
+     buttons on one row. That was five copies of "50" and one of "19"
+     (half an avatar, less a line width), and the narrow-screen rule would
+     have been a sixth. --av-col is the gutter itself, so a rule that wants
+     it doesn't have to add the two up again. */
+  --av:40px; --av-gap:10px; --av-col:calc(var(--av) + var(--av-gap));
   /* The tallest a picture may be: 90% of the window below the top bar, so
-     even the biggest leaves a margin above and below it. */
+     even the biggest leaves a margin above and below it.
+     Written twice: svh is the SMALL viewport, the window with the phone
+     browser's address bar still showing, and it is what a picture has to fit
+     inside -- 100vh on a phone is the window with the bar scrolled away, so
+     a tall picture capped by it runs off the bottom of the screen you are
+     actually looking at. svh rather than dvh because dvh changes as that bar
+     collapses, which would resize every picture on the page mid-scroll. The
+     vh line stays underneath for anything that doesn't know svh; on a
+     desktop the two are the same number, so nothing there moves. */
   --media-cap:calc((100vh - var(--bar-h, 58px)) * 0.9);
+  --media-cap:calc((100svh - var(--bar-h, 58px)) * 0.9);
   --font:"Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   /* The parts of a form the browser draws for itself -- number spinners, the
      date picker, dropdown menus, scrollbars -- follow this, not our colours.
@@ -1803,7 +2094,10 @@ site with this release.
 html,body{margin:0}
 /* Full-width bands (see .bleed below) deliberately paint past the column to
    the viewport edges; clip stops that from creating a sideways scrollbar.
-   overflow-x:clip (unlike hidden) doesn't break position:sticky. */
+   overflow-x:clip (unlike hidden) doesn't break position:sticky.
+   (The overscroll rules that go with this live in the touch block near the
+   end of the stylesheet: overscroll is a thing a finger does, and containing
+   it here would have taken a trackpad's elastic bounce with it.) */
 html{overflow-x:clip}
 body{background:var(--bg); color:var(--ink); font-family:var(--font); font-size:var(--fs); line-height:1.45; -webkit-font-smoothing:antialiased}
 a{color:var(--accent)}
@@ -1812,8 +2106,10 @@ button,input,select{font:inherit; color:inherit}
 .hidden{display:none !important}
 
 /* ---------- top bar ---------- */
-.bar{position:sticky; top:0; z-index:20; background:var(--surface); border-bottom:1px solid var(--line)}
-.bar-inner{display:flex; align-items:center; gap:12px; padding:8px 16px; max-width:calc(var(--col) + 420px); margin:0 auto}
+/* The top padding is for a phone in standalone mode, where the page runs
+   under the status bar; env() is 0px everywhere else. */
+.bar{position:sticky; top:0; z-index:20; background:var(--surface); border-bottom:1px solid var(--line); padding-top:env(safe-area-inset-top)}
+.bar-inner{display:flex; align-items:center; gap:12px; padding:8px max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left)); max-width:calc(var(--col) + 420px); margin:0 auto}
 .clock{display:flex; flex-direction:column; min-width:0; flex:1}
 .clock-time{font-weight:700; font-size:1.15em; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .clock-sub{font-size:.8em; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
@@ -1823,15 +2119,23 @@ button,input,select{font:inherit; color:inherit}
 .bar-src{font-size:.8em; color:var(--muted); text-decoration:none; white-space:nowrap; padding:0 4px}
 .bar-src:hover,.bar-src:focus-visible{color:var(--ink); text-decoration:underline}
 .btn{border:1px solid var(--line); background:var(--surface); border-radius:8px; padding:6px 12px; cursor:pointer}
-.btn:hover{background:var(--surface-2)}
+/* The icon half of a top-bar button. Shown only on a narrow screen; see the
+   narrow-screens block at the end of this stylesheet. */
+.btn-icon{display:none}
+.btn-icon svg{width:18px; height:18px; display:block}
+/* Hover is for a real pointer. On a touch screen the state sticks to
+   whatever was last touched, so a tapped button stays lit; these are the
+   rules where that is visible, each gated where it is written rather than
+   restated in a block of its own. Focus styling is untouched. */
+@media (hover:hover){ .btn:hover{background:var(--surface-2)} }
 .btn.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:700}
-.btn.primary:hover{filter:brightness(1.08)}
+@media (hover:hover){ .btn.primary:hover{filter:brightness(1.08)} }
 .btn:disabled{opacity:.5; cursor:default}
 .strip{height:4px; background:var(--surface-2); position:relative}
 .strip-fill{position:absolute; inset:0 auto 0 0; width:0; background:var(--accent); transition:width .2s}
 
 /* ---------- layout ---------- */
-main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
+main{max-width:var(--col); margin:0 auto; padding:16px 12px calc(120px + env(safe-area-inset-bottom))}
 /* "Show images whole" (settings.wholeImages): posts carrying pictures may be
    wider than the reading column, so images don't have to be shrunk to fit it.
    main widens to make room; everything that isn't media is pinned back to
@@ -2032,19 +2336,19 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
   content-visibility:visible; --band-bg:var(--anchor); --band-top:3px solid var(--anchor-line); --band-bottom:3px solid var(--anchor-line)}
 .post.context{opacity:.82}
 /* "Reposted by" line, indented to line up with the post text (avatar width + gap). */
-.post-meta-line{font-size:.82em; color:var(--muted); margin:0 0 6px 50px; display:flex; align-items:center; gap:6px}
+.post-meta-line{font-size:.82em; color:var(--muted); margin:0 0 6px var(--av-col); display:flex; align-items:center; gap:6px}
 .post-meta-line svg{width:14px; height:14px}
 /* When the repost happened, right-aligned above the original post's time. */
 /* The reposter's name is a link to their profile; it keeps the muted colour
    of the line it sits in rather than .pv-name's full-contrast ink. */
 .post-meta-line .pv-name{color:inherit; font-weight:600}
 .post-meta-line .repost-time{margin-left:auto; font-variant-numeric:tabular-nums; white-space:nowrap}
-.pv{display:flex; gap:10px}
+.pv{display:flex; gap:var(--av-gap)}
 .pv + .pv{margin-top:10px}
 /* ---------- reply threads ----------
    Parent post shown above a reply, with a vertical thread line joining them. */
 .parent{position:relative}
-.parent::after{content:""; position:absolute; left:19px; top:46px; bottom:-10px; width:2px; background:var(--line)}
+.parent::after{content:""; position:absolute; left:calc(var(--av) / 2 - 1px); top:calc(var(--av) + 6px); bottom:-10px; width:2px; background:var(--line)}
 /* Joined thread cards: when a reply directly follows the post it answers, the
    two cards are fused into one visual card (.has-next on the upper card,
    .joined on the lower) and a thread line runs from the upper avatar down
@@ -2053,14 +2357,14 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .post.has-next{margin-bottom:0; border-bottom:0; border-bottom-left-radius:0; border-bottom-right-radius:0}
 .post.joined{margin-top:0; border-top:0; border-top-left-radius:0; border-top-right-radius:0; padding-top:4px}
 .post.has-next > .pv:last-child{position:relative}
-.post.has-next > .pv:last-child::after{content:""; position:absolute; left:19px; top:46px; bottom:-6px; width:2px; background:var(--line)}
+.post.has-next > .pv:last-child::after{content:""; position:absolute; left:calc(var(--av) / 2 - 1px); top:calc(var(--av) + 6px); bottom:-6px; width:2px; background:var(--line)}
 .post.joined > .pv:first-child{position:relative}
-.post.joined > .pv:first-child::before{content:""; position:absolute; left:19px; top:-4px; height:4px; width:2px; background:var(--line)}
+.post.joined > .pv:first-child::before{content:""; position:absolute; left:calc(var(--av) / 2 - 1px); top:-4px; height:4px; width:2px; background:var(--line)}
 /* Short reminder of a parent you've already seen: one line, click to expand
    into the full parent post. Indented to line up with post text. */
-.parent-mini{display:flex; align-items:center; gap:6px; width:calc(100% - 50px); margin:0 0 8px 50px; background:var(--surface-2); border:0; border-radius:8px;
+.parent-mini{display:flex; align-items:center; gap:6px; width:calc(100% - var(--av-col)); margin:0 0 8px var(--av-col); background:var(--surface-2); border:0; border-radius:8px;
   padding:5px 10px; text-align:left; cursor:pointer; color:var(--muted); font-size:.86em}
-.parent-mini:hover{color:var(--ink)}
+@media (hover:hover){ .parent-mini:hover{color:var(--ink)} }
 .parent-mini .avatar{width:18px; height:18px}
 .parent-mini .pm-label{white-space:nowrap}
 /* Everything on this line is nowrap, and a flex item won't shrink below its
@@ -2077,17 +2381,17 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
    of a reply deep in the thread. Sits on the thread line. The button fetches
    the missing posts and puts them here; the link beside it is the way out to
    bsky.app, for when that fetch can't get the whole chain. */
-.thread-gap{display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; margin:-2px 0 10px 50px; font-size:.85em; color:var(--muted)}
+.thread-gap{display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px; margin:-2px 0 10px var(--av-col); font-size:.85em; color:var(--muted)}
 .thread-gap button{background:0; border:0; padding:0; font:inherit; color:inherit; text-align:left; cursor:pointer}
-.thread-gap button:hover:not(:disabled){color:var(--accent)}
+@media (hover:hover){ .thread-gap button:hover:not(:disabled){color:var(--accent)} }
 .thread-gap button:disabled{cursor:default; opacity:.7}
 .thread-gap a{color:inherit; white-space:nowrap}
 .thread-gap a:hover{color:var(--accent)}
-.avatar{width:40px; height:40px; border-radius:50%; flex:none; background:var(--surface-2); object-fit:cover}
+.avatar{width:var(--av); height:var(--av); border-radius:50%; flex:none; background:var(--surface-2); object-fit:cover}
 /* The link around a post's avatar is a flex item of .pv, and flex items
    stretch to the row's full height by default, which made the whole empty
    column under the avatar clickable. Pin it to the avatar's own size. */
-.avatar-link{flex:none; align-self:flex-start; display:block; width:40px; height:40px; border-radius:50%}
+.avatar-link{flex:none; align-self:flex-start; display:block; width:var(--av); height:var(--av); border-radius:50%}
 .pv-body{flex:1; min-width:0}
 .pv-head{display:flex; gap:6px; align-items:baseline; flex-wrap:wrap; font-size:.95em}
 /* A display name is whatever the account set it to, so it can be one
@@ -2109,7 +2413,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 /* Like / repost / reply / copy / open buttons under each post. */
 .actions{display:flex; gap:2px; margin:6px 0 2px -8px; flex-wrap:wrap}
 .act{display:inline-flex; align-items:center; gap:5px; background:none; border:0; border-radius:16px; padding:5px 9px; color:var(--muted); cursor:pointer; text-decoration:none; font-size:.88em; font-variant-numeric:tabular-nums}
-.act:hover{background:var(--surface-2); color:var(--ink)}
+@media (hover:hover){ .act:hover{background:var(--surface-2); color:var(--ink)} }
 .act svg{width:17px; height:17px}
 .act.liked{color:var(--like)}
 .act.reposted{color:var(--repost)}
@@ -2250,7 +2554,8 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px 120px}
 .embed-unknown{border:1px dashed var(--line); border-radius:10px; padding:8px 10px; color:var(--muted); font-size:.9em}
 /* ---------- settings drawer (built dynamically from SETTINGS_SCHEMA) ---------- */
 .drawer-scrim{position:fixed; inset:0; background:rgba(0,0,0,.3); z-index:40}
-.drawer{position:fixed; top:0; right:0; bottom:0; width:min(440px, 100vw); background:var(--surface); border-left:1px solid var(--line); z-index:41; overflow-y:auto; padding:16px 18px 40px}
+.drawer{position:fixed; top:0; right:0; bottom:0; width:min(440px, 100vw); background:var(--surface); border-left:1px solid var(--line); z-index:41;
+  overflow-y:auto; padding:calc(16px + env(safe-area-inset-top)) 18px calc(40px + env(safe-area-inset-bottom))}
 /* While the drawer is open the page moves aside instead of hiding behind it,
    so a change to the look can be seen as it is made. Padding on <body> is
    what does it: the bar is sticky rather than fixed and main is centred with
@@ -2267,7 +2572,7 @@ body{transition:padding-right .18s ease}
 .drawer details.group > summary::-webkit-details-marker{display:none}
 .drawer details.group > summary::before{content:"\203A"; color:var(--muted); font-size:1.15em; line-height:1; transition:transform .15s; display:inline-block; width:10px}
 .drawer details.group[open] > summary::before{transform:rotate(90deg)}
-.drawer details.group > summary:hover{color:var(--accent)}
+@media (hover:hover){ .drawer details.group > summary:hover{color:var(--accent)} }
 .group-sum{margin-left:auto; font-size:.76em; font-weight:400; color:var(--accent)}
 .group-body{padding-bottom:12px}
 /* The Protocol group's read-only readout of what this copy is actually
@@ -2317,7 +2622,7 @@ body{transition:padding-right .18s ease}
 /* The optional "your server" row on the sign-in form. */
 .field-advanced{margin:2px 0 10px}
 .field-advanced summary{font-size:.86em; color:var(--muted); cursor:pointer}
-.field-advanced summary:hover{color:var(--ink)}
+@media (hover:hover){ .field-advanced summary:hover{color:var(--ink)} }
 .field-advanced .field{margin-top:8px}
 /* A setting that only applies while another one has a particular value (the
    schema's `when`): indented under its parent so the nesting is visible, and
@@ -2367,23 +2672,146 @@ body{transition:padding-right .18s ease}
 .banner button{background:none; border:0; cursor:pointer; color:var(--muted); font-size:1.2em; line-height:1; padding:0 4px}
 
 /* ---------- overlays: image lightbox, toast notifications, repost menu ---------- */
-.lightbox{position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:60; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:20px; cursor:zoom-out}
-.lightbox img{max-width:100%; max-height:calc(100vh - 110px); object-fit:contain}
+.lightbox{position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:60; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  padding:max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); cursor:zoom-out}
+.lightbox img{max-width:100%; max-height:calc(100vh - 110px); max-height:calc(100svh - 110px); object-fit:contain}
 .lightbox .lb-alt{color:#eee; max-width:760px; margin-top:12px; font-size:.9em; white-space:pre-wrap; max-height:80px; overflow:auto}
 /* Previous/next and "2 / 5" counter when a post has several images. */
 .lb-nav{position:fixed; top:50%; transform:translateY(-50%); width:48px; height:48px; border-radius:50%; border:0; background:rgba(255,255,255,.15); color:#fff; font-size:30px; line-height:1; cursor:pointer; padding:0 0 4px}
-.lb-nav:hover{background:rgba(255,255,255,.28)}
+@media (hover:hover){ .lb-nav:hover{background:rgba(255,255,255,.28)} }
 .lb-nav.prev{left:16px} .lb-nav.next{right:16px}
 .lb-count{color:#ccc; font-size:.85em; margin-top:8px; font-variant-numeric:tabular-nums}
-.toast{position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:var(--ink); color:var(--surface); padding:8px 16px; border-radius:8px; z-index:70; font-size:.92em}
+.toast{position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--ink); color:var(--surface); padding:8px 16px; border-radius:8px; z-index:70; font-size:.92em}
 .menu{position:absolute; z-index:50; background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:4px; box-shadow:0 6px 24px rgba(0,0,0,.18); min-width:200px}
 .menu button, .menu a{display:flex; align-items:center; gap:8px; width:100%; background:none; border:0; padding:8px 10px; border-radius:6px; text-align:left; cursor:pointer; color:var(--ink); text-decoration:none; font-size:.92em}
-.menu button:hover, .menu a:hover{background:var(--surface-2)}
+@media (hover:hover){ .menu button:hover, .menu a:hover{background:var(--surface-2)} }
 @media (prefers-reduced-motion: reduce){ *{transition:none !important} }
-/* Narrow screens: the reading clock needs the room, so the provenance link
-   drops to just "MIT" (still linking to this release; the version is in the
-   "About" block and the link target). */
-@media (max-width:560px){ .bar-actions .btn{padding:6px 8px} .pv-handle{max-width:120px} .bar-src{padding:0 2px} .bar-src .src-v{display:none} }
+/* ---------- touch (no pointer that can hover) ----------
+   The counterpart to the gated :hover rules above. Turning hover off for
+   touch stopped a tapped button sitting there lit -- and left touch with no
+   feedback at all, which is worse: a press that does nothing visible reads
+   as a press that was missed, and gets repeated. These are the same colours
+   the hover rules use, through the same tokens; only the state differs.
+   Keyed on the POINTER, not the width: a touch laptop at 1400px wants press
+   feedback just as much as a phone does, and neither wants a hover that
+   sticks. */
+@media (hover:none){
+  html{
+    /* Chrome's own grey flash box, replaced by the states below rather than
+       simply removed: on its own this line would leave touch with nothing. */
+    -webkit-tap-highlight-color:transparent;
+  }
+  .btn:active{background:var(--surface-2)}
+  .btn.primary:active{filter:brightness(.92)}
+  .act:active{background:var(--surface-2); color:var(--ink)}
+  .menu button:active, .menu a:active{background:var(--surface-2)}
+  .parent-mini:active{color:var(--ink)}
+  .choice:active{border-color:var(--accent)}
+  /* The gallery's arrows are for a mouse. On a touch screen the strip is
+     already swiped -- it is scroll-snap -- so they only sit on top of the
+     picture you are swiping past. */
+  .g-nav{display:none}
+  /* Pull-to-refresh, which only a finger can do. Reloading is not a small
+     thing here: starting a catch-up writes #from=... into the address, so a
+     reload re-runs the whole catch-up -- minutes of fetching and real data,
+     for a gesture nobody meant to make at the top of a feed they are reading
+     DOWNWARDS. Scoped here rather than onto html outright, where it would
+     also have taken a trackpad's elastic bounce away from a desktop that
+     never had a pull-to-refresh to stop. */
+  html{overscroll-behavior-y:contain}
+  /* And reaching the end of the settings list stops there, instead of
+     carrying on into the feed behind the open drawer. */
+  .drawer{overscroll-behavior:contain}
+}
+
+/* ---------- narrow screens (phones) ----------
+   ONE breakpoint, and it is 600px because the default reading column is
+   640px: at any width this matches, the page is already being squeezed by
+   the window rather than laid out at the measure it was designed for, so
+   there is no desktop state here to protect. The rule to keep is that
+   nothing in this block may touch a window at or above --col. The desktop
+   layout is the design; this is that design made to fit a phone, not a
+   second design.
+
+   WHAT WAS MEASURED, in a browser at a 328px viewport -- narrower than any
+   current phone, so everything below has slack on a real one:
+
+     - The top bar did not fit. Its three buttons plus the MIT link needed
+       336px on their own and the bar needed ~380px, so the clock was
+       crushed to nothing and "Sign out" ran off the edge, where
+       html{overflow-x:clip} cut it in half: partly UNTAPPABLE, not merely
+       ugly. The buttons go icon-only here. Both the icon and the words are
+       always in the markup and this block picks which is seen, so the
+       accessible name never goes away and no script has to put it back.
+       Measured after: no overflow at all, the clock gets 147px, the buttons
+       come out 38px tall and the bar stays the 66px it was. --bar-h is
+       re-measured on every resize, so the sticky day divider and --media-cap
+       follow a bar of any height on their own.
+
+     - The six buttons under a post did not fit either: 289px of buttons into
+       a 234px box, so "open" dropped to a second row. Trimming them is not
+       enough on its own (it only gets to 234 into 230). The row also takes
+       back the avatar gutter, which is empty space under the avatar anyway;
+       a negative margin is the whole of it, because a row with an auto width
+       absorbs the margin and simply gets wider. Measured after: ONE row at
+       234px typical and 280px with four-digit counts, into a 288px box.
+
+     - Buttons are 38px tall here rather than 27px, which is a thumb rather
+       than a mouse pointer. The extra height is why the trimming above is
+       horizontal only.
+
+     - A settings row whose control is wide now stacks. A 130px slider beside
+       a long label left the label six characters wide -- "Most columns" read
+       one word per line, and "Column width"'s value was clipped. Rows whose
+       control is a checkbox stay on one line, which is where they read best.
+
+   Things deliberately NOT changed, so nobody re-opens them: the avatar stays
+   40px (Bluesky's own app keeps it at that size on a phone, and shrinking it
+   would move every thread line); galleries keep height:min(380px, 62vw),
+   whose 62vw is for exactly this case; and tiling needs no mention, since
+   two columns cannot fit a window this narrow. */
+@media (max-width:600px){
+  /* The reading clock needs the room, so the provenance link drops to just
+     "MIT" (still linking to this release; the version is in the "About"
+     block and the link target). */
+  .bar-src{padding:0 2px} .bar-src .src-v{display:none}
+  .bar-inner{gap:8px; padding:8px 10px}
+  .bar-actions{gap:4px}
+  .bar-actions .btn{padding:9px; display:inline-flex; align-items:center}
+  .bar-actions .btn-icon{display:block}
+  /* Hidden from the eye, never from a screen reader: display:none here would
+     take the button's only accessible name with it. */
+  .bar-actions .btn-label{position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap}
+  .pv-handle{max-width:120px}
+  .post{padding:12px 10px 6px}
+  /* Out past the avatar to the card's left edge. The -8px is the nudge the
+     row already carries, which lines the first icon up with the text above
+     it once the button's own padding is allowed for. */
+  .actions{gap:0; margin-left:calc(-1 * var(--av-col) - 8px)}
+  .act{padding:9px 6px; gap:4px}
+  .act svg{width:16px; height:16px}
+  /* A quoted post's bar has no gutter to take back -- the quote box is
+     already indented -- so it buys its room by being tighter instead. */
+  .quote .act{padding:9px 4px}
+  .set:has(select), .set:has(input[type=range]), .set:has(input[type=text]), .set:has(input[type=number]){flex-direction:column; align-items:stretch; gap:6px}
+  .set:has(select) select, .set:has(input[type=text]) input[type=text]{max-width:none; width:100%}
+  .set .range-row{width:100%}
+  .set input[type=range]{flex:1; width:auto}
+  .set .checks{grid-template-columns:1fr}
+  /* 48px arrows sitting 16px in ate a third of the screen's width. */
+  .lb-nav{width:40px; height:40px; font-size:26px}
+  .lb-nav.prev{left:6px} .lb-nav.next{right:6px}
+  /* Targets a thumb can find. Each grows by padding and gives the same
+     amount back as negative margin, so the hit area changes and NOTHING
+     moves -- these sit inside laid-out rows, and the point is to be easier
+     to hit, not to push the text around. The banner's dismiss was the worst
+     of them at about 19px square. */
+  .banner button{padding:10px 12px; margin:-10px -12px -10px 0}
+  .thread-gap button{padding:7px 0; margin:-7px 0}
+  .blur-cover button{padding:10px 16px}
+  .about summary, .field-advanced summary{padding:7px 0; margin:-7px 0}
+  .set .checks label{min-height:32px}
+}
 </style>
 </head>
 <body>
@@ -2399,9 +2827,17 @@ body{transition:padding-right .18s ease}
     </div>
     <div class="bar-actions">
       <a class="bar-src" id="barSrc" href="https://github.com/choccccy/bsky-catch-up" target="_blank" rel="noopener" title="Open source, MIT licence — see the code on GitHub"><span class="src-v">v<span id="barVersion"></span> &middot; </span>MIT</a>
-      <button class="btn hidden" id="btnNew" type="button">New catch-up</button>
-      <button class="btn" id="btnSettings" type="button">Settings</button>
-      <button class="btn hidden" id="btnSignOut" type="button">Sign out</button>
+      <!-- Below 600px these three go icon-only (see the narrow-screens block
+           in the stylesheet). Both the icon and the words are always here and
+           CSS chooses which is shown, so the accessible name is never absent
+           and nothing has to run to restore it. The icons are inline rather
+           than in ICON because this bar is static markup: putting them in
+           ICON would mean script writing them in at boot for no gain.
+           The title is what a touch user long-presses to find out what an
+           icon means, and matches every other icon-only control on the page. -->
+      <button class="btn hidden" id="btnNew" type="button" title="New catch-up"><span class="btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/></svg></span><span class="btn-label">New catch-up</span></button>
+      <button class="btn" id="btnSettings" type="button" title="Settings"><span class="btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/></svg></span><span class="btn-label">Settings</span></button>
+      <button class="btn hidden" id="btnSignOut" type="button" title="Sign out"><span class="btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg></span><span class="btn-label">Sign out</span></button>
     </div>
   </div>
   <div class="strip"><div class="strip-fill" id="stripFill"></div></div>
@@ -2473,7 +2909,7 @@ body{transition:padding-right .18s ease}
   <section class="panel hidden" id="viewStart">
     <div class="who" id="whoBox"></div>
     <h1>Where do you want to start reading?</h1>
-    <p>Posts load oldest first, so you scroll down to move forward in time.</p>
+    <p>Posts load oldest first, so you scroll down to move forward in time — unless the feed ranks its posts, which is read in the order the feed gives them.</p>
     <form id="startForm">
       <!-- Which feed to read. Following unless the account has saved feeds
            or a feed/list link is pasted; see loadSavedFeeds(). No label: the
@@ -2497,7 +2933,7 @@ body{transition:padding-right .18s ease}
         </label>
         <label class="choice">
           <span><input type="radio" name="kind" value="like">From the last post I liked</span>
-          <div class="choice-body hint always">Kept by Bluesky, not by this page, so it works on any device.</div>
+          <div class="choice-body hint always">Kept by Bluesky, not this page, so it works on any device. Starts where it sat in your feed.</div>
         </label>
       </div>
       <label class="choice">
@@ -2515,7 +2951,7 @@ body{transition:padding-right .18s ease}
         <span><input type="radio" name="kind" value="recent">The most recent posts</span>
         <div class="choice-body field field-indent">
           <input type="number" id="inRecent" min="1" max="2000" value="200">
-          <span class="hint">Reads this many of the newest posts and shows them oldest first. Best for feeds that rank posts rather than ordering them by time, where “from a date” doesn’t mean much.</span>
+          <span class="hint">Best for feeds that rank posts rather than ordering them by time, where “from a date” doesn’t mean much. A ranked feed is kept in the order it gives them, and “load more” goes further down it; anything else is shown oldest first.</span>
         </div>
       </label>
       <!-- Optional end point. Unchecked (the default) means "read up to now". -->
@@ -2570,7 +3006,7 @@ body{transition:padding-right .18s ease}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.2.2";
+const APP_VERSION = "1.3.0";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -2600,8 +3036,10 @@ const sleep = (ms, signal) => new Promise((res, rej) => {
 const isAbort = e => e?.name === "AbortError";
 /* Compact counts: 950 -> "950", 12345 -> "12.3k", 250000 -> "250k". */
 const fmtNum = n => n == null ? "" : n >= 10000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, "") + "k" : String(n);
-/* "1 post" / "2 posts". English plurals only, which is all this page writes. */
-const plural = (n, word) => `${word}${n === 1 ? "" : "s"}`;
+/* "1 post" / "2 posts". English plurals only, which is all this page writes.
+   `many` gives the plural outright, for a word that doesn't just take an s
+   ("is" / "are"). */
+const plural = (n, word, many) => n === 1 ? word : (many || word + "s");
 /* Is an element hidden (the .hidden class is how every screen and overlay is
    toggled)? viewing() is the same question about one of the four views, which
    is what most callers actually mean. */
@@ -2679,9 +3117,16 @@ const DOC = {
 const DEFAULTS = {
   theme: "system", fontSize: 16, columnWidth: 640, tile: false, tileMax: 2, timeFormat: "absolute", dayDividers: true, hourDividers: true, showCounts: true,
   showReposts: true, replies: "followed", showQuotes: true, onlyTypes: [], replyContext: "reminder", collapseRepeats: true, showOwn: true, hideFollowed: "off",
+  // "Hide people I follow", per feed: {feed at:// URI -> mode} for every feed
+  // you have set it on, over hideFollowed above as the fallback for one you
+  // haven't. See hideFollowedFor. Deliberately has no SETTINGS_SCHEMA row of
+  // its own -- the drawer shows it through the hideFollowed row's resolved
+  // value -- which also keeps it out of the changed-dot machinery, since that
+  // walks the schema.
+  hideFollowedBy: {},
   sensitive: "blur", videoMode: "click", gifMode: "auto", preloadVideos: defaultPreloadVideos(), confirmRepost: true, confirmFollow: true, galleryProxy: true, galleryProxyHost: "xbsky.app",
   wholeImages: "app", mediaWidth: 1, wholeAlt: true, wholeVideo: true, wholeLinkThumbs: true,
-  contextCount: 12, scrollTo: "anchor", trackPosition: true, fetchMethod: "auto",
+  contextCount: 12, scrollTo: "anchor", trackPosition: true, showBrokenFeeds: false, fetchMethod: "auto",
   concurrency: 6, rpm: 500, batchSize: 150,
   appView: "", webHost: "bsky.app",
   dnsResolver: "https://cloudflare-dns.com/dns-query", plcDirectory: "https://plc.directory",
@@ -2772,6 +3217,12 @@ const POST_KINDS = [["images", "Images (1–4)"], ["gallery", "Galleries (5+)"],
                        greyed out (and its control disabled) while it doesn't
                        apply; see .set.sub-set / .off, renderDrawer and
                        syncDependents.
+   - value / set       a setting that isn't simply settings[key]: value()
+                       returns what the row should show and set(v) stores a
+                       change (hideFollowed is remembered per feed, so both
+                       depend on which feed is in question). Everything goes
+                       through rowValue / setRowValue, so a row can't be drawn
+                       from one place and written to another.
    - needs / needsWhy  needs() says whether the setting means anything for the
                        feed being read (or the one picked on the start screen);
                        while it doesn't, the row is greyed out and disabled and
@@ -2808,8 +3259,12 @@ const SETTINGS_SCHEMA = [
     options: [["reminder", "Short reminder (full post if not seen yet)"], ["full", "Full post above every reply"], ["moveLater", "Move thread to its latest reply"], ["moveUp", "Move replies up under their post"], ["none", "Just “Replying to @name”"]], apply: "render" },
   { key: "collapseRepeats", link: true, label: "Show each post only once", sub: "Hides later reposts of something already in the feed", type: "bool", apply: "render" },
   { key: "showOwn", link: true, label: "My own posts and reposts", type: "bool", apply: "render" },
-  { key: "hideFollowed", link: true, label: "Hide people I follow", sub: "For a feed that mixes in accounts you don't follow \u2014 Discover, For You, a list. What you'd see in your Following feed anyway is left out, so what's left is fresh.", type: "select",
+  { key: "hideFollowed", link: true, label: "Hide people I follow", sub: "For a feed that mixes in accounts you don't follow \u2014 Discover, For You, a list. What you'd see in your Following feed anyway is left out, so what's left is fresh. Remembered for each feed on its own: a feed you've set this on stays as you set it, and one you haven't follows whatever you chose last.", type: "select",
     options: [["off", "Off"], ["posts", "Their posts"], ["all", "Their posts and their reposts"]],
+    // Per feed, so the row shows the value for the feed in question rather
+    // than the bare setting (see hideFollowedFor).
+    value: () => hideFollowedMode(),
+    set: v => setHideFollowed(v),
     needs: () => hideFollowedFits(feedInQuestion()),
     needsWhy: "Your Following feed is nothing but posts from people you follow, so there would be nothing left. This applies to a custom feed or a list.", apply: "render" },
   { key: "sensitive", link: true, label: "Adult or graphic media", type: "select", options: [["blur", "Blur"], ["show", "Show"], ["hide", "Hide the post"]], apply: "render" },
@@ -2832,6 +3287,9 @@ const SETTINGS_SCHEMA = [
   { key: "contextCount", link: true, label: "Earlier posts shown above a start post", type: "number", min: 0, max: 100, apply: "render" },
   { key: "scrollTo", link: true, label: "When the feed opens, show", type: "select", options: [["anchor", "The start post"], ["context", "The earliest context post"]] },
   { key: "trackPosition", label: "Remember how far I've read", type: "bool" },
+  // Deliberately NOT link: true. It's about the feeds saved in THIS account,
+  // so it has no meaning in a catch-up link shared with anyone else.
+  { key: "showBrokenFeeds", label: "Show saved feeds that don't load", sub: "Feeds and lists saved in your account that no longer resolve \u2014 deleted, or their owner is gone. Hidden unless you want to try one anyway.", type: "bool" },
   { key: "fetchMethod", link: true, label: "How to load posts", sub: "Auto uses the timeline, and rebuilds from your follows if the timeline doesn't reach back far enough", type: "select", options: [["auto", "Auto"], ["timeline", "Timeline only"], ["rebuild", "Always rebuild from follows"]],
     needs: () => !settings.protocolOnly,
     needsWhy: "Not used while “Build the catch-up without an AppView” is on, which has its own way of gathering posts." },
@@ -2884,6 +3342,49 @@ function setSetting(key, value) {
   if (linkOverrides) { baseSettings[key] = value; delete linkOverrides[key]; if (!Object.keys(linkOverrides).length) endLinkOverlay(false); }
   saveSettings();
 }
+/* The value a drawer row is showing. Usually just the setting, but a row may
+   resolve its own (hideFollowed is remembered per feed, so what it shows
+   depends on which feed is in question). Everything that reads a row's value
+   -- the control, the changed dot, each group's count -- comes through here,
+   so a row can't be drawn with one value and marked against another. */
+const rowValue = s => s.value ? s.value() : settings[s.key];
+/* And the way back: how a user action on that row stores its value. A row may
+   store its own (hideFollowed writes the feed it is about as well as the
+   setting), so the drawer and the notes above the feed both change a setting
+   through here rather than reaching for setSetting themselves. */
+const setRowValue = (s, v) => s.set ? s.set(v) : setSetting(s.key, v);
+/* How many feeds' worth of "Hide people I follow" are remembered. Each entry
+   is a feed at:// URI, around 70 bytes, and nothing ever removes one by
+   itself, so without a cap the map would grow for as long as the browser
+   keeps its localStorage. */
+const HIDE_FOLLOWED_MEMORY = 100;
+/* Changing "Hide people I follow", which is remembered per feed (see
+   hideFollowedFor). The value becomes both this feed's own -- so a feed you
+   have set stays as you set it, whatever you later choose elsewhere -- and the
+   last value chosen, which is what a feed you have never set follows.
+   An entry is NOT dropped for matching the fallback: a feed set deliberately
+   has to stay put the next time the fallback moves, which is the whole point.
+   Instead the oldest entries fall off the end. */
+function setHideFollowed(value) {
+  const src = feedInQuestion();
+  // Nothing to remember where the filter can't apply. The drawer's control is
+  // disabled there, so this is belt and braces -- it keeps the timeline from
+  // ever putting a key in the map.
+  if (!hideFollowedFits(src)) return;
+  const k = feedKey(src);
+  if (k) {
+    const by = { ...settings.hideFollowedBy };
+    delete by[k];                       // re-inserted below, so key order is
+    by[k] = value;                      // least- to most-recently set
+    const keys = Object.keys(by);
+    for (const old of keys.slice(0, Math.max(0, keys.length - HIDE_FOLLOWED_MEMORY))) delete by[old];
+    setSetting("hideFollowedBy", by);
+  }
+  // Always through setSetting, even when the value is unchanged: it is what
+  // takes hideFollowed out of a link's overlay, without which the link would
+  // go on outranking the choice just made (see hideFollowedFor).
+  setSetting("hideFollowed", value);
+}
 /* The tiled layout as it currently stands -- whether it's in force at all,
    and over how many columns -- so a resize or a width change can tell what
    has to happen: a rebuild (the markup differs), or just putting the
@@ -2918,8 +3419,61 @@ function applyLook() {
   r.toggleAttribute("data-tile", tiling);
   wasTiled = tiling; wasCols = tiling ? tileCols() : 1;
   r.toggleAttribute("data-tile-wide", tiling && whole && settings.mediaWidth > 1);
+  // The browser's own chrome, told what colour the page is. This has to be
+  // read back from the cascade rather than kept in a table here: --surface is
+  // defined once per palette in the stylesheet, and a second copy in the
+  // script is how two colours come to disagree.
+  const surface = getComputedStyle(r).getPropertyValue("--surface").trim();
+  if (surface) $('meta[name="theme-color"]')?.setAttribute("content", surface);
+  // The manifest carries the same colours, for the splash screen behind a
+  // page opened from the home screen. Here rather than once at boot, so
+  // switching to the light theme doesn't leave a dark splash behind it.
+  writeManifest();
   requestAnimationFrame(() => r.style.setProperty("--bar-h", $("#bar").offsetHeight + "px"));
 }
+
+/* Rewrites the manifest in the head (which is already a valid one) with the
+   two things only the running page knows: where it is being served from, and
+   which palette is in force. The <link> carries the fallback, so a page whose
+   script never gets this far still has a usable manifest -- see the comment
+   on the tag.
+   What this does NOT claim to be is an installable PWA. That also wants a
+   service worker, which needs a URL of its own and so cannot exist inside a
+   single file, and an icon of at least 192px, where the one here is the 180px
+   apple-touch-icon. What it gets is the part that is actually worth having:
+   a home-screen launcher that opens without browser chrome, under the right
+   name, with the right icon and the right colours behind it. */
+function writeManifest() {
+  const link = $("#manifest");
+  if (!link) return;
+  const icon = $('link[rel="apple-touch-icon"]')?.href;
+  const css = getComputedStyle(document.documentElement);
+  const look = p => css.getPropertyValue(p).trim();
+  const mf = {
+    name: "Bluesky Catch-up", short_name: "Catch-up",
+    description: "Read your Bluesky Following feed from any point in time, oldest first.",
+    // Whatever address this copy is at, WITHOUT the fragment: a launcher
+    // should open the start screen, not re-run whichever catch-up happened to
+    // be on screen when it was made.
+    start_url: location.pathname + location.search,
+    scope: location.pathname.replace(/[^/]*$/, ""),
+    display: "standalone",
+    background_color: look("--bg") || "#0F141B",
+    theme_color: look("--surface") || "#0F141B",
+    icons: icon ? [{ src: icon, sizes: "180x180", type: "image/png", purpose: "any" }] : [],
+  };
+  // encodeURIComponent rather than base64: a data: URL's payload may not hold
+  // a raw "#" (it would start a fragment), and JSON is full of characters a
+  // URL parser would otherwise take an interest in.
+  const json = JSON.stringify(mf);
+  // applyLook calls this on every settings change, and almost none of them
+  // touch anything in here. Writing the href makes the browser fetch and
+  // parse the manifest again, so only write it when it has actually changed.
+  if (json === lastManifest) return;
+  lastManifest = json;
+  link.href = "data:application/manifest+json," + encodeURIComponent(json);
+}
+let lastManifest = null;
 
 /* Follow the system's light/dark setting while "Match system" is chosen. The
    stylesheet used to do this on its own with a media query; now that the
@@ -3485,17 +4039,69 @@ function sortAtOf(fi) {
 /* Wraps a feedViewPost as an item. The key must be unique per feed ENTRY, not
    per post: the same post can appear once as itself and again as each
    follow's repost. Repost keys include the repost record URI when the API
-   provides it (newer AppViews do), else reposter DID + time. */
+   provides it (newer AppViews do), else reposter DID + time.
+   fetchFeed also stamps `o`, the item's place in the order the feed SERVED
+   it. Only that fetcher can: the rebuild and protocol strategies assemble
+   the feed out of one account at a time, so there is no server order to
+   record -- and both only ever run for Following, which is chronological
+   anyway. */
 function mkItem(fi, t = sortAtOf(fi)) {
   const key = isRepost(fi) ? "r:" + (fi.reason.uri || fi.reason.by?.did + "@" + fi.reason.indexedAt) + "|" + fi.post.uri : "p:" + fi.post.uri;
   return { key, t, fi };
 }
-/* Merges item lists, de-duplicating by key (later lists win), sorted oldest first. */
+/* How far a feed may step BACKWARDS (towards newer) between consecutive items
+   before it counts as out of order. Some tolerance is needed because sortAtOf
+   uses min(indexedAt, createdAt), which isn't the same key the AppView sorted
+   by: a genuinely chronological feed still produces small backward steps. */
+const ORDER_TOLERANCE = 60e3;
+/* Below this many items a run of inversions says nothing, and a feed is taken
+   at its word as chronological. */
+const ORDER_MIN_ITEMS = 20;
+/* Above this share of out-of-order steps the feed is ranked, not chronological. */
+const ORDER_RANKED_SHARE = 0.05;
+/* Did this feed come back in time order? Items are served newest-first, so a
+   chronological feed's times only ever go DOWN the list. Counting how often
+   they go up instead separates Following, lists and chronological custom
+   feeds (a handful of sub-tolerance wobbles) from a ranked feed like For You
+   or Discover (inversions everywhere). */
+function looksRanked(items) {
+  if (items.length < ORDER_MIN_ITEMS) return false;
+  let inversions = 0;
+  for (let i = 1; i < items.length; i++) if (items[i].t > items[i - 1].t + ORDER_TOLERANCE) inversions++;
+  return inversions / (items.length - 1) > ORDER_RANKED_SHARE;
+}
+/* Merges item lists, de-duplicating by key (later lists win), sorted oldest
+   first. An item already held keeps the `o` it was first served at, and new
+   items are moved past the highest `o` so far, so that reading a ranked feed
+   in served order (see feedOrder) is stable: "Load more" re-reads the feed
+   from the top, and without this a feed that re-ranked between fetches would
+   reshuffle posts the reader has already gone past. */
 function mergeItems(...lists) {
-  const m = new Map();
-  for (const list of lists) for (const it of list) if (!isNaN(it.t)) m.set(it.key, it);
+  const m = new Map(), firstList = new Map();
+  for (let i = 0; i < lists.length; i++) for (const it of lists[i]) {
+    if (isNaN(it.t)) continue;
+    if (!firstList.has(it.key)) firstList.set(it.key, i);
+    const prev = m.get(it.key);
+    m.set(it.key, prev && prev.o != null ? { ...it, o: prev.o } : it);
+  }
+  // A later list is a fresh reading of the same feed, numbered from the top
+  // again, so an item only IT has would otherwise land among the ones already
+  // held. Move those past the highest ordinal held, keeping their order.
+  let maxO = -1;
+  for (const [key, it] of m) if (firstList.get(key) === 0 && it.o != null && it.o > maxO) maxO = it.o;
+  if (maxO >= 0) for (const [key, it] of m) if (firstList.get(key) > 0 && it.o != null) it.o += maxO + 1;
   return [...m.values()].sort((a, b) => a.t - b.t || (a.key < b.key ? -1 : 1));
 }
+
+/* Is this catch-up being read in the order the feed served it, rather than
+   oldest-first by time? True only for a "most recent posts" run on a feed
+   that came back ranked (see looksRanked). The ordering is set once, when
+   the run starts, so it can't change under the reader mid-feed.
+   Where it's true, time stops being the thing you move through: day and hour
+   dividers are off, the progress strip counts posts instead of minutes, and
+   the reading position isn't saved -- going deeper into For You isn't
+   progress through your Following feed. */
+const feedOrder = () => state.run?.order === "feed";
 
 /* Whether this catch-up will be built from repositories. The setting only
    applies to the Following feed: a custom feed or list is something an
@@ -3568,13 +4174,40 @@ const FOLLOWING = { kind: "timeline", name: "Following" };
    gather() only ever rebuilds a timeline source (canRebuild), so this one test
    covers both. */
 const hideFollowedFits = src => (src || FOLLOWING).kind !== "timeline";
-/* The feed the filter and the drawer are talking about: the one being read,
-   else the one picked on the start screen (chosenFeed; null = Following). */
-const feedInQuestion = () => state.run?.feed || chosenFeed || FOLLOWING;
-/* The filter's mode here, "off" wherever it doesn't fit. That is what makes a
-   value arriving from saved settings or a catch-up link harmless on Following,
-   as well as greying the row out in the drawer. */
-const hideFollowedMode = () => hideFollowedFits(feedInQuestion()) ? settings.hideFollowed : "off";
+/* How a feed is keyed in settings.hideFollowedBy: its at:// URI. The timeline
+   has none and never needs one (the filter can't fit there), so it keys to "",
+   which hideFollowedFor and setHideFollowed both read as "no slot". */
+const feedKey = src => { const s = src || FOLLOWING; return s.kind === "timeline" ? "" : s.uri; };
+/* What "Hide people I follow" means on one particular feed, which is the only
+   question anything should ask. Newest wins:
+     1. "off" wherever the filter doesn't fit (hideFollowedFits) -- that is what
+        makes a value from saved settings or a catch-up link harmless on
+        Following rather than an empty page;
+     2. a catch-up link's own value, while its overlay is on (the link is
+        talking about the feed it names, so it outranks what's remembered);
+     3. this feed's remembered value, if it has ever been set here;
+     4. the last value chosen anywhere, for a feed never set.
+   (2) reads settings.hideFollowed because applyLinkSettings has already put the
+   link's value there; linkOverrides is what says it came from the link. */
+function hideFollowedFor(src) {
+  if (!hideFollowedFits(src)) return "off";
+  if (linkOverrides && "hideFollowed" in linkOverrides) return settings.hideFollowed;
+  const by = settings.hideFollowedBy || {}, k = feedKey(src);
+  return k && k in by ? by[k] : settings.hideFollowed;
+}
+/* The feed the filter and the drawer are talking about: on the start screen,
+   the one picked there (chosenFeed; null = Following), and otherwise the one
+   being read. The start screen has to win rather than fall back, because
+   state.run outlives its catch-up -- "Start a new catch-up" leaves the
+   finished run in place -- and while you are choosing a feed, that choice is
+   plainly what the drawer is about. Settings remembered per feed are stored
+   against whatever this returns (see setHideFollowed), so getting it wrong
+   doesn't just grey the wrong row: it writes the value against the wrong
+   feed. */
+const feedInQuestion = () => viewing("start") ? (chosenFeed || FOLLOWING) : (state.run?.feed || chosenFeed || FOLLOWING);
+/* The filter's mode for the feed in question -- what the filter itself, the
+   note above the feed and the drawer's row all go by. */
+const hideFollowedMode = () => hideFollowedFor(feedInQuestion());
 function feedQuery(src) {
   if (src?.kind === "feed") return ["app.bsky.feed.getFeed", { feed: src.uri }];
   if (src?.kind === "list") return ["app.bsky.feed.getListFeed", { list: src.uri }];
@@ -3582,25 +4215,30 @@ function feedQuery(src) {
 }
 /* Strategy (a): page a feed newest-first until it reaches `until` (a
    timestamp) or has `max` items, whichever is asked for.
-   Returns {items, exhausted, oldest}. exhausted=true means the feed ran out
-   of pages (no cursor / empty page) before that -- which is the signal for
-   "auto" mode to fall back to rebuilding, and is common on custom feeds,
-   where how far back you can page is entirely the generator's choice and
-   often only a few hundred posts. */
+   Returns {items, exhausted, oldest, ranked}. exhausted=true means the feed
+   ran out of pages (no cursor / empty page) before that -- which is the
+   signal for "auto" mode to fall back to rebuilding, and is common on custom
+   feeds, where how far back you can page is entirely the generator's choice
+   and often only a few hundred posts.
+   Each item is stamped with `o`, its place in the order the feed served it,
+   and `ranked` says whether that order was anything other than chronological
+   (see looksRanked). Together they let a ranked feed be read the way it was
+   ranked instead of being re-shuffled by timestamp. */
 async function fetchFeed(src, { until = null, max = 0 }, signal, onProgress) {
   const [method, params] = feedQuery(src);
   const out = []; let cursor; const now = Date.now(); let oldest = now;
+  const done = r => ({ ...r, ranked: looksRanked(r.items) });
   for (let page = 0; page < 3000; page++) {
     const r = await xrpc(method, { ...params, limit: 100, cursor }, { signal });
     const feed = r.feed || [];
-    for (const fi of feed) { const it = mkItem(fi); out.push(it); if (it.t < oldest) oldest = it.t; }
+    for (const fi of feed) { const it = mkItem(fi); it.o = out.length; out.push(it); if (it.t < oldest) oldest = it.t; }
     const fraction = max ? Math.min(1, out.length / max) : Math.min(1, (now - oldest) / Math.max(1, now - until));
     onProgress?.({ oldest, fraction, count: out.length });
-    if (max ? out.length >= max : oldest < until) return { items: max ? out.slice(0, max) : out, exhausted: false, oldest };
-    if (!r.cursor || !feed.length) return { items: out, exhausted: true, oldest };
+    if (max ? out.length >= max : oldest < until) return done({ items: max ? out.slice(0, max) : out, exhausted: false, oldest });
+    if (!r.cursor || !feed.length) return done({ items: out, exhausted: true, oldest });
     cursor = r.cursor;
   }
-  return { items: out, exhausted: true, oldest };
+  return done({ items: out, exhausted: true, oldest });
 }
 
 /* Strategy (b): rebuild the Following feed from each followed account's own
@@ -3892,8 +4530,11 @@ async function fetchProtocol(until, signal, onProgress) {
 /* Chooses and runs a fetch strategy per settings.fetchMethod, reporting
    progress to the progress screen (setProgress is a no-op when that screen
    isn't visible, e.g. during "Load newer posts").
-   Returns {items, method: "timeline"|"rebuild", note} where note is a
-   human-readable explanation shown in the feed header. */
+   Returns {items, method: "timeline"|"rebuild", note, ranked} where note is
+   a human-readable explanation shown in the feed header, and ranked says the
+   feed came back in some order of its own rather than newest-first. Only
+   fetchFeed can tell: the other two strategies assemble the feed per account,
+   and only ever for Following, which is chronological. */
 async function gather(src, until, max, signal, label) {
   let note = "", method = src.kind === "timeline" ? "timeline" : src.kind;
   // Rebuilding means paging every account you follow, which only means
@@ -3916,7 +4557,7 @@ async function gather(src, until, max, signal, label) {
       }));
       note = "Read straight from each account's own server, with no AppView: no counts, no context for replies, no labels, handles are the ones each account claims, and it doesn't know what you've already liked.";
       if (r.failures.length) note += ` ${r.failures.length} ${plural(r.failures.length, "account")} couldn't be read.`;
-      return { items: r.items, method: "protocol", note };
+      return { items: r.items, method: "protocol", note, ranked: false };
     }
   }
   const fm = canRebuild ? settings.fetchMethod : "timeline";
@@ -3932,7 +4573,7 @@ async function gather(src, until, max, signal, label) {
       if (r.exhausted) note = canRebuild
         ? `The timeline only reached back to ${fmtClock(r.oldest)}.`
         : `${src.name || "This feed"} only goes back to ${fmtClock(r.oldest)}. Custom feeds decide for themselves how much history they keep.`;
-      return { items: r.items, method, note };
+      return { items: r.items, method, note, ranked: r.ranked };
     }
     note = `The timeline stopped at ${fmtClock(r.oldest)}, so the feed was rebuilt from your follows.`;
   }
@@ -3943,7 +4584,7 @@ async function gather(src, until, max, signal, label) {
     stats: `${p.done.toLocaleString()} of ${p.total.toLocaleString()} accounts · ${p.count.toLocaleString()} posts · ${state.stats.requests.toLocaleString()} requests`,
   }));
   if (r.failures.length) note += (note ? " " : "") + `${r.failures.length} ${plural(r.failures.length, "account")} couldn't be loaded (deleted, suspended, or blocking you).`;
-  return { items: r.items, method, note };
+  return { items: r.items, method, note, ranked: false };
 }
 
 /* ---------- choosing a feed ----------
@@ -3981,8 +4622,13 @@ async function parseFeedInput(input, signal) {
    array (muted words, saved feeds, content labels) and getting that wrong
    would destroy real settings. savedFeedsPrefV2 holds {id, type, value,
    pinned}; names come from getFeedGenerators (one batched call) and getList
-   (one per list). Anything that fails to resolve still works -- it just
-   shows its URI. */
+   (one per list).
+   Anything that fails to resolve is marked `broken` and named for what it
+   is. An account collects saved feeds and lists over years and they are
+   never tidied up when one is deleted, so this is ordinary: the picker used
+   to show the rkey out of the at:// URI, which reads as a random string of
+   letters. A momentary network failure lands here too, which is why these
+   are hidden rather than dropped (see fillFeedPicker). */
 async function loadSavedFeeds(signal) {
   if (state.savedFeeds) return state.savedFeeds;
   const prefs = (await xrpc("app.bsky.actor.getPreferences", {}, { signal })).preferences || [];
@@ -3998,7 +4644,7 @@ async function loadSavedFeeds(signal) {
     const r = await xrpc("app.bsky.graph.getList", { list: f.uri, limit: 1 }, { signal }).catch(() => null);
     if (r?.list?.name) f.name = r.list.name;
   }
-  for (const f of out) if (!f.name) f.name = f.uri.split("/").pop();
+  for (const f of out) if (!f.name) { f.broken = true; f.name = f.kind === "list" ? "Unavailable list" : "Unavailable feed"; }
   out.sort((a, b) => (b.pinned - a.pinned) || a.name.localeCompare(b.name));
   state.savedFeeds = out;
   return out;
@@ -4032,35 +4678,99 @@ function parsePostRef(s) {
 /* Turns a pasted post link into the anchor {uri, t}: resolves the handle to a
    DID, loads the post, and uses its sort time. If the user actually saw it
    as a repost, computeView() later finds the repost entry (same URI, later
-   time) and highlights that instead. */
-async function resolvePostAnchor(input, signal) {
+   time) and highlights that instead.
+   `t` is a time already known for this post: the moment it sat at in the feed
+   that was read, which the post record itself can't tell us -- a repost's
+   time, or the one a catch-up link carries. Given one, the post lookup is
+   skipped, because the anchor is all anything downstream wants. The handle
+   still has to be resolved: the anchor is matched by at:// URI. */
+async function resolvePostAnchor(input, signal, t = null) {
   const ref = parsePostRef(input);
   if (!ref) throw new Error(`That doesn't look like a Bluesky post link. It should look like ${webLinkHost()}/profile/name/post/abc123.`);
   let did = ref.actor;
   if (!did.startsWith("did:")) did = (await xrpc("com.atproto.identity.resolveHandle", { handle: did }, { signal })).did;
   const uri = `at://${did}/app.bsky.feed.post/${ref.rkey}`;
+  if (t != null) return { uri, t };
   const r = await xrpc("app.bsky.feed.getPosts", { uris: [uri] }, { signal });
   const p = r.posts?.[0];
   if (!p) throw new Error("Couldn't load that post. It may have been deleted.");
   return { uri, t: sortAtOf({ post: p }) };
 }
 
-/* The post your most recent like points at. Likes are records in your own
-   repo, and listRecords orders by record key descending unless asked to
-   reverse -- record keys are TIDs, so descending is newest first and one
-   record is all we need. Checked against the PDS implementation, because the
-   lexicon itself doesn't say which way round the default is. */
-async function latestLikedPostUri(signal) {
+/* Your most recent like: which post it points at, when you made it, and --
+   if you met that post as a repost -- the repost record you made it through.
+   Likes are records in your own repo, and listRecords orders by record key
+   descending unless asked to reverse -- record keys are TIDs, so descending
+   is newest first and one record is all we need. Checked against the PDS
+   implementation, because the lexicon itself doesn't say which way round the
+   default is.
+   `via` is an optional strongRef in app.bsky.feed.like. The Bluesky app sets
+   it to the repost record when you like something a repost put in front of
+   you, which is the only trace of HOW you met the post. It's absent for a
+   like made from a thread, a profile, search, or by another client, so
+   nothing here may depend on having it. */
+async function latestLike(signal) {
   const r = await xrpc("com.atproto.repo.listRecords",
     { repo: me(), collection: "app.bsky.feed.like", limit: 1 }, { signal });
-  const uri = r.records?.[0]?.value?.subject?.uri;
+  const rec = r.records?.[0]?.value;
+  const uri = rec?.subject?.uri;
   if (!uri) throw new Error("You haven't liked anything yet, so there's no post to start from.");
-  return uri;
+  const via = parseAtUri(rec.via?.uri);
+  return { uri, likedAt: Date.parse(rec.createdAt),
+    via: via?.collection === "app.bsky.feed.repost" ? rec.via.uri : null };
+}
+/* The clock inside a record key. Record keys in these collections are TIDs:
+   13 characters of a sortable base32, a leading 0 bit, then 53 bits of
+   MICROSECONDS since the epoch and 10 bits of clock id. So a key names its
+   own creation time -- the one thing still knowable about a record that has
+   since been deleted. Returns NaN for anything that isn't a TID. */
+const TID_CHARS = "234567abcdefghijklmnopqrstuvwxyz";
+function tidTime(rkey) {
+  if (!/^[234567a-z]{13}$/.test(String(rkey || ""))) return NaN;
+  let n = 0n;
+  for (const ch of rkey) n = n * 32n + BigInt(TID_CHARS.indexOf(ch));
+  return Math.round(Number(n >> 10n) / 1000);
+}
+/* Bluesky's first posts: a start point before this is a misread number, not
+   a memory. */
+const BSKY_EPOCH = Date.parse("2022-11-17T00:00:00Z");
+/* When the repost a like was made through actually happened. The record
+   lives in the REPOSTER's repository, so this reads it there, the way
+   postFor() reads the post a repost points at: no AppView serves someone
+   else's repost record, and reading repositories directly means protocol
+   mode needs no special case here. If the record is gone -- they un-reposted
+   since -- its key still says when it was written.
+   Returns null rather than a wrong answer. A time that isn't a time, one
+   before Bluesky existed, or one AFTER the like that supposedly came from it
+   is evidence that this isn't a timestamp at all, and the caller has better
+   fallbacks than a start point in 1970. */
+async function repostTime(viaUri, likedAt, signal) {
+  const ref = parseAtUri(viaUri); if (!ref) return null;
+  let t = NaN;
+  const who = await identityFor(ref.did, signal).catch(() => null);
+  if (who) {
+    const r = await repoGet(who.pds, "com.atproto.repo.getRecord",
+      { repo: ref.did, collection: ref.collection, rkey: ref.rkey }, signal).catch(() => null);
+    if (r?.value?.createdAt) t = Date.parse(r.value.createdAt);
+  }
+  if (isNaN(t)) t = tidTime(ref.rkey);
+  // A like record with no readable createdAt leaves nothing to check against,
+  // so now stands in: a repost can't have happened after this moment either.
+  const cap = (isNaN(likedAt) ? Date.now() : likedAt) + 864e5;
+  if (isNaN(t) || t < BSKY_EPOCH || t > cap) return null;
+  return t;
 }
 
 /* The most posts a "newest N posts" start will read, however big a number is
    typed into the form or carried by a link. */
 const MAX_RECENT = 2000;
+/* How far back of its own like a post may be dated before the post's date
+   stops being evidence about where you were reading. Half a day: a like made
+   in the same sitting as the post it's on is within it, and the post's own
+   time is the finer of the two; a like on something older than that was made
+   somewhere other than the feed -- search, a profile, a thread -- and says
+   nothing about where you got to, so the like's own time stands in. */
+const LIKE_CLAMP = 12 * 3600e3;
 /* In post/resume mode we fetch some time BEFORE the anchor so the N context
    posts exist. 12 hours is ample for a dozen posts with ~700 follows; if a
    very quiet feed yields fewer, the feed simply shows what it has. */
@@ -4070,8 +4780,14 @@ const CONTEXT_WINDOW = 12 * 3600e3; // fetch this far before a start post so the
    kind:  "date"   value = start time in ms
           "post"   value = pasted post link
           "resume" value = saved position {uri, t}
-          "like"   value = unused; the most recent like names the post, and
-                   this becomes a "post" start before anything else happens
+          "like"   value = unused; the most recent like names the point you
+                   read up to, and this becomes a "post" (or, when the like is
+                   much newer than the post, a "date") start before anything
+                   else happens
+   atT:   for a "post" start, the time that post sat at in the feed being read
+          (a repost's time, or one carried by a link). Skips looking the post
+          up, and is what makes a like on a repost of an old post start at the
+          repost rather than years back.
    end:   null = read up to now (default); {kind:"date", t} or
           {kind:"post", input} = stop there. The fetch still runs from now
           backwards (Bluesky only pages newest-first), and the end point is
@@ -4083,14 +4799,26 @@ const CONTEXT_WINDOW = 12 * 3600e3; // fetch this far before a start post so the
 /* ---------- catch-up links (#fragment) ----------
    See CATCH-UP LINKS at the top of the file for the syntax. */
 
-/* Parses one <point>: returns {kind:"post", input} or {kind:"date", t},
-   null if empty, or undefined if unreadable. */
+/* Parses one <point>: returns {kind:"post", input, t} (t only if the point
+   carries one) or {kind:"date", t}, null if empty, or undefined if
+   unreadable. */
 function parsePointParam(v) {
   v = (v || "").trim(); if (!v) return null;
   // URLSearchParams turns a literal "+" into a space, which breaks offsets
   // like 09:00+02:00; put it back.
   v = v.replace(/ (\d{2}:?\d{2})$/, "+$1");
-  if (parsePostRef(v)) return { kind: "post", input: v };
+  // A post point may carry the time that post sat at in the feed that was
+  // read: <post link>@<unix seconds or ms>. Without it a link to a catch-up
+  // that started at a repost of an old post would start at the post's own
+  // date and read everything since. Taken off BEFORE the link is parsed,
+  // because an rkey would otherwise swallow it.
+  const at = v.match(/@(\d{10}|\d{12,13})$/);
+  const base = at ? v.slice(0, -at[0].length) : v;
+  if (parsePostRef(base)) {
+    const pt = { kind: "post", input: base };
+    if (at) pt.t = at[1].length === 10 ? Number(at[1]) * 1000 : Number(at[1]);
+    return pt;
+  }
   if (/^\d{10}$/.test(v)) return { kind: "date", t: Number(v) * 1000 };       // Unix seconds
   if (/^\d{12,13}$/.test(v)) return { kind: "date", t: Number(v) };           // Unix milliseconds
   const dm = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);                             // date only: LOCAL midnight
@@ -4142,17 +4870,17 @@ function runHashRequest(req) {
   } else if (start.kind === "recent") {
     $('input[name="kind"][value="recent"]').checked = true; $("#inRecent").value = start.value;
     startCatchup("recent", start.value, end, feed);
-  } else startCatchup(start.kind, start.kind === "date" ? start.t : start.input, end, feed);
+  } else startCatchup(start.kind, start.kind === "date" ? start.t : start.input, end, feed, start.kind === "post" ? start.t ?? null : null);
 }
 /* Rewrites the fragment to describe the catch-up being started, in a form
    that means the same thing for anyone who opens it (UTC times; post links
    as bsky.app URLs). replaceState: no history entry, no hashchange event. */
-function writeHash(kind, value, end, src) {
-  const point = (k, v) => {
+function writeHash(kind, value, end, src, atT = null) {
+  const point = (k, v, t = null) => {
     if (k === "date") return new Date(v).toISOString();
-    return postLinkFrom(v);
+    return postLinkFrom(v) + (t != null ? "@" + Math.round(t / 1000) : "");
   };
-  let h = kind === "resume" ? "resume" : kind === "recent" ? "recent=" + Math.max(1, Number(value) || 0) : "from=" + point(kind, value);
+  let h = kind === "resume" ? "resume" : kind === "recent" ? "recent=" + Math.max(1, Number(value) || 0) : "from=" + point(kind, value, atT);
   if (end) h += "&to=" + point(end.kind, end.kind === "date" ? end.t : end.input);
   if (src && src.kind !== "timeline" && src.uri) h += "&feed=" + encodeURIComponent(src.uri);
   h += `&v=${LINK_FORMAT}` + overlayParams();
@@ -4166,9 +4894,12 @@ function clearHash() { try { history.replaceState(null, "", location.pathname + 
    copy of the page would silently ignore (see the maintainer notes at the
    top). An older page opening a newer link shows a notice, which is the only
    reason bumping is worth anything: 2 marks the links that can carry a feed,
-   so a 0.13.x copy says something instead of quietly reading Following.
+   so a 0.13.x copy says something instead of quietly reading Following, and
+   4 marks the links whose post points can carry a time (<post link>@<secs>),
+   which an older copy would read as part of the rkey and then report the post
+   as deleted.
    Links without v were made by 0.7.0/0.8.0 and count as format 0. */
-const LINK_FORMAT = 3;
+const LINK_FORMAT = 4;
 /* For each link format: linkable defaults that were DIFFERENT back then,
    as {key: oldDefault}. Links only carry non-default settings, so when a
    link that carries settings is opened, keys it omits are filled from this
@@ -4181,6 +4912,7 @@ const LINK_FORMAT_DEFAULTS = {
   1: {},
   2: { tileMax: 4 },   // 1.1.0 shipped "Most columns" at 4; 1.1.1 made it 2
   3: {},               // 0.14.0's bump (to 2) was for feed= links, not a default
+  4: {},               // 1.3.0's bump (to 4) was for timed post points, likewise
 };
 /* Renamed settings and values, so old links keep working. Never rename a
    linkable setting key or option value without adding an entry here.
@@ -4299,8 +5031,12 @@ function endLinkOverlay(keep, revert = false) {
    resolved start/end, including "Keep going to now"). */
 function catchupFragment() {
   const r = state.run; if (!r) return "";
-  let h = r.kind === "resume" ? "resume" : r.kind === "recent" ? "recent=" + r.max : "from=" + (r.anchor ? postLinkFrom(r.anchor.uri) : new Date(r.startT).toISOString());
-  if (r.end) h += "&to=" + (r.end.uri ? postLinkFrom(r.end.uri) : new Date(r.end.t).toISOString());
+  // Post points carry the time they sat at (see parsePointParam), so the
+  // link reproduces THIS reading window, not whatever the post's own date
+  // would start from -- the two differ whenever a repost was what you read.
+  const at = p => postLinkFrom(p.uri) + "@" + Math.round(p.t / 1000);
+  let h = r.kind === "resume" ? "resume" : r.kind === "recent" ? "recent=" + r.max : "from=" + (r.anchor ? at(r.anchor) : new Date(r.startT).toISOString());
+  if (r.end) h += "&to=" + (r.end.uri ? at(r.end) : new Date(r.end.t).toISOString());
   if (r.feed && r.feed.kind !== "timeline" && r.feed.uri) h += "&feed=" + encodeURIComponent(r.feed.uri);
   return h + `&v=${LINK_FORMAT}`;
 }
@@ -4321,9 +5057,14 @@ function buildShareLink(withSettings) {
   let h = catchupFragment(), count = 0;
   if (withSettings) {
     for (const sc of SETTINGS_SCHEMA) {
-      if (!linkable(sc) || isDefaultValue(sc.key, settings[sc.key])) continue;
+      // rowValue, not the bare setting: a link is about the feed it names, so
+      // it has to carry what that feed is actually being read with. For every
+      // setting but hideFollowed the two are the same thing; for that one the
+      // fallback can have moved on since this feed was set. It also keeps a
+      // Following-feed link from carrying a filter that does nothing there.
+      if (!linkable(sc) || isDefaultValue(sc.key, rowValue(sc))) continue;
       // Keep commas, colons and slashes readable; encode everything else.
-      const v = encodeURIComponent(settingToParam(sc, settings[sc.key])).replace(/%2C/gi, ",").replace(/%3A/gi, ":").replace(/%2F/gi, "/");
+      const v = encodeURIComponent(settingToParam(sc, rowValue(sc))).replace(/%2C/gi, ",").replace(/%3A/gi, ":").replace(/%2F/gi, "/");
       h += (h ? "&" : "") + `s.${sc.key}=${v}`; count++;
     }
   }
@@ -4341,8 +5082,14 @@ window.addEventListener("hashchange", () => {
   if (state.session) { state.abort?.abort(); disconnectVideos(); runHashRequest(req); } else pendingHash = req;
 });
 
-async function startCatchup(kind, value, end = null, feed = null) {
-  const src = feed || state.run?.feed || FOLLOWING;
+async function startCatchup(kind, value, end = null, feed = null, atT = null) {
+  // null means the Following feed, and nothing else: every caller passes what
+  // was chosen on the start screen or named by a link, where "no feed" is the
+  // choice rather than a gap to fill in. Falling back to state.run?.feed here
+  // made going BACK to Following impossible -- the picker said Following, and
+  // the catch-up started on the custom feed just read, because the finished
+  // run outlives its catch-up (see feedInQuestion).
+  const src = feed || FOLLOWING;
   state.abort?.abort();
   const ac = new AbortController(); state.abort = ac; const signal = ac.signal;
   state.stats.requests = 0;
@@ -4355,12 +5102,33 @@ async function startCatchup(kind, value, end = null, feed = null) {
     // concrete post. A link saying "wherever I last left a like" would mean
     // something different to every person who opened it, and would change
     // under its own author the moment they liked something else.
+    let startNote = null;
     if (kind === "like") {
       setProgress({ stage: "Finding the last post you liked…" });
-      value = await latestLikedPostUri(signal);
-      kind = "post";
+      const like = await latestLike(signal);
+      // What the mode asks is where you were READING, and that's where the
+      // thing you liked sat in your feed. For a repost that's the repost --
+      // not the day the post it carries was written, which may be years back.
+      const viaT = like.via ? await repostTime(like.via, like.likedAt, signal) : null;
+      if (viaT != null) {
+        kind = "post"; value = like.uri; atT = viaT;
+        startNote = "Your last like was on a repost, so this starts where the repost appeared rather than at the date the post itself was written.";
+      } else {
+        setProgress({ stage: "Finding your start post…" });
+        const a = await resolvePostAnchor(like.uri, signal);
+        // A like on something far older than the like itself, with no repost
+        // to explain how you met it: from search, a profile, a thread. The
+        // post's date is then evidence about the post, not about your reading,
+        // and starting there would read months of feed nobody asked for. Your
+        // own like is the better guess at where you got to. Inside the window
+        // the two describe the same sitting, and the post is the finer of them.
+        if (a.t < like.likedAt - LIKE_CLAMP) {
+          kind = "date"; value = like.likedAt;
+          startNote = `The last post you liked is from ${fmtClock(a.t)}, but you liked it on ${fmtClock(like.likedAt)}, so this starts there instead.`;
+        } else { kind = "post"; value = like.uri; atT = a.t; }
+      }
     }
-    writeHash(kind, value, end, src);   // so the address always matches this catch-up
+    writeHash(kind, value, end, src, atT);   // so the address always matches this catch-up
     let anchor = null, startT;
     // "recent" reads the newest `value` posts instead of everything since a
     // time, which is the only shape that makes sense on a ranked feed.
@@ -4368,7 +5136,7 @@ async function startCatchup(kind, value, end = null, feed = null) {
     else if (kind === "date") startT = value;
     else {
       setProgress({ stage: "Finding your start post…" });
-      anchor = kind === "resume" ? { uri: value.uri, t: value.t } : await resolvePostAnchor(value, signal);
+      anchor = kind === "resume" ? { uri: value.uri, t: value.t } : await resolvePostAnchor(value, signal, atT);
       startT = anchor.t;
     }
     if (kind !== "recent" && startT > Date.now()) throw new Error("That start time is in the future.");
@@ -4384,7 +5152,7 @@ async function startCatchup(kind, value, end = null, feed = null) {
     // asking an AppView for it here would be both a second copy and a call
     // this mode exists to avoid.
     const needFollows = !protocolRun(src) && (settings.replies === "followed" || (src.kind === "timeline" && settings.fetchMethod !== "timeline")
-      || (settings.hideFollowed !== "off" && hideFollowedFits(src)));
+      || hideFollowedFor(src) !== "off");
     if (needFollows && !state.follows.size) {
       setProgress({ stage: "Loading the accounts you follow…" });
       await loadFollows(signal, n => setProgress({ stats: `${n.toLocaleString()} accounts` }));
@@ -4395,7 +5163,12 @@ async function startCatchup(kind, value, end = null, feed = null) {
     const g = await gather(src, until, max, signal, "Loading posts");
     state.items = mergeItems(g.items);
     state.postState = new Map(); state.authors = new Map(); hydrateQueue.clear();
-    state.run = { kind, startT, anchor, end: endPoint, fetchedAt, method: g.method, note: g.note, feed: src, max };
+    // A ranked feed read as "the most recent posts" keeps the order it was
+    // served in (see feedOrder). Every other mode is defined by a point in
+    // time -- its start, its context window, "Load newer posts" -- so even a
+    // ranked feed is read chronologically there, as it always was.
+    const order = kind === "recent" && g.ranked ? "feed" : "time";
+    state.run = { kind, startT, anchor, end: endPoint, fetchedAt, method: g.method, note: g.note, startNote, feed: src, max, order };
     state.maxRead = null;
     show("feed");
     buildView({ fresh: true });
@@ -4440,8 +5213,12 @@ async function fetchNewer() {
    no cursor to keep or go stale, posts already held are dropped by key, and
    anything the feed has newly ranked to the top comes along for free. The
    cost is re-paging what we already have (100 posts a request).
-   The extra posts are further down the feed, so in the oldest-first view they
-   land ABOVE what you've read -- hence keepPosition rather than append. */
+   Where the feed is read in its own order (feedOrder), the extra posts are
+   the ones further down the ranking, and mergeItems keeps everything already
+   held in the place it was first served -- so they land BELOW what you've
+   read, which is where reading further down ought to put them.
+   In a chronological run the extra posts are OLDER, so in the oldest-first
+   view they land above instead, and the position has to be held still. */
 async function fetchMoreRecent() {
   if (!state.run || state.abort) return;
   const ac = new AbortController(); state.abort = ac;
@@ -4452,9 +5229,10 @@ async function fetchMoreRecent() {
     const before = state.view.length;
     state.items = mergeItems(state.items, g.items);
     state.run.fetchedAt = fetchedAt;
-    buildView({ fresh: false, keepPosition: true });
+    const below = feedOrder();
+    buildView(below ? { fresh: false, append: true } : { fresh: false, keepPosition: true });
     const added = Math.max(0, state.view.length - before);
-    if (added) toast(`${added.toLocaleString()} more ${plural(added, "post")} added above`);
+    if (added) toast(`${added.toLocaleString()} more ${plural(added, "post")} added ${below ? "below" : "above"}`);
     else { state.run.atEnd = true; updateEndcap(); toast("This feed doesn't go back any further"); }
   } catch (e) {
     if (!isAbort(e)) toast(e.message || "Couldn't load more posts");
@@ -4606,6 +5384,14 @@ const feedEl = () => $("#feed");
 const TILE_GAP = 16;        // -> --tile-gap, read by .band's column-gap
 const MAIN_PAD = 24;        // mirrors main{padding:… 12px …}, doubled; box-sizing includes it
 const DRAWER_W = 440;       // mirrors .drawer{width:min(440px, 100vw)}
+const NARROW_W = 600;       // mirrors the one @media (max-width:600px)
+/* Is the window narrow enough for that block to be in force? Asked rather
+   than remembered, so a resize needs nothing: the only cost is a matchMedia
+   call, and the callers are already per-render. The optional chaining is for
+   anything without matchMedia (jsdom answers, and answers false, which is
+   the desktop reading -- the right default for a renderer that doesn't lay
+   out). */
+function narrowNow() { return !!window.matchMedia?.(`(max-width:${NARROW_W}px)`).matches; }
 /* Least page width worth leaving beside the drawer. Below this the posts are
    squeezed into a strip, which is worse than letting the drawer cover them.
    The column rule below can't catch this on its own: on a narrow window one
@@ -4841,10 +5627,20 @@ function computeView() {
   // in post/resume mode reaches CONTEXT_WINDOW before the start point, so the
   // note says "hidden" rather than claiming a number for the window on screen.
   const tally = { followed: 0 };
-  const vis = state.items.filter(it => passes(it, seen, tally));
+  // In feed order the sequence is the one the feed served (item.o), not time.
+  // Sorted BEFORE filtering, because "show each post only once" keeps the
+  // first copy it meets, and that has to mean the first one you'll read.
+  const ordered = feedOrder()
+    ? [...state.items].sort((a, b) => (a.o ?? Infinity) - (b.o ?? Infinity) || (a.key < b.key ? -1 : 1))
+    : state.items;
+  const vis = ordered.filter(it => passes(it, seen, tally));
   state.hiddenFollowed = tally.followed;
   const run = state.run; let startIdx = 0, anchorIdx = -1;
-  if (run.anchor) {
+  if (feedOrder()) {
+    // Nothing to slice. The run is "the most recent N posts" of a ranked
+    // feed, and a start or end point in time means nothing in an order that
+    // isn't time, so the whole of it is the view.
+  } else if (run.anchor) {
     anchorIdx = vis.findIndex(it => it.fi.post.uri === run.anchor.uri && it.t >= run.anchor.t - 1000);
     if (anchorIdx < 0) anchorIdx = vis.findIndex(it => it.t >= run.anchor.t);
     if (anchorIdx < 0) anchorIdx = vis.length;
@@ -4857,7 +5653,7 @@ function computeView() {
   // same URI at/after its time, so a repost is found too) or after the last
   // item at/before the end time.
   let endIdx = vis.length;
-  if (run.end) {
+  if (run.end && !feedOrder()) {
     let ei = run.end.uri ? vis.findIndex(it => it.fi.post.uri === run.end.uri && it.t >= run.end.t - 1000) : -1;
     if (ei >= 0) endIdx = ei + 1;
     else { const after = vis.findIndex(it => it.t > run.end.t); if (after >= 0) endIdx = after; }
@@ -5011,13 +5807,18 @@ function renderMore() {
     if (!state.band) { const b = document.createElement("div"); b.className = "band"; frag.append(b); state.band = b; }
     state.band.append(el); placed.push(el);
   };
+  // Dividers mark where you are in time as you scroll, which is only true
+  // while the feed IS in time order. Reading a ranked feed in its own order
+  // they would fire on every jump back and forth, so they are off there --
+  // each post still shows its own timestamp.
+  const dividers = !feedOrder();
   for (let i = state.rendered; i < end; i++) {
     const it = state.view[i];
     const d = new Date(it.pt ?? it.t);          // dividers follow feed position (see arrangeThreads)
     const day = d.toDateString();
     const hour = day + " " + d.getHours();   // local time, so DST/time zones follow the browser
     let divided = false;
-    if (settings.dayDividers && day !== state.lastDay) {
+    if (dividers && settings.dayDividers && day !== state.lastDay) {
       const div = document.createElement("div"); div.className = "day bleed";
       div.textContent = d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: d.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined });
       if (tiled) state.band = null;          // a divider starts a new band
@@ -5026,7 +5827,7 @@ function renderMore() {
     // Hour dividers mark the first post of each clock hour that has posts
     // (empty hours get no divider). The first hour of each day gets one too,
     // directly under the day band, so every hour is marked the same way.
-    if (settings.hourDividers && hour !== state.lastHour) {
+    if (dividers && settings.hourDividers && hour !== state.lastHour) {
       const div = document.createElement("div"); div.className = "hour bleed";
       const top = new Date(d); top.setMinutes(0, 0, 0);
       div.textContent = top.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -5098,7 +5899,10 @@ function updateFeedHead() {
   const posts = `${n.toLocaleString()} ${plural(n, "post")}`;
   const what = r.kind === "recent" ? `The ${posts === "1 post" ? "most recent post" : `${n.toLocaleString()} most recent posts`}`
     : `${posts} ${r.anchor ? "from your start post" : `from ${fmtClock(r.startT)}`}`;
-  $("#feedHead").innerHTML = esc(`${what}${to}, ${how}.${r.note ? " " + r.note : ""}`) +
+  // A ranked feed is left in its own order, which is worth saying: otherwise
+  // the posts look shuffled, and the missing day dividers look like a fault.
+  const order = feedOrder() ? " This feed ranks its posts rather than ordering them by time, so they're in the order it gave them, newest ranking first." : "";
+  $("#feedHead").innerHTML = esc(`${what}${to}, ${how}.${order}${r.startNote ? " " + r.startNote : ""}${r.note ? " " + r.note : ""}`) +
     `<button class="linkbtn" type="button" id="btnCopyCatchup">Copy link</button>` +
     `<button class="linkbtn" type="button" id="btnCopyCatchupSettings">Copy link with my settings</button>`;
   $("#btnCopyCatchup").onclick = () => copyText(buildShareLink(false).url).then(ok => toast(ok ? "Catch-up link copied" : "Couldn't copy the link"));
@@ -5118,7 +5922,15 @@ function updateFeedHead() {
   const hidden = state.hiddenFollowed;
   if (followsPending) setFilterNote("#followNote", "Looking up the accounts you follow\u2026", null, null);
   else if (hideFollowedMode() !== "off") {
-    setFilterNote("#followNote", `Showing only accounts you don't follow${hidden ? ` (${hidden.toLocaleString()} ${plural(hidden, "post")} hidden)` : ""}`,
+    // A feed that turns out to be nothing but accounts you follow -- a list of
+    // your own mutuals, say -- leaves an empty page, and the count alone beside
+    // it reads like a coincidence. Say what has happened instead. This can't be
+    // known in advance the way the Following feed can (hideFollowedFits): it is
+    // a fact about what the feed served, not about what kind of feed it is.
+    const all = hidden && !state.view.length;
+    setFilterNote("#followNote", all
+      ? `Everything on this feed is from accounts you follow, so all ${hidden.toLocaleString()} ${plural(hidden, "post")} ${plural(hidden, "is", "are")} hidden`
+      : `Showing only accounts you don't follow${hidden ? ` (${hidden.toLocaleString()} ${plural(hidden, "post")} hidden)` : ""}`,
       "Show everyone", () => turnFilterOff("hideFollowed", "off"));
   } else setFilterNote("#followNote", null);
 }
@@ -5137,7 +5949,7 @@ function setFilterNote(sel, html, btnLabel, onClick) {
 /* The "show me everything again" button on those notes: back to the default,
    the open drawer brought in step with it, and the feed rebuilt where it is. */
 function turnFilterOff(key, value) {
-  setSetting(key, value);
+  setRowValue(schemaFor(key), value);
   if (!isHidden("#drawer")) renderDrawer();
   buildView({ fresh: false, keepPosition: true });
 }
@@ -5163,7 +5975,7 @@ function updateEndcap() {
   if (state.run.kind === "recent") {
     const n = state.view.length;
     const more = state.run.atEnd
-      ? `<div>This feed doesn't go back any further.</div>`
+      ? `<div>${feedOrder() ? "That's as far down this feed's ranking as it goes." : "This feed doesn't go back any further."}</div>`
       : `<button class="btn primary" id="btnMore" type="button">Load ${state.run.max.toLocaleString()} more</button>`;
     e.innerHTML = `${empty}<div>That's all ${n.toLocaleString()} ${plural(n, "post")}, as of ${esc(fmtClock(state.run.fetchedAt))}.</div>${more}`;
     if (!state.run.atEnd) $("#btnMore").onclick = fetchMoreRecent;
@@ -5614,13 +6426,20 @@ function imgSrcAttrs(im, cssW) {
    the post's inner width shared between `cols` columns. Media posts are wider
    than the text column in whole-image mode (settings.mediaWidth), and nothing
    is ever wider than the window. */
-const POST_INNER_PAD = 30;   // mirrors .post{padding:… 14px …} both sides + its 1px borders
+/* The two values of .post's side padding -- the narrow-screens block gives a
+   card less of it, to buy the action row underneath enough width for one row.
+   This is the number cellWidthPx subtracts to work out the slot a picture
+   really lands in, which is what `sizes` tells the browser, so when it stopped
+   matching the CSS the browser was being handed a slot 8px narrower than the
+   one it was filling. */
+const POST_PAD = 14, POST_PAD_NARROW = 10;   // mirror .post{padding:… Npx …}, both blocks
+function postInnerPad() { return 2 * (narrowNow() ? POST_PAD_NARROW : POST_PAD) + 2; }   // + the 1px borders
 function cellWidthPx(cols, whole = wholeMode()) {
   const col = numSetting("columnWidth");
   const mult = whole ? numSetting("mediaWidth") : 1;
   const viewport = (typeof window !== "undefined" && pageWidth()) || col;
   const card = Math.min(col * mult, viewport - 24);
-  const inner = Math.max(120, card - POST_INNER_PAD);
+  const inner = Math.max(120, card - postInnerPad());
   return cols > 1 ? (inner - 6 * (cols - 1)) / cols : inner;
 }
 
@@ -6405,14 +7224,62 @@ document.addEventListener("click", ev => {
     if (hlsReadyNow()) go(); else ensureHls().then(go);
   }
 });
-/* Full-screen image viewer; click anywhere or press Escape to close. For
-   posts with several images, arrows (on screen or keyboard) step through them. */
+/* ---------- overlays and the Back button ----------
+   A phone's Back gesture should shut whatever is covering the screen, not
+   leave the page -- and leaving is expensive here, because starting a
+   catch-up writes #from=... into the address, so coming back re-runs the
+   whole thing. In standalone mode (see writeManifest) there is no address
+   bar at all, which makes Back the only way out of an overlay there is.
+
+   Opening one pushes a history entry; closing it pops that entry back off;
+   Back pops it for us and we close in response. The entry's URL is
+   IDENTICAL to the one already showing, which is the load-bearing detail:
+   an unchanged fragment means no hashchange event, so the listener that
+   turns a fragment into a catch-up never sees any of this. (writeHash uses
+   replaceState and only runs as a catch-up starts, with nothing open, so
+   the two can't collide either.)
+
+   Only the two overlays that take over the screen are in here. The repost
+   menu is not: it is dismissed by tapping away from it, and nobody presses
+   Back at a popup menu.
+
+   Every path in and out goes through open/close, never through the class
+   alone, so there is one place that knows an overlay is up. Both close
+   functions return early when their overlay is already hidden, which is
+   what keeps Escape -- which closes all of them, unconditionally -- from
+   popping an entry that isn't there. */
+const OVERLAY_CLOSE = { lightbox: () => closeLightbox(), drawer: () => closeDrawer() };
+const overlays = [];
+function pushOverlay(name) {
+  overlays.push(name);
+  try { history.pushState({ bcuOverlay: name }, "", location.href); } catch { overlays.pop(); }
+}
+/* Give the entry back, if ours is still the one on top. Closing an overlay
+   that has been buried (which shouldn't happen -- the two are mutually
+   exclusive in practice) just forgets it rather than rewinding past
+   somebody else's entry. */
+function dropOverlay(name) {
+  const i = overlays.lastIndexOf(name);
+  if (i < 0) return;
+  const top = i === overlays.length - 1;
+  overlays.splice(i, 1);
+  if (top) try { history.back(); } catch {}
+}
+window.addEventListener("popstate", () => {
+  const name = overlays.pop();
+  if (name) OVERLAY_CLOSE[name]();     // closes without popping again: it is already gone
+});
+
+/* Full-screen image viewer; click anywhere, swipe it away or press Escape to
+   close. For posts with several images, arrows (on screen or keyboard) and a
+   sideways swipe step through them. */
 /* lb holds the open viewer's images [{src, alt}] and the current index. */
 const lb = { list: [], idx: 0 };
 function openLightbox(list, idx) {
   lb.list = list; lb.idx = Math.max(0, idx);
   showLightboxImage();
   $("#lightbox").classList.remove("hidden");
+  pushOverlay("lightbox");
 }
 function showLightboxImage() {
   const box = $("#lightbox"); const cur = lb.list[lb.idx]; const many = lb.list.length > 1;
@@ -6425,12 +7292,66 @@ function stepLightbox(dir) {
   const n = lb.idx + dir; if (n < 0 || n >= lb.list.length) return;
   lb.idx = n; showLightboxImage();
 }
-function closeLightbox() { $("#lightbox").classList.add("hidden"); $("#lightbox img").src = ""; }
+function closeLightbox() {
+  if (isHidden("#lightbox")) return;   // so Escape, which closes everything, only gives back the entry that exists
+  $("#lightbox").classList.add("hidden"); $("#lightbox img").src = "";
+  swipe = null; swiped = false;        // a gesture interrupted by Escape shouldn't outlive the viewer
+  dropOverlay("lightbox");
+}
 const lightboxOpen = () => !isHidden("#lightbox");
 // Clicking the arrows steps; clicking anywhere else closes.
 $("#lightbox").addEventListener("click", ev => {
+  // A swipe ends in a click too, and "anywhere else closes" would mean every
+  // swipe also shut the viewer. swiped is set by the gesture below and read
+  // exactly once.
+  if (swiped) { swiped = false; return; }
   const nav = ev.target.closest(".lb-nav");
   if (nav) stepLightbox(nav.classList.contains("next") ? 1 : -1); else closeLightbox();
+});
+/* ---- swiping the viewer ----
+   The arrows are a mouse's way through a post's pictures; on a phone the
+   expected thing is to swipe sideways for the next one and down to put it
+   away. Both end in the same stepLightbox/closeLightbox the arrows and the
+   keyboard use, so there is one definition of what they do.
+   Two deliberate restraints:
+     - touch-action is NOT set on .lightbox. Setting it to none would hand
+       every gesture to this code and take the browser's pinch-zoom with it,
+       and zooming into a picture is the main thing anyone does to one on a
+       phone. The overlay has nothing to scroll, so the default still lets
+       these events through.
+     - a gesture with more than one finger down is dropped outright, for the
+       same reason: that one is a pinch, and it is the browser's.
+   Thresholds are in CSS pixels. Sideways is the lower bar of the two because
+   a horizontal flick is short and deliberate, while a downward one has to
+   clear the slower, vaguer drag that a scroll would have been.
+   TAP_SLOP is what separates a tap from a drag, and the separation is the
+   whole of it: anything past it is a DRAG and never falls through to "click
+   anywhere closes", even when it turns out to mean nothing (a flick upwards,
+   a sideways nudge too small to step). Letting a drag that did nothing close
+   the viewer is the worst of both -- you reach for something, miss it, and
+   the picture goes away. */
+const TAP_SLOP = 10, SWIPE_X = 50, SWIPE_Y = 80;
+let swipe = null, swiped = false;
+$("#lightbox").addEventListener("pointerdown", ev => {
+  if (ev.isPrimary) { swipe = { x: ev.clientX, y: ev.clientY }; swiped = false; }
+  // isPrimary is false for the second finger of a pinch. That gesture is the
+  // browser's, so this one is abandoned -- and marked as not-a-tap, or it
+  // would fall through to "click anywhere closes" and the viewer would shut
+  // in the middle of zooming into a picture. The flag is cleared by the next
+  // first finger down, above, so it can never outlive its own gesture.
+  else { swipe = null; swiped = true; }
+});
+$("#lightbox").addEventListener("pointercancel", () => { swipe = null; });
+$("#lightbox").addEventListener("pointerup", ev => {
+  const s = swipe; swipe = null;
+  if (!s) return;
+  const dx = ev.clientX - s.x, dy = ev.clientY - s.y;
+  if (Math.hypot(dx, dy) <= TAP_SLOP) return;      // a tap: the click handler below has it
+  swiped = true;
+  // stepLightbox already refuses to go past either end, so a swipe on the
+  // last picture -- or on a post with only one -- simply does nothing.
+  if (Math.abs(dx) > Math.abs(dy)) { if (Math.abs(dx) >= SWIPE_X) stepLightbox(dx < 0 ? 1 : -1); }
+  else if (dy >= SWIPE_Y) closeLightbox();         // downwards only; flicking up is not "away"
 });
 document.addEventListener("keydown", ev => {
   if (ev.key === "Escape") { closeLightbox(); closeMenu(); closeDrawer(); }
@@ -6484,14 +7405,27 @@ function updateClock() {
   $("#clockTime").textContent = fmtClock(t);
   const idx = state.viewIdxByKey.get(top.dataset.key) ?? -1;
   const left = Math.max(0, state.view.length - idx - 1);
-  const endT = state.run.end ? state.run.end.t : state.run.fetchedAt;
-  $("#clockSub").textContent = `${left.toLocaleString()} posts below · ${state.run.end ? "ends at" : "caught up to"} ${fmtClock(endT)}`;
-  // t here is the placement time (data-t = pt), which only ever increases
-  // down the feed, even when threads have been moved.
-  const t0 = state.view[0]?.pt ?? state.view[0]?.t;
-  const span = endT - t0;
-  $("#stripFill").style.width = span > 0 ? Math.min(100, ((t - t0) / span) * 100) + "%" : "0";
-  if (settings.trackPosition && idx >= 0) {
+  if (feedOrder()) {
+    // Nothing here moves through time, so the strip counts posts instead of
+    // minutes and the line doesn't claim to be caught up to a moment. The
+    // clock above still shows this post's own time, which is true of it.
+    $("#clockSub").textContent = `${left.toLocaleString()} posts below · in the order ${state.run.feed?.name || "the feed"} gave them`;
+    const n = state.view.length - 1;
+    $("#stripFill").style.width = n > 0 && idx >= 0 ? Math.min(100, (idx / n) * 100) + "%" : "0";
+  } else {
+    const endT = state.run.end ? state.run.end.t : state.run.fetchedAt;
+    $("#clockSub").textContent = `${left.toLocaleString()} posts below · ${state.run.end ? "ends at" : "caught up to"} ${fmtClock(endT)}`;
+    // t here is the placement time (data-t = pt), which only ever increases
+    // down the feed, even when threads have been moved.
+    const t0 = state.view[0]?.pt ?? state.view[0]?.t;
+    const span = endT - t0;
+    $("#stripFill").style.width = span > 0 ? Math.min(100, ((t - t0) / span) * 100) + "%" : "0";
+  }
+  // The saved position is a place in YOUR Following feed, and "further" means
+  // further forward in time. Going deeper into a ranked feed is neither, so a
+  // feed-order run leaves the saved position alone rather than dropping it
+  // somewhere arbitrary.
+  if (settings.trackPosition && !feedOrder() && idx >= 0) {
     const it = state.view[idx];
     // Saved: t (the item's own time, used to find it again on resume) and pt
     // (its feed position time, used to decide whether we've read further).
@@ -6590,7 +7524,7 @@ function setFeedChoice(src) {
 function updateFeedHint() {
   const h = $("#feedHint"); if (!h) return;
   h.textContent = chosenFeed
-    ? "Custom feeds decide how much history they keep, so this may not reach as far back as you ask."
+    ? "Custom feeds decide how much history they keep, so this may not reach as far back as you ask. One that ranks its posts is read in the order it gives them."
     : "";
 }
 /* Fills the picker from the account's saved feeds. Read-only; a failure just
@@ -6606,7 +7540,13 @@ async function fillFeedPicker() {
     try { saved = await loadSavedFeeds(); } catch { /* offline, or no preferences: Following still works */ }
   }
   const frag = document.createDocumentFragment();
-  for (const f of saved) frag.appendChild(new Option(`${f.pinned ? "\u2605 " : ""}${f.name}${f.kind === "list" ? " (list)" : ""}`, f.uri));
+  // Saved feeds that no longer resolve are left out unless they're asked for,
+  // or unless this catch-up is already pointed at one -- a link naming a feed
+  // has to find its option here (see setFeedChoice) even if it's broken.
+  for (const f of saved) {
+    if (f.broken && !settings.showBrokenFeeds && f.uri !== chosenFeed?.uri) continue;
+    frag.appendChild(new Option(`${f.pinned ? "\u2605 " : ""}${f.name}${f.kind === "list" ? " (list)" : ""}`, f.uri));
+  }
   frag.appendChild(new Option("Paste a feed or list link\u2026", "url"));
   sel.appendChild(frag);
   if (chosenFeed) setFeedChoice(chosenFeed);
@@ -6698,6 +7638,10 @@ $("#inFeed").addEventListener("change", () => {
   chosenFeed = v && v !== "url" ? (state.savedFeeds || []).find(f => f.uri === v) || feedSourceFromUri(v) : (v === "url" ? chosenFeed : null);
   if (v === "") chosenFeed = null;
   updateFeedHint();
+  // "Hide people I follow" is about the feed in question, which this just
+  // changed: an open drawer would otherwise go on showing the last feed's
+  // value, and offering it on Following or greying it out on a custom feed.
+  if (!isHidden("#drawer")) renderDrawer();
 });
 $("#inRecent").addEventListener("focus", () => ($('input[name="kind"][value="recent"]').checked = true));
 $("#inDate").addEventListener("focus", () => ($('input[name="kind"][value="date"]').checked = true));
@@ -6724,7 +7668,7 @@ function changedInGroup(name) {
   let inGroup = false, n = 0;
   for (const s of SETTINGS_SCHEMA) {
     if (s.group) { if (inGroup) break; inGroup = s.group === name; continue; }
-    if (inGroup && !isDefaultValue(s.key, settings[s.key])) n++;
+    if (inGroup && !isDefaultValue(s.key, rowValue(s))) n++;
   }
   return n;
 }
@@ -6934,7 +7878,7 @@ function renderDrawer() {
     // A read-only readout rather than a setting: no key, so it skips all of
     // the value/default/dependency machinery below.
     if (s.info) { html += infoHtml(s); continue; }
-    const v = settings[s.key]; const id = "set-" + s.key;
+    const v = rowValue(s); const id = "set-" + s.key;
     // A setting with `when` only applies while another setting has a given
     // value (see syncDependents): it is indented under its parent and greyed
     // out, rather than hidden, so you can see what the mode would give you.
@@ -6977,7 +7921,7 @@ $("#drawer").addEventListener("input", ev => {
   let v = s.type === "bool" ? el.checked : s.type === "range" || s.type === "number" ? Number(el.value) : el.value;
   if (s.type === "multi") v = $$(`#drawer [data-k="${s.key}"]:checked`).map(x => x.value);
   if (s.type === "number") { if (isNaN(v)) return; v = Math.max(s.min, Math.min(s.max, v)); }
-  setSetting(s.key, v);
+  setRowValue(s, v);
   // Whether the page can be held aside depends on the column maths, which
   // tile, tileMax and columnWidth all change -- so a setting altered while
   // the drawer is open can make the current answer wrong in either
@@ -7011,7 +7955,7 @@ $("#drawer").addEventListener("input", ev => {
   if (s.key === "contextCount" && viewing("start")) prepareStart();
   // The follow filter needs the follow list, which a custom-feed catch-up may
   // never have had a reason to load; it rebuilds the feed again once it's in.
-  if (s.key === "hideFollowed" && v !== "off" && !state.follows.size) ensureFollows();
+  if (s.key === "hideFollowed" && hideFollowedMode() !== "off" && !state.follows.size) ensureFollows();
 });
 /* Brings the open drawer back in step with the current settings, without
    re-rendering it (which would lose the focus and caret of whatever control
@@ -7032,7 +7976,7 @@ function syncDependents() {
       for (const el of $$(`#drawer [data-k="${s.key}"]`)) el.disabled = !on;
       $(`#drawer [data-why="${s.key}"]`)?.classList.toggle("hidden", on);
     }
-    const changed = !isDefaultValue(s.key, settings[s.key]);
+    const changed = !isDefaultValue(s.key, rowValue(s));
     row?.classList.toggle("changed", changed);
     if (row) row.title = changed ? "Changed from the default" : "";
   }
@@ -7057,8 +8001,15 @@ function setDrawerShift(on) {
   applyLook();                          // re-records wasTiled/wasCols for the resize handler
   if (state.run && viewing("feed")) keepReadingSpot(spot);
 }
-function openDrawer() { renderDrawer(); $("#drawer").classList.remove("hidden"); $("#scrim").classList.remove("hidden"); setDrawerShift(true); }
-function closeDrawer() { $("#drawer").classList.add("hidden"); $("#scrim").classList.add("hidden"); setDrawerShift(false); }
+function openDrawer() {
+  renderDrawer(); $("#drawer").classList.remove("hidden"); $("#scrim").classList.remove("hidden"); setDrawerShift(true);
+  pushOverlay("drawer");
+}
+function closeDrawer() {
+  if (isHidden("#drawer")) return;     // see closeLightbox
+  $("#drawer").classList.add("hidden"); $("#scrim").classList.add("hidden"); setDrawerShift(false);
+  dropOverlay("drawer");
+}
 $("#btnSettings").addEventListener("click", openDrawer);
 $("#scrim").addEventListener("click", closeDrawer);
 
@@ -7096,7 +8047,7 @@ function applyWebHostLinks() {
   for (const el of $$(".web-host")) el.textContent = host;
 }
 (async function boot() {
-  applyLook();
+  applyLook();       // which also writes theme-color and the manifest
   applyWebHostLinks();
   // Says, in the About block, which servers this copy is actually set to use,
   // so the privacy note above it can't drift from the settings.

@@ -237,6 +237,164 @@ test("liking nothing yet is explained, not a crash", async () => {
   assert.match(page.$("#startErr").textContent, /haven't liked anything/i);
 });
 
+/* ---- what a like says about where you were reading ---- */
+
+const TID_CHARS = "234567abcdefghijklmnopqrstuvwxyz";
+/** A record key that encodes a time, the way a PDS makes one: 53 bits of
+ *  microseconds since the epoch, then 10 bits of clock id, in sortable
+ *  base32. The page reads this back when a record itself is gone. */
+function tid(ms) {
+  let n = (BigInt(ms) * 1000n) << 10n, out = "";
+  for (let i = 0; i < 13; i++) { out = TID_CHARS[Number(n & 31n)] + out; n >>= 5n; }
+  return out;
+}
+const secs = t => Math.round(t / 1000);
+/** Liked a repost: an old post that someone put back in front of you 20
+ *  minutes into this feed, liked five minutes after that. */
+function viaSetup({ record = true, viaUri = null } = {}) {
+  const repostedAt = h.BASE + 20 * h.MIN;
+  const orig = h.post("OLD", b, -4000);                 // written days earlier
+  const fi = h.item(orig, { repostBy: a, repostMin: 20 });
+  if (viaUri) fi.reason.uri = viaUri;
+  const server = {
+    timeline: [h.item(h.post("BEFORE", b, 10)), fi, h.item(h.post("AFTER", b, 30))],
+    likes: [{ uri: orig.uri, via: fi.reason.uri, createdAt: h.iso(repostedAt + 5 * h.MIN) }],
+    ...(record ? { recordsByUri: { [fi.reason.uri]: {
+      $type: "app.bsky.feed.repost", subject: { uri: orig.uri, cid: orig.cid }, createdAt: h.iso(repostedAt),
+    } } } : {}),
+  };
+  return { orig, fi, server, repostedAt };
+}
+
+test("a like on a repost starts where the repost appeared, not at the post's own date", async () => {
+  // The post is days old; the repost is what went past you. Starting at the
+  // post's own date would read those days back, and would be answering a
+  // question about the post rather than about your reading.
+  const { server, repostedAt } = viaSetup();
+  const page = await h.loadPage({ server });
+  await page.start("like");
+  assert.ok(page.article("OLD").classList.contains("anchor"),
+    `the repost is where you're put: ${page.ids().join(",")}`);
+  assert.deepEqual(page.ids(), ["BEFORE", "OLD", "AFTER"],
+    "with context above it and the rest of the feed below");
+  assert.match(page.$("#feedHead").textContent, /repost/,
+    "and the page says that's what happened");
+  assert.match(page.window.location.hash, new RegExp(`from=[^&]*/post/OLD@${secs(repostedAt)}\\b`),
+    `the link names the post and the time it was read at: ${page.window.location.hash}`);
+  const asked = page.requests.filter(r => r.nsid === "com.atproto.repo.getRecord" && r.search.get("collection") === "app.bsky.feed.repost");
+  assert.equal(asked.length, 1, "the repost record is read for its time");
+  assert.equal(asked[0].search.get("repo"), a.did, "out of the reposter's own repository");
+});
+
+test("a repost deleted since the like is still dated, from its record key", async () => {
+  // People un-repost things. The key is a TID, so it says when it was
+  // written even when there's nothing left to read.
+  const repostedAt = h.BASE + 20 * h.MIN;
+  const { server } = viaSetup({ record: false, viaUri: `at://${a.did}/app.bsky.feed.repost/${tid(repostedAt)}` });
+  const page = await h.loadPage({ server });
+  await page.start("like");
+  assert.ok(page.article("OLD").classList.contains("anchor"));
+  assert.match(page.window.location.hash, new RegExp(`@${secs(repostedAt)}\\b`),
+    `dated from the key: ${page.window.location.hash}`);
+});
+
+test("a via nothing can date is ignored rather than trusted", async () => {
+  // No record and no time in the key: the start falls back to the post, which
+  // is what a like with no via at all does. What it must NOT do is start at
+  // the epoch, or anywhere else a failed read happens to point.
+  const liked = h.post("LIKED", b, 20);
+  const fi = h.item(liked, { repostBy: a, repostMin: 25 });
+  fi.reason.uri = `at://${a.did}/app.bsky.feed.repost/not-a-tid`;
+  const page = await h.loadPage({ server: {
+    timeline: [h.item(h.post("BEFORE", b, 5)), fi, h.item(h.post("AFTER", b, 40))],
+    likes: [{ uri: liked.uri, via: fi.reason.uri, createdAt: h.iso(h.BASE + 30 * h.MIN) }],
+  } });
+  await page.start("like");
+  assert.ok(page.article("LIKED").classList.contains("anchor"));
+  assert.match(page.window.location.hash, new RegExp(`@${secs(h.BASE + 20 * h.MIN)}\\b`),
+    `the post's own time, not a misread one: ${page.window.location.hash}`);
+});
+
+test("a like on something far older than the like starts at the like instead", async () => {
+  // Liked from search, a profile or a thread: nothing says you met it in your
+  // feed, its date is days back, and starting there reads days of feed for a
+  // catch-up nobody asked for. Your own like is the better guess.
+  const old = h.post("ANCIENT", b, -3000);
+  const likedAt = h.BASE + 15 * h.MIN;
+  const page = await h.loadPage({ server: {
+    timeline: [h.item(h.post("EARLIER", b, 5)), h.item(old), h.item(h.post("AFTER", b, 20)), h.item(h.post("LATER", b, 40))],
+    likes: [{ uri: old.uri, createdAt: h.iso(likedAt) }],
+  } });
+  await page.start("like");
+  assert.deepEqual(page.ids(), ["AFTER", "LATER"], "reading starts at the like, not days back");
+  assert.match(page.$("#feedHead").textContent, /you liked it on/, "and it says why");
+  assert.match(page.window.location.hash, /from=\d{4}-\d{2}-\d{2}T/,
+    `a time start -- the post is nowhere in the window: ${page.window.location.hash}`);
+});
+
+test("a like made in the same sitting still starts at the post itself", async () => {
+  // Inside the window the post's own time is the finer of the two, and the
+  // post is the thing to highlight.
+  const liked = h.post("LIKED", b, 20);
+  const page = await h.loadPage({ server: {
+    timeline: [h.item(h.post("BEFORE", b, 5)), h.item(liked), h.item(h.post("AFTER", b, 40))],
+    likes: [{ uri: liked.uri, createdAt: h.iso(h.BASE + 80 * h.MIN) }],
+  } });
+  await page.start("like");
+  assert.ok(page.article("LIKED").classList.contains("anchor"));
+  assert.ok(!/you liked it on/.test(page.$("#feedHead").textContent), "nothing to explain");
+  assert.match(page.window.location.hash, new RegExp(`@${secs(h.BASE + 20 * h.MIN)}\\b`));
+});
+
+test("a record key is only read as a time when it is one", async () => {
+  // tidTime() is the fallback for a repost that's been deleted, so it is the
+  // one place a string from somebody else's repository is turned into a
+  // number. Anything that isn't a TID has to come back as no answer, not as
+  // a number that happens to fall out of the arithmetic.
+  const page = await h.loadPage({});
+  const when = h.BASE + 20 * h.MIN;
+  assert.equal(page.eval(`tidTime(${JSON.stringify(tid(when))})`), when, "a real key gives its own time back");
+  for (const bad of ["not-a-tid", "", "self", "3momtuwbpqw2", "3momtuwbpqw2ll", "3MOMTUWBPQW2L", "3momtuwbpq01l"]) {
+    assert.ok(Number.isNaN(page.eval(`tidTime(${JSON.stringify(bad)})`)), `${bad || "(empty)"} is not a key that says a time`);
+  }
+});
+
+test("a repost dated after the like it supposedly came from is not believed", async () => {
+  // A time that can't be true is a sign the field isn't what we think, not a
+  // start point. Starting there would put the catch-up in the future.
+  const liked = h.post("LIKED", b, 20);
+  const fi = h.item(liked, { repostBy: a, repostMin: 25 });
+  const page = await h.loadPage({ server: {
+    timeline: [h.item(h.post("BEFORE", b, 5)), fi, h.item(h.post("AFTER", b, 40))],
+    likes: [{ uri: liked.uri, via: fi.reason.uri, createdAt: h.iso(h.BASE + 30 * h.MIN) }],
+    recordsByUri: { [fi.reason.uri]: { $type: "app.bsky.feed.repost", createdAt: h.iso(h.BASE + 400 * 24 * 60 * h.MIN) } },
+  } });
+  await page.start("like");
+  assert.ok(page.visible("viewFeed"), `the catch-up still runs: ${page.$("#startErr").textContent}`);
+  assert.ok(page.article("LIKED").classList.contains("anchor"));
+  assert.match(page.window.location.hash, new RegExp(`@${secs(h.BASE + 20 * h.MIN)}\\b`),
+    `the post's own time, the repost's claim ignored: ${page.window.location.hash}`);
+});
+
+test("a link to a like-on-a-repost catch-up opens the same catch-up", async () => {
+  // Without the time in the link, following it would start at the post's own
+  // date and read days nobody read: a different catch-up from the shared one.
+  const { server } = viaSetup();
+  const page = await h.loadPage({ server });
+  await page.start("like");
+  const frag = page.window.location.hash.slice(1);
+  const again = await h.loadPage({ url: "https://site.example/index.html#" + frag, server: viaSetup().server });
+  await again.settle();
+  assert.deepEqual(again.ids(), page.ids(), "same posts");
+  assert.ok(again.article("OLD").classList.contains("anchor"), "same start post");
+  assert.equal(again.window.location.hash, page.window.location.hash, "and the same link again");
+  // "Copy link" is the one people actually share, and it is built from the
+  // finished run rather than from the address.
+  page.$("#btnCopyCatchup").click(); await h.wait(20);
+  assert.match(page.clip.at(-1), new RegExp(`from=[^&]*/post/OLD@${secs(h.BASE + 20 * h.MIN)}\\b`),
+    `the copied link carries the time as well: ${page.clip.at(-1)}`);
+});
+
 test("the two ways to pick up where you left off sit together", async () => {
   const page = await h.loadPage({});
   const pair = page.$("#startForm .choice-pair");
@@ -328,4 +486,133 @@ test("a feed with nothing deeper says so and drops the button", async () => {
   assert.match(page.toast(), /doesn't go back any further/);
   assert.equal(page.$("#btnMore"), null, "nothing left to press");
   assert.match(page.$("#endcap").textContent, /doesn't go back any further/);
+});
+
+/* ---------------------------------------------------------------- feed order */
+/* A feed that ranks its posts rather than ordering them by time. The ids are
+ * the order it SERVES them in (R0 first, highest-ranked); the minutes are
+ * deliberately scattered, so sorting by time would shuffle them. 24 posts so
+ * there is enough of a run to judge the order by (ORDER_MIN_ITEMS). */
+const RANK_MINS = [31, 9, 57, 14, 48, 2, 39, 21, 60, 5, 44, 17, 53, 28, 11, 36, 1, 50, 24, 7, 42, 19, 33, 12];
+const ranked = (n = RANK_MINS.length, from = 0) =>
+  RANK_MINS.slice(from, from + n).map((min, i) => h.item(h.post("R" + (from + i), a, min)));
+/** The account's saved feeds, with FEED served in the exact order given. */
+const withRanked = (feed, extra = {}) => withFeeds({ feeds: { [FEED]: feed }, rankedFeeds: [FEED], ...extra });
+
+test("a ranked feed is read in the order it served, not by time", async () => {
+  const page = await h.loadPage({ server: withRanked(ranked()) });
+  await page.startRecent(24, { feed: FEED });
+  assert.equal(page.eval("state.run.order"), "feed", "the run noticed the feed is ranked");
+  assert.deepEqual(page.ids(), RANK_MINS.map((_, i) => "R" + i), "served order, top of the ranking first");
+  assert.match(page.$("#feedHead").textContent, /ranks its posts/);
+});
+
+test("a ranked feed loads more posts below what you've read", async () => {
+  // 24 served at first, 48 available: the second read goes deeper.
+  const page = await h.loadPage({ server: withRanked([...ranked(), ...ranked(24, 0).map((fi, i) => h.item(h.post("D" + i, b, 70 + i)))]) });
+  await page.startRecent(24, { feed: FEED });
+  const first = page.ids();
+  const topArticle = page.article("R0");
+
+  page.$("#btnMore").click();
+  await h.waitFor(() => page.ids().length > 24, { message: "deeper posts" });
+  const after = page.ids();
+  assert.deepEqual(after.slice(0, 24), first, "nothing already read moved");
+  assert.deepEqual(after.slice(24), Array.from({ length: 24 }, (_, i) => "D" + i), "the deeper posts are below");
+  assert.equal(page.article("R0"), topArticle, "and the posts on screen weren't re-rendered");
+  assert.match(page.toast(), /24 more posts added below/);
+});
+
+test("a ranked feed that re-ranks between reads doesn't reshuffle what you've read", async () => {
+  const server = withRanked(ranked());
+  const page = await h.loadPage({ server });
+  await page.startRecent(24, { feed: FEED });
+  const first = page.ids();
+  // The feed re-ranks: a post from the middle is now its top result, and a
+  // post that wasn't there before is ranked second -- ahead of everything
+  // already read. That is exactly the shuffle this has to resist.
+  const moved = server.feeds[FEED].splice(12, 1)[0];
+  server.feeds[FEED].unshift(h.item(h.post("NEW", b, 70)));
+  server.feeds[FEED].unshift(moved);
+  server.feeds[FEED].push(h.item(h.post("DEEP", b, 3)));
+
+  page.$("#btnMore").click();
+  await h.waitFor(() => page.ids().includes("NEW"), { message: "the new post" });
+  assert.deepEqual(page.ids().slice(0, 24), first, "the order you were reading is the order you keep");
+  assert.deepEqual(page.ids().slice(24), ["NEW", "DEEP"],
+    "posts the feed hadn't served before go below it, however highly it ranks them now");
+});
+
+test("a chronological feed is still read oldest first, however it's served", async () => {
+  // Served newest-first with a little jitter, as a real feed is: times step
+  // backwards by minutes, with a few sub-tolerance wobbles that must not be
+  // mistaken for a ranking.
+  const mins = [60, 55, 55.5, 50, 45, 40, 40.5, 35, 30, 25, 20, 20.25, 15, 10, 5, 4, 3, 2, 1, 0, -5, -10, -15, -20];
+  const feed = mins.map((min, i) => h.item(h.post("C" + i, a, min)));
+  const page = await h.loadPage({ server: withRanked(feed) });
+  await page.startRecent(24, { feed: FEED });
+  assert.equal(page.eval("state.run.order"), "time", "half a minute of wobble isn't a ranking");
+  const shown = page.ids();
+  const want = mins.map((min, i) => ["C" + i, min]).sort((x, y) => x[1] - y[1]).map(x => x[0]);
+  assert.deepEqual(shown, want, "oldest first, as always -- wobble and all");
+});
+
+test("a short ranked feed is taken at its word as chronological", async () => {
+  // Too few posts to judge an order by (ORDER_MIN_ITEMS), so time it is.
+  const page = await h.loadPage({ server: withRanked(ranked(6)) });
+  await page.startRecent(6, { feed: FEED });
+  assert.equal(page.eval("state.run.order"), "time");
+});
+
+test("reading by date keeps time order even on a ranked feed", async () => {
+  const page = await h.loadPage({ server: withRanked(ranked()) });
+  await page.startDate(h.BASE, null, { feed: FEED });
+  assert.equal(page.eval("state.run.order"), "time", "a start time only means anything in time order");
+  const times = page.eval("JSON.stringify(state.view.map(i => i.t))");
+  const sorted = [...JSON.parse(times)].sort((x, y) => x - y);
+  assert.deepEqual(JSON.parse(times), sorted, "oldest first");
+});
+
+test("feed order drops the day and hour dividers", async () => {
+  const page = await h.loadPage({
+    settings: { dayDividers: true, hourDividers: true },
+    server: withRanked(ranked()),
+  });
+  await page.startRecent(24, { feed: FEED });
+  assert.equal(page.$$(".hour").length, 0, "no hour dividers");
+  assert.equal(page.$$(".day").length, 0, "no day dividers");
+  // The same posts read by time still get them.
+  const byTime = await h.loadPage({
+    settings: { dayDividers: true, hourDividers: true },
+    server: withFeeds({ feeds: { [FEED]: ranked() } }),
+  });
+  await byTime.startRecent(24, { feed: FEED });
+  assert.ok(byTime.$$(".hour").length >= 2, "hour dividers where time is the order");
+});
+
+test("feed order doesn't move your saved reading position", async () => {
+  const page = await h.loadPage({ server: withRanked(ranked()) });
+  await page.startRecent(24, { feed: FEED });
+  page.window.Element.prototype.getBoundingClientRect = function () { return { top: 20, bottom: 120, left: 0, right: 0, width: 0, height: 100 }; };
+  page.eval("updateClock()");
+  assert.equal(page.window.localStorage.getItem(`bcu:position:${h.ME.did}`), null,
+    "how deep into For You you got isn't a place in your Following feed");
+  assert.match(page.$("#clockSub").textContent, /in the order For You gave them/);
+});
+
+/* ------------------------------------------------------- feeds that don't load */
+test("a saved list that no longer resolves is left out of the picker", async () => {
+  const page = await h.loadPage({ server: withFeeds({ missingLists: [LIST] }) });
+  await h.wait(50);
+  const opts = [...page.$("#inFeed").options].map(o => o.textContent);
+  assert.ok(!opts.some(o => /Friends|Unavailable|friends/.test(o)), `the dead list is hidden: ${opts.join(" | ")}`);
+  assert.ok(!opts.some(o => /^\s*[a-z0-9]{8,}\s*\(list\)$/i.test(o)), "and its rkey isn't shown as a name");
+  assert.ok(opts.includes("★ For You"), "the feeds that do load are still there");
+});
+
+test("turning on broken feeds brings them back, named for what they are", async () => {
+  const page = await h.loadPage({ settings: { showBrokenFeeds: true }, server: withFeeds({ missingLists: [LIST] }) });
+  await h.wait(50);
+  const opts = [...page.$("#inFeed").options].map(o => o.textContent);
+  assert.ok(opts.includes("Unavailable list (list)"), `shown and named: ${opts.join(" | ")}`);
 });

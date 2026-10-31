@@ -1,2 +1,6 @@
 .DS_Store
 node_modules/
+
+# sabotage.py copies the page here while it runs and removes it afterwards;
+# an interrupted run (or a git add while one is in flight) leaves it behind.
+.sabotage-run/

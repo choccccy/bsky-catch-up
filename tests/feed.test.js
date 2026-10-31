@@ -127,12 +127,38 @@ test("the reposter's name links to their profile", async () => {
 
 test("only the avatar itself links to the profile, not the column below it", async () => {
   // Regression test for 0.8.2. jsdom does no layout, so check the styles
-  // that keep the link from stretching to the post's full height.
+  // that keep the link from stretching to the post's full height. The height
+  // is compared against the avatar's own rather than against a number: both
+  // read it from --av, and that they AGREE is the actual invariant. jsdom
+  // doesn't resolve custom properties, so a literal here would only ever
+  // have been testing what the token is spelled.
   const page = await h.loadPage({ server: { timeline: [h.item(h.post("A", a, 10))] } });
   await page.startDate(h.BASE);
-  const link = page.article("A").querySelector(":scope > .pv > .avatar-link");
+  const post = page.article("A");
+  const link = post.querySelector(":scope > .pv > .avatar-link");
   assert.ok(link, "avatar wrapped in .avatar-link");
   const cs = page.window.getComputedStyle(link);
   assert.equal(cs.alignSelf, "flex-start");
-  assert.equal(cs.height, "40px");
+  const avatarH = page.window.getComputedStyle(post.querySelector(".avatar")).height;
+  assert.ok(avatarH && avatarH !== "auto", "the avatar is given a height of its own");
+  assert.equal(cs.height, avatarH, "the link is pinned to the avatar's height, not stretched");
+});
+
+/* On a narrow screen the top bar's buttons go icon-only, and they do it in
+   CSS: the words stay in the markup and are hidden from the eye alone. The
+   tempting "simplification" is to delete them once there's an icon, which
+   silently leaves three buttons with no accessible name at any width. jsdom
+   does no layout and so can't see the breakpoint, but it can hold onto the
+   part that matters at every width -- that the words are still there. */
+test("the top bar's buttons keep their words, however they are drawn", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("A", a, 10))] } });
+  await page.startDate(h.BASE);
+  for (const [id, words] of [["btnNew", "New catch-up"], ["btnSettings", "Settings"], ["btnSignOut", "Sign out"]]) {
+    const btn = page.$("#" + id);
+    assert.equal(btn.textContent.trim(), words, `#${id} still says "${words}"`);
+    const label = btn.querySelector(".btn-label");
+    assert.ok(label, `#${id}'s words are in a .btn-label, which is only ever hidden visually`);
+    assert.equal(page.window.getComputedStyle(label).display !== "none", true, `#${id}'s label is not display:none`);
+    assert.ok(btn.querySelector(".btn-icon svg"), `#${id} has an icon for the narrow layout`);
+  }
 });

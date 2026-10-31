@@ -142,6 +142,10 @@ function viewRecord(p) {
  *   dns:          { handle: did } served as a DNS-over-HTTPS TXT answer for
  *                 _atproto.<handle>, the second thing tried. Any resolver
  *                 host answers; absent handles get an empty answer.
+ *   recordsByUri: { "at://did/collection/rkey": recordValue } served by
+ *                 getRecord whatever repository it is in -- for a record
+ *                 nobody's repo needs to hold as a whole, such as the repost
+ *                 a like was made through.
  *   oldestFirst:  true = this server lists collections oldest-first by
  *                 default (reverse then gives newest-first). The spec leaves
  *                 the direction to the server, so the page has to cope.
@@ -190,11 +194,15 @@ function makeServer(opts, calls, requests) {
     "app.bsky.actor.getProfile": () => ({ ...ME, followsCount: follows.length }),
     // Custom feeds and lists. opts.feeds maps an at:// URI to its posts;
     // opts.savedFeeds is what getPreferences reports as saved.
+    // A URI in opts.rankedFeeds is served in exactly the order the test wrote
+    // it, the way a feed generator serves its own ranking; every other feed
+    // is sorted newest-first like the timeline.
     "app.bsky.feed.getFeed": p => {
       const uri = p.get("feed");
       const list = opts.feeds?.[uri];
       if (!list) return { status: 400, error: "UnknownFeed", message: "could not find feed" };
-      return page([...list].sort((a, b) => sortAt(b) - sortAt(a)).slice(0, opts.feedLimit ?? Infinity), p);
+      const ordered = opts.rankedFeeds?.includes(uri) ? [...list] : [...list].sort((a, b) => sortAt(b) - sortAt(a));
+      return page(ordered.slice(0, opts.feedLimit ?? Infinity), p);
     },
     "app.bsky.feed.getListFeed": p => {
       const uri = p.get("list");
@@ -210,8 +218,11 @@ function makeServer(opts, calls, requests) {
     "app.bsky.feed.getFeedGenerators": p => ({
       feeds: p.getAll("feeds").map(uri => ({ uri, displayName: opts.feedNames?.[uri] || "A feed", creator: actor(1), likeCount: 0 })),
     }),
+    // A URI in opts.missingLists answers the way a deleted list does, so the
+    // page can't name it.
     "app.bsky.graph.getList": p => {
       const uri = p.get("list");
+      if (opts.missingLists?.includes(uri)) return { status: 400, error: "InvalidRequest", message: "List not found" };
       return { list: { uri, name: opts.feedNames?.[uri] || "A list", purpose: "app.bsky.graph.defs#curatelist", creator: actor(1) }, items: [] };
     },
     "app.bsky.graph.getFollows": p => { const s = Number(p.get("cursor") || 0); return { follows: follows.slice(s, s + 100), cursor: s + 100 < follows.length ? String(s + 100) : undefined }; },
@@ -243,7 +254,10 @@ function makeServer(opts, calls, requests) {
     },
     // The user's own likes, newest first (which is how a PDS orders records by
     // default: by record key, descending). opts.likes lists post URIs, most
-    // recently liked first.
+    // recently liked first -- or, for a like that carries more than its
+    // subject, { uri, via, createdAt }: `via` is the repost record the like
+    // was made through (app.bsky.feed.like's optional strongRef, which the
+    // Bluesky app sets when you like something a repost showed you).
     "com.atproto.repo.listRecords": p => {
       // Which records were asked for matters here (one, newest first), and
       // `calls` only keeps method names: record the query on the server object
@@ -272,9 +286,13 @@ function makeServer(opts, calls, requests) {
         const next = from + lim;
         return { records: slice, ...(next < made.length ? { cursor: String(next) } : {}) };
       }
-      const uris = p.get("reverse") === "true" ? [...(opts.likes || [])].reverse() : (opts.likes || []);
+      const likes = (p.get("reverse") === "true" ? [...(opts.likes || [])].reverse() : (opts.likes || []))
+        .map(l => (typeof l === "string" ? { uri: l } : l));
       const n = Number(p.get("limit") || 50);
-      return { records: uris.slice(0, n).map((uri, i) => ({ uri: `at://${ME.did}/app.bsky.feed.like/like${i}`, cid: "c", value: { subject: { uri, cid: "c" }, createdAt: iso(0) } })) };
+      return { records: likes.slice(0, n).map((l, i) => ({
+        uri: `at://${ME.did}/app.bsky.feed.like/like${i}`, cid: "c",
+        value: { subject: { uri: l.uri, cid: "c" }, createdAt: l.createdAt || iso(0), ...(l.via ? { via: { uri: l.via, cid: "c" } } : {}) },
+      })) };
     },
     "com.atproto.repo.createRecord": (p, body) => { const uri = `at://${ME.did}/${body.collection}/rec${records.length}`; records.push({ uri, ...body }); return { uri, cid: "c" }; },
     "com.atproto.repo.deleteRecord": (p, body) => {
@@ -288,6 +306,10 @@ function makeServer(opts, calls, requests) {
       const uri = `at://${p.get("repo")}/${p.get("collection")}/${p.get("rkey")}`;
       const r = records.find(x => x.uri === uri);
       if (r) return { uri, cid: "c", value: r.record };
+      // A single record named by its URI (opts.recordsByUri): for one the
+      // test cares about on its own, without standing up a whole repository.
+      const byUri = (opts.recordsByUri || {})[uri];
+      if (byUri) return { uri, cid: "c", value: byUri };
       // Anything in a simulated repository (protocol mode): a post being
       // reposted or quoted, or an account's own profile record.
       const repo = (opts.repos || {})[p.get("repo")]?.[p.get("collection")];

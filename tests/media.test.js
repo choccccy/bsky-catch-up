@@ -25,6 +25,105 @@ test("unknown gallery items and unknown embeds show a bsky.app fallback", async 
   assert.ok(page.article("U").querySelector(".embed-unknown a[href*='bsky.app']"));
 });
 
+/* Swiping the image viewer. jsdom has no PointerEvent, but the handler only
+   ever reads clientX/clientY/isPrimary off the event, so a MouseEvent with
+   isPrimary defined on it exercises exactly the same arithmetic -- and the
+   arithmetic is the whole of it. What a swipe FEELS like is a phone's
+   business; what it decides is testable here.
+   The case that matters most is the last one: a drag must never fall through
+   to "click anywhere closes". It did, in the first cut of this, so an upward
+   flick -- a gesture that means nothing here -- put the picture away. */
+test("the image viewer is swiped, and a drag is never a tap", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("G", a, 10, { embed: h.embeds.gallery(5) }))] } });
+  await page.startDate(h.BASE);
+  const lb = page.$("#lightbox");
+  const at = () => lb.querySelector(".lb-count").textContent;
+  const shut = () => lb.classList.contains("hidden");
+
+  const ptr = (type, x, y, primary = true) => {
+    const ev = new page.window.MouseEvent(type, { bubbles: true, clientX: x, clientY: y });
+    Object.defineProperty(ev, "isPrimary", { value: primary });
+    return ev;
+  };
+  // A real gesture ends in a click, which is what the viewer closes on.
+  const drag = (dx, dy, primary = true) => {
+    lb.dispatchEvent(ptr("pointerdown", 160, 300, primary));
+    lb.dispatchEvent(ptr("pointerup", 160 + dx, 300 + dy, primary));
+    lb.dispatchEvent(new page.window.MouseEvent("click", { bubbles: true }));
+  };
+
+  page.$$('.gallery [data-act="zoom"]')[0].click();
+  assert.equal(at(), "1 / 5");
+  drag(-120, 5);   assert.deepEqual([at(), shut()], ["2 / 5", false], "left goes forward");
+  drag(120, -5);   assert.deepEqual([at(), shut()], ["1 / 5", false], "right goes back");
+  drag(120, 0);    assert.deepEqual([at(), shut()], ["1 / 5", false], "and stops at the first one");
+  drag(-20, 0);    assert.deepEqual([at(), shut()], ["1 / 5", false], "a nudge too short to step does nothing");
+  drag(0, -150);   assert.equal(shut(), false, "flicking UP is not putting it away");
+  // Two fingers are a pinch, which belongs to the browser, not to this.
+  drag(-200, 0, false);
+  assert.deepEqual([at(), shut()], ["1 / 5", false], "a two-finger drag is left alone");
+
+  drag(0, 150);    assert.equal(shut(), true, "down puts it away");
+  assert.equal(page.eval("overlays.length"), 0, "and gives its history entry back");
+
+  // A tap is still a tap.
+  page.$$('.gallery [data-act="zoom"]')[0].click();
+  drag(4, 4);
+  assert.equal(shut(), true, "a tap still closes it");
+});
+
+/* The Back button, on a phone, should shut whatever is covering the screen
+   rather than leave the page -- and leaving is expensive here, because the
+   address carries #from=... and coming back re-runs the whole catch-up.
+   Opening an overlay pushes a history entry and closing it gives that entry
+   back, so the two have to stay in step: an overlay that pushes and never
+   pops would make Back do nothing the first time it was pressed.
+   jsdom implements pushState and fires popstate on back(), so this is one of
+   the few parts of the phone work a test can hold. */
+test("Back closes the lightbox instead of leaving the page", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("G", a, 10, { embed: h.embeds.gallery(5) }))] } });
+  await page.startDate(h.BASE);
+  const lb = page.$("#lightbox");
+  const depth = page.window.history.length;
+
+  page.$$('.gallery [data-act="zoom"]')[1].click();
+  assert.ok(!lb.classList.contains("hidden"), "the viewer is up");
+  assert.equal(page.window.history.length, depth + 1, "opening it pushed an entry to go back to");
+
+  page.window.history.back();
+  await h.wait(20);
+  assert.ok(lb.classList.contains("hidden"), "Back closed the viewer");
+  assert.deepEqual(page.ids(), ["G"], "and the catch-up is still on screen, not restarted");
+});
+
+test("closing an overlay gives its history entry back", async () => {
+  // Otherwise every picture opened would leave an entry behind, and Back
+  // would need pressing once per picture before it did anything at all.
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("G", a, 10, { embed: h.embeds.gallery(5) }))] } });
+  await page.startDate(h.BASE);
+  for (let i = 0; i < 3; i++) {
+    page.$$('.gallery [data-act="zoom"]')[0].click();
+    assert.equal(page.eval("overlays.length"), 1, `viewer ${i} is holding one entry`);
+    page.$("#lightbox").click();                     // tap to close
+    await h.wait(20);
+    assert.ok(page.$("#lightbox").classList.contains("hidden"), `viewer ${i} closed`);
+    // history.length is the wrong measure: going back doesn't shorten the
+    // list, it moves the cursor, and the next push overwrites what was
+    // ahead. What matters is that the entry was GIVEN BACK -- the page is
+    // sitting on the pre-overlay entry again, so the next Back leaves the
+    // page the way it would have before any of this.
+    assert.equal(page.eval("overlays.length"), 0, `viewer ${i} gave its entry back`);
+    assert.equal(page.window.history.state?.bcuOverlay, undefined, `nothing left on the history entry after ${i}`);
+  }
+
+  // The drawer is the other overlay that takes over the screen.
+  page.$("#btnSettings").click();
+  assert.equal(page.eval("overlays.length"), 1, "the drawer pushed one too");
+  page.window.history.back();
+  await h.wait(20);
+  assert.ok(page.$("#drawer").classList.contains("hidden"), "Back closed the drawer");
+});
+
 test("the lightbox steps through all images in a post", async () => {
   const page = await h.loadPage({ server: { timeline: [h.item(h.post("G", a, 10, { embed: h.embeds.gallery(5) }))] } });
   await page.startDate(h.BASE);
@@ -589,6 +688,28 @@ test("the page fetches nothing at all when it loads", async () => {
   for (const tag of head.match(/<link\s[^>]*>/g) || [])
     assert.match(tag, /\shref="data:/, `head <link> must be inline: ${tag.slice(0, 60)}`);
   assert.equal(src.match(/fonts\.(googleapis|gstatic)\.com/g), null, "no Google Fonts reference anywhere");
+});
+
+/* The slot width handed to the browser as `sizes` is the card minus the
+   card's own side padding, and that padding is one of the three numbers in
+   this file that the script can only MIRROR from the stylesheet rather than
+   push into it (see the comment above MAIN_PAD). The narrow-screens block
+   gives a card less padding than the default one does, so the mirror has to
+   know about both; when it only knew about the wide one, every picture on a
+   phone was measured against a slot 8px narrower than the one it landed in.
+   jsdom answers false to any media query, which is the desktop reading, so
+   what this pins is that the wide number is still the wide number and that
+   it is derived rather than written out again. */
+test("the slot handed to the browser allows for the card's own padding", async () => {
+  const page = await h.loadPage({ settings: { columnWidth: 640 },
+    server: { timeline: [h.item(h.post("P", a, 10, { embed: h.embeds.images(1) }))] } });
+  await page.startDate(h.BASE);
+  const pad = page.eval("postInnerPad()");
+  assert.equal(pad, 2 * page.eval("POST_PAD") + 2, "both sides of the padding, plus the 1px borders");
+  assert.equal(page.eval("narrowNow()"), false, "jsdom lays nothing out, so it reads as a wide window");
+  // And the number actually reaches the slot: 640px card, less that padding.
+  assert.equal(page.eval("cellWidthPx(1)"), 640 - pad);
+  assert.equal(parseInt(page.$(".imgs img").getAttribute("sizes"), 10), 640 - pad);
 });
 
 test("a gallery asks for a picture the size of the slot it lands in", async () => {
