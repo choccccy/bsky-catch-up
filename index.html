@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.3.1
+  Version 1.3.2
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -691,6 +691,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.3.2] - 2026-10-30
+
+### Fixed
+
+- **The row of buttons under a post sat lopsided on a phone**, with the follow
+  button jammed against the left edge of the card while the one at the other
+  end stood clear of the right. Both ends are level with the card now.
 
 ## [1.3.1] - 2026-10-30
 
@@ -1993,7 +2001,7 @@ site with this release.
      from the <link> below (which is why the icon is not written out here: that
      base64 is 14KB, and it may appear in this file exactly once). -->
 <link rel="manifest" id="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Bluesky%20Catch-up%22%2C%22short_name%22%3A%22Catch-up%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230F141B%22%2C%22theme_color%22%3A%22%230F141B%22%7D">
-<title>Catch-up v1.3.1 · Bluesky</title>
+<title>Catch-up v1.3.2 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -2795,11 +2803,27 @@ body{transition:padding-right .18s ease}
   .bar-actions .btn-label{position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap}
   .pv-handle{max-width:120px}
   .post{padding:12px 10px 6px}
-  /* Out past the avatar to the card's left edge. The -8px is the nudge the
-     row already carries, which lines the first icon up with the text above
-     it once the button's own padding is allowed for. */
-  .actions{gap:0; margin-left:calc(-1 * var(--av-col) - 8px)}
-  .act{padding:9px 6px; gap:4px}
+  /* Out past the avatar, and then past the card's content box by exactly
+     one button's side padding at EACH end. A button's padding is invisible,
+     so what that lines up is the ICONS: the first one and the last one both
+     land on the card's content box, the same line the text above them starts
+     from, and the row sits level.
+     It used to overhang by 8px on the left and nothing on the right, which
+     put the follow icon 9px from the card's edge and the open icon 17px from
+     the other -- visibly lopsided. The 8px is the nudge this row carries on
+     a WIDE screen, where it lines the first icon up with the text; but that
+     number is tuned to the 9px side padding a button has there, and a button
+     here has --act-pad-x. Hence the variable: the overhang and the padding
+     are the same measurement, and writing it twice is how they drift.
+     Overhanging both ends also keeps the row WIDER than squaring it up on
+     the content box would -- which matters, because at 320px with four
+     figures on every count it is within a few pixels of wrapping, and
+     wrapping is the thing this whole block exists to prevent.
+     A wide screen is untouched: it keeps its own nudge, and the row never
+     spans the avatar gutter there at all. */
+  :root{--act-pad-x:6px}
+  .actions{gap:0; margin-left:calc(-1 * (var(--av-col) + var(--act-pad-x))); margin-right:calc(-1 * var(--act-pad-x))}
+  .act{padding:9px var(--act-pad-x); gap:4px}
   .act svg{width:16px; height:16px}
   /* A quoted post's bar has no gutter to take back -- the quote box is
      already indented -- so it buys its room by being tighter instead. */
@@ -3017,7 +3041,7 @@ body{transition:padding-right .18s ease}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.3.1";
+const APP_VERSION = "1.3.2";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
