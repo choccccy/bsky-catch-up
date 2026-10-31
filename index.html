@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.3.0
+  Version 1.3.1
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -691,6 +691,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.3.1] - 2026-10-30
+
+### Fixed
+
+- **Closing the settings could throw you back to the feed you had just left.**
+  Changing feeds while the settings were open, then closing them, could undo
+  the change and start the old catch-up again. The address of this page is a
+  description of what you are reading, and closing a panel was dragging an
+  older description back with it. (1.3.0, where Back first learned to close a
+  panel, was never released; this is that work's missing piece.)
 
 ## [1.3.0] - 2026-10-30
 
@@ -1982,7 +1993,7 @@ site with this release.
      from the <link> below (which is why the icon is not written out here: that
      base64 is 14KB, and it may appear in this file exactly once). -->
 <link rel="manifest" id="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Bluesky%20Catch-up%22%2C%22short_name%22%3A%22Catch-up%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230F141B%22%2C%22theme_color%22%3A%22%230F141B%22%7D">
-<title>Catch-up v1.3.0 · Bluesky</title>
+<title>Catch-up v1.3.1 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -3006,7 +3017,7 @@ body{transition:padding-right .18s ease}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.3.1";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -4872,9 +4883,21 @@ function runHashRequest(req) {
     startCatchup("recent", start.value, end, feed);
   } else startCatchup(start.kind, start.kind === "date" ? start.t : start.input, end, feed, start.kind === "post" ? start.t ?? null : null);
 }
+/* EVERY rewrite of the address goes through here. replaceState: no history
+   entry and no hashchange event, which is the point -- the address is a
+   description of the catch-up being read, not a thing to navigate to.
+   The second job is hereHref, which remembers where the page believes it is.
+   Nothing else can answer that after the fact: by the time popstate runs,
+   location has already moved to wherever it landed, and the overlay code
+   needs the address it came FROM (see dropOverlay). */
+let hereHref = typeof location !== "undefined" ? location.href : "";
+function setAddress(href) {
+  try { history.replaceState(history.state, "", href); } catch {}
+  hereHref = location.href;
+}
 /* Rewrites the fragment to describe the catch-up being started, in a form
    that means the same thing for anyone who opens it (UTC times; post links
-   as bsky.app URLs). replaceState: no history entry, no hashchange event. */
+   as bsky.app URLs). */
 function writeHash(kind, value, end, src, atT = null) {
   const point = (k, v, t = null) => {
     if (k === "date") return new Date(v).toISOString();
@@ -4884,9 +4907,9 @@ function writeHash(kind, value, end, src, atT = null) {
   if (end) h += "&to=" + point(end.kind, end.kind === "date" ? end.t : end.input);
   if (src && src.kind !== "timeline" && src.uri) h += "&feed=" + encodeURIComponent(src.uri);
   h += `&v=${LINK_FORMAT}` + overlayParams();
-  try { history.replaceState(null, "", location.pathname + location.search + "#" + h); } catch {}
+  setAddress(location.pathname + location.search + "#" + h);
 }
-function clearHash() { try { history.replaceState(null, "", location.pathname + location.search); } catch {} }
+function clearHash() { setAddress(location.pathname + location.search); }
 /* ---- settings in links ---- */
 
 /* Link format number, written into every link as v=<n>. Bump it whenever a
@@ -5018,7 +5041,7 @@ function endLinkOverlay(keep, revert = false) {
   // Drop the s.* settings from the address now that they're settled.
   if (location.hash.includes("s.")) {
     const q = location.hash.replace(/^#/, "").split("&").filter(part => !part.startsWith("s."));
-    try { history.replaceState(null, "", location.pathname + location.search + (q.length ? "#" + q.join("&") : "")); } catch {}
+    setAddress(location.pathname + location.search + (q.length ? "#" + q.join("&") : ""));
   }
   $("#linkSettingsNote").classList.add("hidden");
   if (revert) {
@@ -5077,6 +5100,11 @@ let pendingHash = null;
 // Editing the address bar's fragment (or following a catch-up link to this
 // same page) starts that catch-up right away.
 window.addEventListener("hashchange", () => {
+  // A fragment this page put back itself, after rewinding out of an overlay
+  // onto a stale entry (see dropOverlay). Reading it would restart whatever
+  // catch-up was running when that overlay was opened.
+  if (hashIsOurs) { hashIsOurs = false; return; }
+  hereHref = location.href;
   applyLinkSettings();
   const req = readHashRequest(); if (!req) return;
   if (state.session) { state.abort?.abort(); disconnectVideos(); runHashRequest(req); } else pendingHash = req;
@@ -5966,7 +5994,7 @@ function updateEndcap() {
     e.innerHTML = `${empty}<div>You've reached your end point (${esc(what)}).</div><button class="btn primary" id="btnPastEnd" type="button">Keep going to now</button>`;
     $("#btnPastEnd").onclick = () => {
       state.run.end = null; buildView({ fresh: false, append: true }); updateClock();
-      try { history.replaceState(null, "", "#" + catchupFragment() + overlayParams()); } catch {}   // address drops the end too
+      setAddress("#" + catchupFragment() + overlayParams());   // address drops the end too
     };
     return;
   }
@@ -7249,25 +7277,63 @@ document.addEventListener("click", ev => {
    what keeps Escape -- which closes all of them, unconditionally -- from
    popping an entry that isn't there. */
 const OVERLAY_CLOSE = { lightbox: () => closeLightbox(), drawer: () => closeDrawer() };
+/* Each open overlay, with the address as it stood when it was opened. The
+   address matters: see dropOverlay. */
 const overlays = [];
 function pushOverlay(name) {
-  overlays.push(name);
-  try { history.pushState({ bcuOverlay: name }, "", location.href); } catch { overlays.pop(); }
+  const href = location.href;
+  try { history.pushState({ bcuOverlay: name }, "", href); overlays.push({ name, href }); hereHref = href; } catch {}
 }
-/* Give the entry back, if ours is still the one on top. Closing an overlay
-   that has been buried (which shouldn't happen -- the two are mutually
-   exclusive in practice) just forgets it rather than rewinding past
-   somebody else's entry. */
+/* Give the entry back, if ours is still the one on top.
+
+   THE ADDRESS CAN GO STALE UNDER US, and handling that is most of what is
+   here. The entry we push carries the address as it stands. Starting a
+   catch-up rewrites the fragment -- writeHash, with replaceState -- and
+   replaceState only ever touches the CURRENT entry, which while an overlay is
+   open is ours. The entry UNDERNEATH therefore goes on describing whatever
+   catch-up was running when the overlay opened. Rewinding onto it changes the
+   fragment, a changed fragment fires hashchange, and this page reads that as
+   "start that catch-up" -- so closing the settings after switching feeds threw
+   the reader back to the feed they had just left.
+   It can't be settled when the rewind is ASKED for, because history.back() is
+   asynchronous and the rewrite can land while it is in flight -- which is
+   exactly what happened: this machine won that race every time and CI lost it.
+   So it is settled when the rewind ARRIVES. popstate runs before hashchange,
+   so the address is put back to the one the running catch-up owns, and the
+   hashchange that follows is swallowed rather than read as a request.
+   Closing an overlay that has been buried (which shouldn't happen -- the two
+   are mutually exclusive in practice) just forgets it rather than rewinding
+   past somebody else's entry. */
+let rewinding = false;   // our own back() is in flight
+let hashIsOurs = false;  // the next hashchange is one we caused; don't read it as a request
 function dropOverlay(name) {
-  const i = overlays.lastIndexOf(name);
+  let i = -1;
+  for (let k = overlays.length - 1; k >= 0; k--) if (overlays[k].name === name) { i = k; break; }
   if (i < 0) return;
   const top = i === overlays.length - 1;
   overlays.splice(i, 1);
-  if (top) try { history.back(); } catch {}
+  if (!top) return;
+  rewinding = true;
+  try { history.back(); } catch { rewinding = false; }
 }
 window.addEventListener("popstate", () => {
-  const name = overlays.pop();
-  if (name) OVERLAY_CLOSE[name]();     // closes without popping again: it is already gone
+  if (rewinding) {
+    rewinding = false;
+    // Our own rewind, arriving. hereHref is the address the RUNNING catch-up
+    // owns -- read now, not when back() was asked for, because the rewrite
+    // may have landed in between. If the entry we came down onto describes
+    // something older, put the address back and swallow the hashchange the
+    // traversal has already queued. The overlay is closed either way.
+    const want = hereHref;
+    if (location.href !== want) { setAddress(want); hashIsOurs = true; }
+    hereHref = location.href;
+    return;
+  }
+  // Landing ON an overlay entry is not a way out of one: it means a fresh
+  // overlay was opened before an earlier back() arrived. Nothing to close.
+  if (history.state?.bcuOverlay) return;
+  const entry = overlays.pop();
+  if (entry) OVERLAY_CLOSE[entry.name]();   // closes without popping again: it is already gone
 });
 
 /* Full-screen image viewer; click anywhere, swipe it away or press Escape to

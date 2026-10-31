@@ -385,13 +385,19 @@ GUARDS = [
     # Opening an overlay pushes a history entry so Back shuts it instead of
     # leaving the page. Sabotage = push nothing, and Back leaves.
     ('an overlay pushes no history entry, so Back leaves the page',
-     '  try { history.pushState({ bcuOverlay: name }, "", location.href); } catch { overlays.pop(); }',
-     '  overlays.pop();'),
+     '  try { history.pushState({ bcuOverlay: name }, "", href); overlays.push({ name, href }); hereHref = href; } catch {}',
+     '  overlays.push({ name, href });'),
     # ...and closing one has to give the entry back, or Back needs pressing
     # once per picture ever opened before it does anything.
     ('a closed overlay keeps its history entry',
-     '  if (top) try { history.back(); } catch {}',
-     '  if (false) history.back();'),
+     '  rewinding = true;\n  try { history.back(); } catch { rewinding = false; }',
+     '  rewinding = false;'),
+    # Rewinding out of an overlay can land on an entry whose fragment is
+    # older than the catch-up actually running. Sabotage = let it, and the
+    # reader is thrown back to the feed they just left.
+    ('a rewind out of an overlay drags the address back with it',
+     '    if (location.href !== want) { setAddress(want); hashIsOurs = true; }',
+     '    if (false) {}'),
     # The card's side padding differs between the two CSS blocks; the slot
     # width handed to the browser has to know that. Sabotage = the old single
     # wide number, written out again instead of derived.

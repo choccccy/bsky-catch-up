@@ -96,6 +96,38 @@ test("Back closes the lightbox instead of leaving the page", async () => {
   assert.deepEqual(page.ids(), ["G"], "and the catch-up is still on screen, not restarted");
 });
 
+/* Closing an overlay rewinds the history entry it pushed, and that rewind is
+   ASYNCHRONOUS. If a catch-up starts while it is in flight, writeHash rewrites
+   the fragment on the entry the page is still sitting on -- the overlay's --
+   so the entry underneath goes on describing the catch-up that was running
+   when the overlay opened. Landing on it changes the fragment, which fires
+   hashchange, which this page reads as "start that catch-up": closing the
+   settings after switching feeds threw the reader back to the feed they had
+   just left.
+   The ordering is forced here rather than waited for. Going through
+   startDate() would race -- its own awaits let the rewind land first on a
+   quick machine, which is exactly why this reached CI green from here and
+   red there. Calling writeHash directly is what startCatchup does, at the one
+   moment that matters. */
+test("a catch-up that starts while an overlay is closing keeps its address", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("TL", a, 10))] } });
+  await page.startDate(h.BASE);
+  const hash = () => page.window.location.hash;
+  const before = hash();
+  assert.match(before, /^#from=/, "the running catch-up is in the address");
+
+  page.$("#btnSettings").click();
+  page.$("#btnCloseDrawer").click();              // the rewind is now in flight
+  // A new catch-up lands before it arrives.
+  page.eval(`writeHash("date", ${h.BASE}, null, { kind: "feed", uri: "at://did:plc:f/app.bsky.feed.generator/g" })`);
+  const started = hash();
+  assert.match(started, /feed=/, "and it wrote itself into the address");
+
+  await h.wait(60);                                // the rewind arrives
+  assert.equal(hash(), started, "which the rewind out of the overlay must not undo");
+  assert.deepEqual(page.ids(), ["TL"], "and nothing was restarted underneath the reader");
+});
+
 test("closing an overlay gives its history entry back", async () => {
   // Otherwise every picture opened would leave an entry behind, and Back
   // would need pressing once per picture before it did anything at all.
