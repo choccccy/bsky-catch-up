@@ -125,23 +125,75 @@ test("the reposter's name links to their profile", async () => {
   assert.equal(link.getAttribute("href"), "https://bsky.app/profile/u2.test");
 });
 
-test("only the avatar itself links to the profile, not the column below it", async () => {
-  // Regression test for 0.8.2. jsdom does no layout, so check the styles
-  // that keep the link from stretching to the post's full height. The height
-  // is compared against the avatar's own rather than against a number: both
-  // read it from --av, and that they AGREE is the actual invariant. jsdom
-  // doesn't resolve custom properties, so a literal here would only ever
-  // have been testing what the token is spelled.
+test("only the avatar itself links to the profile, not the space beside it", async () => {
+  // Regression test for 0.8.2, when the link stretched down the avatar's
+  // whole column. The column is gone -- the avatar sits in the post's top
+  // bar now -- but a stretching item in that bar would be the same bug, a
+  // link taller than the face inside it. jsdom does no layout, so check the
+  // styles that prevent it. The height is compared against the avatar's own
+  // rather than against a number: both read it from --av, and that they
+  // AGREE is the actual invariant. jsdom doesn't resolve custom properties,
+  // so a literal here would only ever have been testing what the token is
+  // spelled.
   const page = await h.loadPage({ server: { timeline: [h.item(h.post("A", a, 10))] } });
   await page.startDate(h.BASE);
   const post = page.article("A");
   const link = post.querySelector(":scope > .pv > .avatar-link");
   assert.ok(link, "avatar wrapped in .avatar-link");
   const cs = page.window.getComputedStyle(link);
-  assert.equal(cs.alignSelf, "flex-start");
+  assert.notEqual(cs.alignSelf, "stretch", "the link must not be stretched by its row");
   const avatarH = page.window.getComputedStyle(post.querySelector(".avatar")).height;
   assert.ok(avatarH && avatarH !== "auto", "the avatar is given a height of its own");
   assert.equal(cs.height, avatarH, "the link is pinned to the avatar's height, not stretched");
+});
+
+const cssOf = () => {
+  const src = require("fs").readFileSync(h.PAGE_PATH, "utf8");
+  return src.slice(src.indexOf("<style>"), src.indexOf("</style>"));
+};
+
+test("a post is a top bar and a body that spans the card", async () => {
+  // The avatar used to hold open a column down the post's whole height and
+  // everything else was squeezed into what was left, which cost the text 50px
+  // of measure and left the space under the avatar empty. The identity line
+  // now sits in a top bar beside the avatar, and the body spans both of .pv's
+  // columns. Two halves to the invariant, and each can break alone:
+  //   the MARKUP has to put .pv-head outside .pv-body (otherwise the bar is
+  //   back inside the indented column), and the CSS has to let .pv-body cross
+  //   the avatar's track (otherwise it is indented whatever the markup says).
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("A", a, 10))] } });
+  await page.startDate(h.BASE);
+  const pv = page.article("A").querySelector(":scope > .pv:last-child");
+  assert.ok(pv.querySelector(":scope > .pv-head"), "the name/handle/time line is in the top bar, not the body");
+  assert.ok(pv.querySelector(":scope > .pv-body > .pv-text"), "the text is in the body");
+  // jsdom does no layout, so the span itself is read out of the stylesheet.
+  const css = cssOf().replace(/\/\*[\s\S]*?\*\//g, "");
+  const areas = /\.pv\s*\{[^}]*grid-template-areas:([^;}]+)/.exec(css);
+  assert.ok(areas, ".pv lays its parts out with named grid areas");
+  const rows = [...areas[1].matchAll(/"([^"]+)"/g)].map(m => m[1].trim().split(/\s+/));
+  const bodyRow = rows.find(cells => cells.includes("body"));
+  assert.ok(bodyRow, "one row of the grid is the body");
+  assert.deepEqual(bodyRow, bodyRow.map(() => "body"),
+    "the body must own every column of its row, or it is indented under the avatar again");
+});
+
+test("the thread line runs beside the text, not through it", async () => {
+  // It used to run down the middle of the avatar's column, which was empty.
+  // With the body spanning the card that column is text, so the line moved
+  // out into the card's side padding -- i.e. to a NEGATIVE offset from the
+  // content box. Every --rail-x there is has to stay negative (the narrow
+  // block sets its own, because the padding is smaller there), and the rules
+  // that draw a rail have to read it rather than carry their own number.
+  const css = cssOf().replace(/\/\*[\s\S]*?\*\//g, "");
+  const values = [...css.matchAll(/--rail-x\s*:\s*([^;}]+)/g)].map(m => m[1].trim());
+  assert.ok(values.length, "the rail's offset is a variable");
+  for (const v of values)
+    assert.match(v, /^-/, `--rail-x: ${v} would put the thread line over the post's text`);
+  const rails = [...css.matchAll(/\.pv-body::(?:after|before)\s*\{([^}]*)\}/g)].map(m => m[1]);
+  assert.ok(rails.length, "a thread rail is drawn on .pv-body");
+  for (const decls of rails)
+    assert.match(decls, /left\s*:\s*var\(--rail-x\)/,
+      "a rail that hard-codes its offset will drift from the padding it hides in");
 });
 
 /* On a narrow screen the top bar's buttons go icon-only, and they do it in

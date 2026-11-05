@@ -409,6 +409,22 @@ GUARDS = [
     ('the picture slot forgets the card it sits in',
      'function postInnerPad() { return 2 * (narrowNow() ? POST_PAD_NARROW : POST_PAD) + 2; }',
      'function postInnerPad() { return 24; }'),
+    # A post is a top bar and a body that spans the card. Sabotage each half
+    # separately: the markup can fold the bar back into the body, and the CSS
+    # can leave the body in the column beside the avatar.
+    ('the top bar folds back into the indented column',
+     '''    ${headHtml(a, { href: postUrl(p), timeHtml: esc(fmtPostTime(time, feedT ?? time)), timeTitle: new Date(time).toLocaleString() })}
+    <div class="pv-body">''',
+     '''    <div class="pv-body">
+      ${headHtml(a, { href: postUrl(p), timeHtml: esc(fmtPostTime(time, feedT ?? time)), timeTitle: new Date(time).toLocaleString() })}'''),
+    ('the body is indented under the avatar again',
+     'grid-template-areas:"av head" "body body"',
+     'grid-template-areas:"av head" ". body"'),
+    # The thread line hides in the card's side padding now that the gutter it
+    # used to run down is the post's text. Sabotage = put it back over it.
+    ('the thread line runs over the post text',
+     '  --rail-x:-7px;',
+     '  --rail-x:19px;'),
 ]
 
 
