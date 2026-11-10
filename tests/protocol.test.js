@@ -127,6 +127,10 @@ test("a quoted post is fetched and shown, not just labelled", async () => {
   const body = page.$("#feed").textContent;
   assert.match(body, /alice quotes/);
   assert.match(body, /carol quoted/, "the quoted post's text is shown, not just 'Quotes another post'");
+  // And ONLY shown: naming it as well says it twice, and with the quote put
+  // first those words would be left in the body pointing at a box that has
+  // moved to the top of the card.
+  assert.doesNotMatch(body, /Quotes another post/, "the box is there, so the label isn't");
   const got = page.requests.find(r => r.nsid === "com.atproto.repo.getRecord" && r.search.get("repo") === carol);
   assert.equal(got.host, "carol.example");
 });

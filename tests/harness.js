@@ -110,6 +110,9 @@ const embeds = {
   link: (uri = "https://example.com/article") => ({ $type: "app.bsky.embed.external#view", external: { uri, title: "An article", description: "About things", thumb: "lthumb.jpg" } }),
   gif: () => embeds.link("https://media.tenor.com/abc/funny.gif"),
   quote: p => ({ $type: "app.bsky.embed.record#view", record: viewRecord(p) }),
+  /** A quote with pictures of its own: both at once, which is the shape that
+   *  the body-order settings have to take apart (see bodyOrder). */
+  quoteWithMedia: (p, media = embeds.images(1)) => ({ $type: "app.bsky.embed.recordWithMedia#view", media, record: embeds.quote(p) }),
   unknown: () => ({ $type: "app.bsky.embed.somethingNew#view" }),
 };
 /** Raw record embeds (what's stored in a post record). */
@@ -454,10 +457,13 @@ async function loadPage({ url = "https://example.test/", session = true, setting
     /** Evaluates an expression in the page and returns a plain copy (use this
      *  for arrays/objects: values from the page's realm fail deepStrictEqual). */
     json: expr => JSON.parse(w.eval(`JSON.stringify(${expr})`)),
+    /* Both of these read a card's OWN text, so the path is direct children all
+     * the way down: a descendant match would find a quoted post's text instead
+     * whenever that comes first (the quote-first setting, see bodyOrder). */
     /** Post ids ("post <id>" texts) of main posts in the feed, in order. */
-    ids: () => $$("#feed .post").map(el => el.querySelector(":scope > .pv:last-child .pv-text").textContent.replace(/^post /, "")),
+    ids: () => $$("#feed .post").map(el => el.querySelector(":scope > .pv:last-child > .pv-body > .pv-text").textContent.replace(/^post /, "")),
     /** The <article> for a post id. */
-    article: id => $$("#feed .post").find(el => el.querySelector(":scope > .pv:last-child .pv-text").textContent === `post ${id}`),
+    article: id => $$("#feed .post").find(el => el.querySelector(":scope > .pv:last-child > .pv-body > .pv-text").textContent === `post ${id}`),
     toast: () => $("#toast").textContent,
     /** Records created in the simulated repo (likes, reposts). */
     records: () => w.__records,

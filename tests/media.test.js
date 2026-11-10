@@ -773,3 +773,135 @@ test("a gallery asks for a picture the size of the slot it lands in", async () =
   const w = parseInt(land.$(".gallery img").getAttribute("sizes"), 10);
   assert.ok(w > declared && w <= 520, `landscape slot ${w}px is wider but still under the strip`);
 });
+
+/* ---------- what a card is made of, top to bottom (bodyOrder) ----------
+   One setting reorders the words, the attachment, the button row and -- when
+   the quote leads -- the top bar itself; the default is the layout every
+   Bluesky-like client uses. The whole card is read, not just the body, since
+   the quote and the "Reposted by" line can sit above the bar. DOM order is
+   written to match reading order, so this is what you see down the card. */
+const partsOf = (page, id) => cardParts(page.article(id).querySelector(":scope > .pv:last-child"));
+function cardParts(pv) {
+  const out = [];
+  for (const el of pv.children) {
+    const c = el.classList[0];
+    if (c === "avatar-link") continue;              // sits beside the bar, not above or below it
+    else if (c === "pv-head") out.push("head");
+    else if (c === "pv-lead" || c === "pv-body") out.push(...bodyParts(el));
+    else out.push(c);                               // post-meta-line
+  }
+  return out;
+}
+/* Class names of a body's parts, with the two kinds of .embed told apart:
+   "quote" is the post being quoted, "media" the post's own attachment. */
+const bodyParts = body => [...body.children].map(el => el.classList[0] !== "embed" ? el.classList[0]
+  : el.firstElementChild?.classList.contains("quote") ? "quote" : "media");
+
+async function layoutPage() {
+  const quoted = h.post("Q", h.actor(9), -1000);
+  return h.loadPage({ server: { timeline: [
+    h.item(h.post("QP", a, 10, { embed: h.embeds.quote(quoted) })),
+    h.item(h.post("IMG", a, 11, { embed: h.embeds.images(1) })),
+    h.item(h.post("TXT", a, 12)),
+  ] } });
+}
+
+test("by default a post reads words, attachment, buttons", async () => {
+  const page = await layoutPage();
+  await page.startDate(h.BASE);
+  assert.deepEqual(partsOf(page, "QP"), ["head", "pv-text", "quote", "actions"]);
+  assert.deepEqual(partsOf(page, "IMG"), ["head", "pv-text", "media", "actions"]);
+  assert.deepEqual(partsOf(page, "TXT"), ["head", "pv-text", "actions"]);
+});
+
+test("quote-first puts the quoted post before the reaction to it", async () => {
+  const page = await layoutPage();
+  await page.startDate(h.BASE);
+  await page.setSetting("quoteFirst", true);
+  assert.deepEqual(partsOf(page, "QP"), ["quote", "head", "pv-text", "actions"], "the bar comes down with its own words");
+  assert.deepEqual(partsOf(page, "IMG"), ["head", "pv-text", "media", "actions"], "only quote posts move");
+  assert.deepEqual(partsOf(page, "TXT"), ["head", "pv-text", "actions"]);
+});
+
+test("reordering keeps the “Replying to” line at the top of the body", async () => {
+  const parent = h.post("PAR", h.actor(2), 5);   // a followed author, so the reply isn't filtered out
+  const reply = h.post("R", a, 10, { embed: h.embeds.quote(h.post("Q", h.actor(9), -1000)), replyTo: parent });
+  const page = await h.loadPage({ settings: { quoteFirst: true, replyContext: "none" }, server: {
+    timeline: [h.item(reply, { parent })],
+  } });
+  await page.startDate(h.BASE);
+  assert.deepEqual(partsOf(page, "R"), ["quote", "head", "reply-to", "pv-text", "actions"]);
+});
+
+/* A quote with pictures of its own (app.bsky.embed.recordWithMedia) is the
+   case quote-first has to take apart: only the quote moves, and the
+   pictures stay with the words that introduce them. */
+async function bothPage(settings) {
+  const quoted = h.post("Q", h.actor(9), -1000);
+  return h.loadPage({ settings, server: {
+    timeline: [h.item(h.post("BOTH", a, 10, { embed: h.embeds.quoteWithMedia(quoted) }))],
+  } });
+}
+const bothCases = [
+  ["by default", {}, ["head", "pv-text", "media", "quote", "actions"]],
+  ["quote first", { quoteFirst: true }, ["quote", "head", "pv-text", "media", "actions"]],
+];
+for (const [name, settings, want] of bothCases) {
+  test(`a quote with pictures of its own, ${name}`, async () => {
+    const page = await bothPage(settings);
+    await page.startDate(h.BASE);
+    assert.deepEqual(partsOf(page, "BOTH"), want);
+  });
+}
+
+test("quote first: a quote that quotes something leads with the inner box", async () => {
+  // The shape that showed this up: A quotes B, B quotes C. B is drawn as a
+  // .quote box, and quote-first applies inside it too -- C's box leads it,
+  // then B's own name line. The lead has to BE the box's first child, or the
+  // rule that gives it room underneath can't find it and B's 20px avatar
+  // sits on the inner box's border.
+  const inner = h.post("C", h.actor(9), -2000);
+  const mid = h.post("B", h.actor(2), -1000, { embed: h.embeds.quote(inner) });
+  const page = await h.loadPage({ settings: { quoteFirst: true }, server: {
+    timeline: [h.item(h.post("A", a, 10, { embed: h.embeds.quote(mid) }))],
+  } });
+  await page.startDate(h.BASE);
+  const outer = page.article("A").querySelector(".quote");
+  assert.deepEqual([...outer.children].map(el => el.className.split(" ")[0]),
+    ["embed", "pv-head", "pv-text", "actions"], "the inner box first, then B's own name line");
+  assert.ok(outer.querySelector(":scope > .embed > .quote"), "and what leads it is the quoted post");
+  // The gap under it is the box's own padding, the way a card's lead quote
+  // takes the card's padding (see feed.test.js).
+  const css = require("node:fs").readFileSync(h.PAGE_PATH, "utf8");
+  const pad = /\.quote\{[^}]*padding:\s*([\d.]+)px/.exec(css);
+  const lead = /\.quote > \.embed:first-child\{[^}]*margin-bottom:\s*([\d.]+)px/.exec(css);
+  assert.ok(pad && lead, "both numbers are in the stylesheet");
+  assert.equal(lead[1], pad[1], "the lead holds the name line off by the box's own padding");
+});
+
+test("quote first: a repost's line stays with the bar, below the quote", async () => {
+  const quoted = h.post("Q", h.actor(9), -1000);
+  const page = await h.loadPage({ settings: { quoteFirst: true }, server: {
+    timeline: [h.item(h.post("QP", a, 10, { embed: h.embeds.quote(quoted) }), { repostBy: h.actor(3), repostMin: 20 })],
+  } });
+  await page.startDate(h.BASE);
+  assert.deepEqual(partsOf(page, "QP"), ["quote", "post-meta-line", "head", "pv-text", "actions"]);
+});
+
+test("a reposted post keeps its line above the bar by default", async () => {
+  const page = await h.loadPage({ server: {
+    timeline: [h.item(h.post("P", a, 10), { repostBy: h.actor(3), repostMin: 20 })],
+  } });
+  await page.startDate(h.BASE);
+  assert.deepEqual(partsOf(page, "P"), ["post-meta-line", "head", "pv-text", "actions"]);
+});
+
+test("a quoted post's own body is reordered the same way", async () => {
+  const inner = h.post("I", h.actor(8), -2000);
+  const quoted = h.post("Q", h.actor(9), -1000, { embed: h.embeds.quote(inner), rawEmbed: h.raw.quote(inner) });
+  const page = await h.loadPage({ settings: { quoteFirst: true }, server: {
+    timeline: [h.item(h.post("P", a, 10, { embed: h.embeds.quote(quoted) }))],
+  } });
+  await page.startDate(h.BASE);
+  assert.deepEqual(bodyParts(page.$(`.quote[data-uri="${quoted.uri}"]`)), ["quote", "pv-head", "pv-text", "actions"]);
+});

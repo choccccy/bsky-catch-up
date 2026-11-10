@@ -177,23 +177,74 @@ test("a post is a top bar and a body that spans the card", async () => {
     "the body must own every column of its row, or it is indented under the avatar again");
 });
 
-test("the thread line runs beside the text, not through it", async () => {
-  // It used to run down the middle of the avatar's column, which was empty.
-  // With the body spanning the card that column is text, so the line moved
-  // out into the card's side padding -- i.e. to a NEGATIVE offset from the
-  // content box. Every --rail-x there is has to stay negative (the narrow
-  // block sets its own, because the padding is smaller there), and the rules
-  // that draw a rail have to read it rather than carry their own number.
+test("stacked cards are as far apart as side-by-side ones", async () => {
+  // One gap, used twice: the space below a card and the space between two
+  // columns are the same thing, so they read as one grid rather than as a
+  // dense ribbon beside a roomy one. Both have to come from --tile-gap --
+  // two literals that happen to match today would drift the first time one
+  // of them was tuned.
   const css = cssOf().replace(/\/\*[\s\S]*?\*\//g, "");
-  const values = [...css.matchAll(/--rail-x\s*:\s*([^;}]+)/g)].map(m => m[1].trim());
-  assert.ok(values.length, "the rail's offset is a variable");
-  for (const v of values)
-    assert.match(v, /^-/, `--rail-x: ${v} would put the thread line over the post's text`);
-  const rails = [...css.matchAll(/\.pv-body::(?:after|before)\s*\{([^}]*)\}/g)].map(m => m[1]);
-  assert.ok(rails.length, "a thread rail is drawn on .pv-body");
-  for (const decls of rails)
-    assert.match(decls, /left\s*:\s*var\(--rail-x\)/,
-      "a rail that hard-codes its offset will drift from the padding it hides in");
+  // Any rule may say .post{...} (the tiling block has one of its own), so
+  // the one that matters is whichever declares the gap.
+  const gaps = [...css.matchAll(/\.post\{([^}]*)\}/g)].map(m => m[1]).filter(d => /margin-bottom/.test(d));
+  assert.equal(gaps.length, 1, "one rule sets the gap below a card");
+  assert.match(gaps[0], /margin-bottom:\s*var\(--tile-gap/, "the gap below a card is the column gap");
+  const band = /\.band\{([^}]*)\}/.exec(css);
+  assert.ok(band, "the band lays the columns out");
+  assert.match(band[1], /column-gap:\s*var\(--tile-gap/, "and so is the gap between columns");
+});
+
+test("a quote put first holds the top bar as far off as the card edge does", async () => {
+  // On an ordinary post the bar stands one card padding below the card's
+  // top edge. On a quote-first post it stands below a bordered box instead,
+  // and the first thing in it is a 32px avatar, not a line of text: the gap
+  // that separates words from an attachment reads as half a gap there. So
+  // the lead's own margin plus the grid's row-gap come to the card's top
+  // padding, and the bar sits the same distance off either way.
+  const css = cssOf().replace(/\/\*[\s\S]*?\*\//g, "");
+  const num = (re, what) => {
+    const m = re.exec(css);
+    assert.ok(m, `${what} is set in the stylesheet`);
+    return parseFloat(m[1]);
+  };
+  const padTop = num(/\.post\{[^}]*padding:\s*([\d.]+)px/, "the card's padding");
+  const rowGap = num(/\.pv\{[^}]*row-gap:\s*([\d.]+)px/, "the grid's row gap");
+  const lead = num(/\.pv-lead\{[^}]*margin-bottom:\s*([\d.]+)px/, "the lead's margin");
+  assert.equal(lead + rowGap, padTop, `a leading quote holds the bar ${lead + rowGap}px off, the card edge ${padTop}px`);
+});
+
+test("the lead and meta rows are above the bar in the grid, not just in the DOM", async () => {
+  // .pv is a grid, so what the eye sees is the ROW ORDER in
+  // grid-template-areas, not the order the markup is written in. Writing the
+  // lead first and then naming its row below "av head" would put a quoted
+  // post between the bar and the words -- the very discontinuity the setting
+  // exists to remove -- with every DOM-order test still passing.
+  const css = cssOf().replace(/\/\*[\s\S]*?\*\//g, "");
+  const rowsOf = sel => {
+    const m = new RegExp(`${sel.replace(/\./g, "\\.")}\\{[^}]*grid-template-areas:([^;}]+)`).exec(css);
+    assert.ok(m, `${sel} sets the rows`);
+    // Each row is "<area> <area>"; the first name is enough to say which row it is.
+    return [...m[1].matchAll(/"([^"]+)"/g)].map(x => x[1].trim().split(/\s+/)[0]);
+  };
+  assert.deepEqual(rowsOf(".pv"), ["av", "body"], "an ordinary post is the bar and the body");
+  assert.deepEqual(rowsOf(".pv.has-lead"), ["lead", "av", "body"], "a lead quote comes before the bar");
+  assert.deepEqual(rowsOf(".pv.has-meta"), ["meta", "av", "body"], "so does the \u201cReposted by\u201d line");
+  assert.deepEqual(rowsOf(".pv.has-lead.has-meta"), ["lead", "meta", "av", "body"],
+    "and with both, the line sits between the quote and the bar it belongs to");
+});
+
+test("nothing draws a thread rail any more", async () => {
+  // The 2px line down the card's side padding went in 1.4.0; what marks a
+  // thread is the seam between two fused cards. Half-removing it -- a rail
+  // left behind on one of the four selectors that used to draw one, or
+  // brought back without the variable that kept it clear of the text --
+  // would be a stray hairline on some posts and not others, which is
+  // exactly the kind of thing nobody notices in a screenshot.
+  const css = cssOf().replace(/\/\*[\s\S]*?\*\//g, "");
+  const painted = [...css.matchAll(/::(?:after|before)\s*\{([^}]*)\}/g)].map(m => m[1])
+    .filter(decls => /background\s*:\s*var\(--line\)/.test(decls));
+  assert.deepEqual(painted, [], "a pseudo-element painted in the line colour is a rail");
+  assert.doesNotMatch(css, /--rail-x/, "and the offset it hung on is gone with it");
 });
 
 /* On a narrow screen the top bar's buttons go icon-only, and they do it in

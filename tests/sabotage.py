@@ -420,11 +420,60 @@ GUARDS = [
     ('the body is indented under the avatar again',
      'grid-template-areas:"av head" "body body"',
      'grid-template-areas:"av head" ". body"'),
-    # The thread line hides in the card's side padding now that the gutter it
-    # used to run down is the post's text. Sabotage = put it back over it.
-    ('the thread line runs over the post text',
-     '  --rail-x:-7px;',
-     '  --rail-x:19px;'),
+    # Inside a quote, a quote put first needs the same room underneath.
+    # Sabotage = none at all, which is what put a 20px avatar on the inner
+    # box's border.
+    ('a quote inside a quote crowds the name line under it',
+     '.quote > .embed:first-child{margin-top:0; margin-bottom:8px}',
+     '.quote > .embed:first-child{margin-top:0}'),
+    # A quote put first stands the bar off by the card's own top padding.
+    # Sabotage = the 8px that separates words from an attachment, which is
+    # the gap that looked wrong against an avatar.
+    ('a quote put first crowds the top bar under it',
+     '.pv-lead{grid-area:lead; min-width:0; margin-bottom:9px}',
+     '.pv-lead{grid-area:lead; min-width:0; margin-bottom:5px}'),
+    # Down the page and across the columns are the same gap, taken from the
+    # same variable. Sabotage = half it again, back to where a feed read as
+    # one dense ribbon.
+    ('stacked cards are crammed together',
+     '.post{background:var(--surface); border:1px solid var(--line); border-radius:12px; margin-bottom:var(--tile-gap, 16px);',
+     '.post{background:var(--surface); border:1px solid var(--line); border-radius:12px; margin-bottom:8px;'),
+    # The setting that reorders a post's body (bodyOrder). Sabotage it by
+    # ignoring it, which is the whole-feature failure: the setting is in the
+    # drawer and changes nothing.
+    # Quote-first moves the top bar down with the words it names, and the
+    # "Reposted by" line with it. Sabotage = leave them above the quote,
+    # which is the discontinuity the setting exists to remove.
+    ('the top bar stays above a quote put first',
+     """    ${lead ? `<div class="pv-lead">${lead}</div>` : ""}
+    ${meta}
+    <a class="avatar-link" href="${esc(profileUrl(a))}" target="_blank" rel="noopener" tabindex="-1">${avatar}</a>
+    ${headHtml(a, { href: postUrl(p), timeHtml: esc(fmtPostTime(time, feedT ?? time)), timeTitle: new Date(time).toLocaleString() })}""",
+     """    ${meta}
+    <a class="avatar-link" href="${esc(profileUrl(a))}" target="_blank" rel="noopener" tabindex="-1">${avatar}</a>
+    ${headHtml(a, { href: postUrl(p), timeHtml: esc(fmtPostTime(time, feedT ?? time)), timeTitle: new Date(time).toLocaleString() })}
+    ${lead ? `<div class="pv-lead">${lead}</div>` : ""}"""),
+    ('quote-first ordering is ignored',
+     '  if (quote && settings.quoteFirst) return { lead: quote, body: text + media + actions };',
+     '  if (false) return { lead: quote, body: text + media + actions };'),
+    # Quote-first moves the quote ALONE: a post's own pictures stay with the
+    # words that introduce them. Sabotage = take the pictures up with it.
+    ('quote-first drags the post\'s own pictures above the quote',
+     '  if (quote && settings.quoteFirst) return { lead: quote, body: text + media + actions };',
+     '  if (quote && settings.quoteFirst) return { lead: media + quote, body: text + actions };'),
+    # A quote with pictures of its own is two things, and only the quote may
+    # move. Sabotage = hand bodyOrder the pair as one block again, which is
+    # what dragged the poster's own pictures up above the quote.
+    ('a quote with pictures of its own moves as one block',
+     '    return { media: box(embedHtml(e.media, p, depth)), quote: box(quoteHtml(e.record?.record, depth)) };',
+     '    return { media: "", quote: box(embedHtml(e.media, p, depth) + quoteHtml(e.record?.record, depth)) };'),
+    # The grid decides what is ABOVE the bar; the DOM order the guard above
+    # moves decides only reading and tab order. Sabotage = name the lead's
+    # row below the bar's, which drops a quoted post between the bar and the
+    # words with the markup left exactly as it is.
+    ('the grid puts a quote put first below the bar',
+     '.pv.has-lead{grid-template-areas:"lead lead" "av head" "body body"}',
+     '.pv.has-lead{grid-template-areas:"av head" "lead lead" "body body"}'),
 ]
 
 

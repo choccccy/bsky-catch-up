@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.3.3
+  Version 1.4.0
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -404,8 +404,8 @@ TILED MODE ("Tile posts side by side", settings.tile)
   padding. There is no avatar gutter any more: .pv is a two-row grid, and
   --av / --av-gap on :root measure that bar's one row rather than a column
   everything else had to line up against. The thread lines that used to run
-  down the gutter now run down the card's side padding instead, at --rail-x,
-  which the narrow block overrides because the padding there is smaller.
+  down that gutter are gone altogether: a reply right after its post is
+  marked by being fused onto it (see "reply threads" in the CSS).
 
   There is a SECOND block beside it, @media (hover:none), and the difference
   between the two keys is the thing to get right when adding to either:
@@ -532,9 +532,11 @@ EXTENDING
     and writes through it. Cap the map: nothing prunes it by itself. Don't make
     the map link: true -- which feeds someone reads isn't theirs to share by
     accident, and it would mean nothing to whoever opened the link.
-  - New embed type: add a case to embedHtml() (and quoteHtml() for records),
-    to postKinds() so the "Only show posts with" filter knows it, and to
-    rawMedia()/mediaLabels() so deeply nested posts can summarize it.
+  - New embed type: add a case to embedHtml() -- and to embedParts() too if
+    it carries a record, which is where a quote is split from a post's own
+    attachment, plus quoteHtml() to draw the record itself -- to postKinds()
+    so the "Only show posts with" filter knows it, and to rawMedia() /
+    mediaLabels() so deeply nested posts can summarize it.
   - New post action: add a button in actionsHtml() with data-act="...", then
     handle it in the delegated document click listener. An action on the
     AUTHOR rather than the post carries its own id on the button instead of
@@ -694,6 +696,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.4.0] - 2026-11-09
+
+### Added
+
+- **"Quote posts show the quote first" setting.** A quote post reads
+  quote-then-reaction instead of reaction-then-quote: you see the thing
+  being quoted before the answer to it. It also pulls apart the two
+  near-identical rows of buttons a quote post otherwise stacks one on the
+  other, the quoted post's and the quoting post's, since the quoting post's
+  own words end up between them. Off by default.
+- On a post that quotes another **and has pictures of its own**, only the
+  quote moves: the pictures stay with the words that introduce them, rather
+  than being dragged up above a stranger's post.
+- With the quote first, the name bar comes down with it: the quoted post
+  leads the card, and the avatar, name, time, "Reposted by" line, words,
+  pictures and buttons of the post quoting it follow as one block. A name
+  bar sitting on top of somebody else's post was the same discontinuity the
+  button row had, one end of the card up.
+
+### Changed
+
+- **Cards are a full column gap apart.** The space between one post and the
+  next down the page is now the same space as the one between two columns
+  side by side, instead of half of it. A feed that read as one dense ribbon
+  now reads as a grid both ways.
+- **The thread rail is gone.** The 2px line down a card's side padding, from
+  a parent post to the reply under it and across the seam between two fused
+  cards, said nothing that the seam and the parent card weren't already
+  saying -- and with cards further apart, the seam says it louder than it
+  did. A reply right after the post it answers is still fused onto it as one
+  card.
 
 ## [1.3.3] - 2026-11-04
 
@@ -2033,7 +2067,7 @@ site with this release.
      from the <link> below (which is why the icon is not written out here: that
      base64 is 14KB, and it may appear in this file exactly once). -->
 <link rel="manifest" id="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Bluesky%20Catch-up%22%2C%22short_name%22%3A%22Catch-up%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230F141B%22%2C%22theme_color%22%3A%22%230F141B%22%7D">
-<title>Catch-up v1.3.3 · Bluesky</title>
+<title>Catch-up v1.4.0 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -2112,10 +2146,6 @@ site with this release.
      needs. Nothing lines up against them any more, which is why the old
      --av-col went: there is no gutter left to name. */
   --av:32px; --av-gap:10px;
-  /* Where a thread line runs: in the card's side padding, clear of the text,
-     measured from the content box's left edge (so it is negative). The
-     narrow block overrides it, because the padding there is smaller. */
-  --rail-x:-7px;
   /* The tallest a picture may be: 90% of the window below the top bar, so
      even the biggest leaves a margin above and below it.
      Written twice: svh is the SMALL viewport, the window with the phone
@@ -2250,9 +2280,10 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px calc(120px + env(saf
   column-gap:var(--tile-gap, 16px); justify-content:center; align-items:start}
 :root[data-tile] .band > .day,
 :root[data-tile] .band > .hour{grid-column:1 / -1}
-/* flow-root keeps each post's own margins (8px between cards, 18px around
-   an anchor) INSIDE the tile, so the spacing is the same as in one column
-   and the tile's measured height is exactly what its row span must cover. */
+/* flow-root keeps each post's own margins (--tile-gap between cards, 18px
+   around an anchor) INSIDE the tile, so the spacing is the same as in one
+   column and the tile's measured height is exactly what its row span must
+   cover. */
 :root[data-tile] .tile{display:flow-root; min-width:0}
 /* Spans are measured once, when the batch lands in the DOM.
    content-visibility:auto would hand back the 220px contain-intrinsic-size
@@ -2388,7 +2419,11 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px calc(120px + env(saf
   --band-bg:var(--hour-bg); --band-top:2px solid var(--accent)}
 /* An hour divider right after a day divider shouldn't add a second big gap. */
 .day + .hour{margin-top:0}
-.post{background:var(--surface); border:1px solid var(--line); border-radius:12px; margin-bottom:8px; padding:12px 14px 6px; content-visibility:auto; contain-intrinsic-size:auto 220px}
+/* The gap below a card is the SAME gap as the one between two columns, and
+   is literally that gap: --tile-gap is set from TILE_GAP by applyLook
+   whether or not the feed is tiled, so the two can never drift apart. The
+   fallback is for the first paint, before applyLook has run. */
+.post{background:var(--surface); border:1px solid var(--line); border-radius:12px; margin-bottom:var(--tile-gap, 16px); padding:12px 14px 6px; content-visibility:auto; contain-intrinsic-size:auto 220px}
 /* The start post (post / resume mode) drops its card styling and sits on a
    full-width highlight band with heavy rules above and below.
    content-visibility must be off here: it implies paint containment, which
@@ -2415,33 +2450,39 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px calc(120px + env(saf
    the avatar's width is still what sets the gap beside it in the bar. */
 .pv{display:grid; grid-template-columns:auto 1fr; column-gap:var(--av-gap); row-gap:3px;
   grid-template-areas:"av head" "body body"}
+/* Two rows that only exist when there is something to put in them, so an
+   ordinary post is laid out exactly as it was: `lead` is a quote the
+   setting has put first, above the bar (see bodyOrder), and `meta` the
+   "Reposted by" line, which sits between the two so it stays with the bar
+   and not on top of somebody else's post. */
+.pv.has-lead{grid-template-areas:"lead lead" "av head" "body body"}
+.pv.has-meta{grid-template-areas:"meta meta" "av head" "body body"}
+.pv.has-lead.has-meta{grid-template-areas:"lead lead" "meta meta" "av head" "body body"}
+/* The quote leads the card, so it takes no gap above it. Below it, its own
+   margin tops the grid's 3px row-gap up to the 12px of the card's own top
+   padding: the bar then stands the same distance off the box above it as it
+   does off the card's edge on an ordinary post. 8px, the gap between a
+   post's words and what it has attached, reads as half of one here: it is
+   measured against a 32px avatar rather than a line of text. The meta line
+   keeps the 6px it had when it sat outside the card. */
+.pv-lead{grid-area:lead; min-width:0; margin-bottom:9px}
+.pv-lead > .embed{margin-top:0}
+.pv > .post-meta-line{grid-area:meta; margin-bottom:3px}
+/* A parent post and the reply under it, inside ONE card. Smaller than the
+   gap between two cards on purpose: these are two parts of one thing. */
 .pv + .pv{margin-top:10px}
 /* ---------- reply threads ----------
-   Parent post shown above a reply, with a vertical thread line joining them.
-   The line used to run down the middle of the avatar's column; there is no
-   column now, so it runs down the card's side padding instead -- a rail
-   beside the text rather than a line through where the text would be.
-   It hangs off .pv-body, not .pv, because .pv-body IS everything below the
-   top bar: the rail starts where it starts, with no arithmetic guessing at
-   how tall the bar came out. .pv-body's left edge is the card's content box,
-   so --rail-x is measured from there. */
-.parent > .pv-body{position:relative}
-.parent > .pv-body::after{content:""; position:absolute; left:var(--rail-x); top:0; bottom:-10px; width:2px; background:var(--line)}
-/* Joined thread cards: when a reply directly follows the post it answers, the
-   two cards are fused into one visual card (.has-next on the upper card,
-   .joined on the lower) and a thread line runs from the upper avatar down
-   to the lower one. Lines stay inside each card's own box because .post
-   uses content-visibility (paint containment would clip anything outside). */
+   A reply that directly follows the post it answers is FUSED onto it: the
+   two cards lose the border and the gap between them (.has-next on the
+   upper, .joined on the lower) and read as one box, which is the whole of
+   how a thread is marked now. There used to be a 2px rail as well, down the
+   card's side padding, from a parent post to the reply under it and across
+   the seam between two fused cards. It went in 1.4.0: a hairline hiding in
+   7px of padding said nothing the seam and the parent card inside the
+   reply's own card weren't already saying, and with cards a full column gap
+   apart the seam says it louder than it did. */
 .post.has-next{margin-bottom:0; border-bottom:0; border-bottom-left-radius:0; border-bottom-right-radius:0}
 .post.joined{margin-top:0; border-top:0; border-top-left-radius:0; border-top-right-radius:0; padding-top:4px}
-.post.has-next > .pv:last-child > .pv-body{position:relative}
-.post.has-next > .pv:last-child > .pv-body::after{content:""; position:absolute; left:var(--rail-x); top:0; bottom:-6px; width:2px; background:var(--line)}
-/* The lower card's stub bridges the seam and stops at the reply's top bar,
-   the way the old line stopped at the reply's avatar. It hangs off .pv
-   rather than .pv-body because it has to reach ABOVE the bar; both boxes
-   have the same left edge, so --rail-x means the same thing on either. */
-.post.joined > .pv:first-child{position:relative}
-.post.joined > .pv:first-child::before{content:""; position:absolute; left:var(--rail-x); top:-4px; height:4px; width:2px; background:var(--line)}
 /* Short reminder of a parent you've already seen: one line, click to expand
    into the full parent post. Spans the card, like the post body it sits in. */
 .parent-mini{display:flex; align-items:center; gap:6px; width:100%; margin:0 0 8px; background:var(--surface-2); border:0; border-radius:8px;
@@ -2571,6 +2612,15 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px calc(120px + env(saf
 .ext-domain{font-size:.8em; color:var(--muted); margin-top:4px; border-top:1px solid var(--line); padding-top:4px}
 .gif{max-width:100%; border-radius:10px; display:block}
 .quote{border:1px solid var(--line); border-radius:10px; padding:8px 10px; overflow-wrap:anywhere}
+/* A quote that quotes something, with the quote put first: the inner box
+   leads this one, exactly as a lead quote leads a card (.pv-lead), and the
+   spacing follows the same rule -- nothing above it beyond the box's own
+   padding, and that same 8px below it, so the name line under it isn't
+   wearing it as a hat. Without this the inner box keeps .embed's 8px on top
+   and nothing underneath, and the 20px avatar below ends up touching it.
+   Only a lead can be the first child here: every other order starts the box
+   with its name line. */
+.quote > .embed:first-child{margin-top:0; margin-bottom:8px}
 .quote .pv-head{font-size:.88em}
 .quote .avatar{width:20px; height:20px}
 .quote .pv-text{font-size:.95em}
@@ -2871,8 +2921,6 @@ body{transition:padding-right .18s ease}
   .bar-actions .btn-label{position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap}
   .pv-handle{max-width:120px}
   .post{padding:12px 10px 6px}
-  /* Less padding to hide a thread line in, so the rail moves in with it. */
-  :root{--rail-x:-5px}
   /* Out past the card's content box by exactly one button's side padding at
      EACH end. A button's padding is invisible, so what that lines up is the
      ICONS: the first one and the last one both land on the card's content
@@ -3111,7 +3159,7 @@ body{transition:padding-right .18s ease}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.3.3";
+const APP_VERSION = "1.4.0";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -3220,7 +3268,7 @@ const DOC = {
 /* Default values for every setting. Saved settings are merged over these at
    load time, so adding a new key here is backwards-compatible. */
 const DEFAULTS = {
-  theme: "system", fontSize: 16, columnWidth: 640, tile: false, tileMax: 2, timeFormat: "absolute", dayDividers: true, hourDividers: true, showCounts: true,
+  theme: "system", fontSize: 16, columnWidth: 640, tile: false, tileMax: 2, timeFormat: "absolute", dayDividers: true, hourDividers: true, showCounts: true, quoteFirst: false,
   showReposts: true, replies: "followed", showQuotes: true, onlyTypes: [], replyContext: "reminder", collapseRepeats: true, showOwn: true, hideFollowed: "off",
   // "Hide people I follow", per feed: {feed at:// URI -> mode} for every feed
   // you have set it on, over hideFollowed above as the fallback for one you
@@ -3279,6 +3327,11 @@ if (!savedSettings._v && savedSettings.hourDividers === false) delete savedSetti
    choose, which no single yes/no could get right for every screen. Drop the
    stale key so it doesn't sit in saved settings forever. */
 delete savedSettings.wholeFullsize;
+/* 1.4.0: actionsAt ("where a post's buttons go") never shipped outside a
+   development build, but a saved value would sit in settings forever --
+   saveSettings keeps every key it finds, and a key with no default can
+   never compare equal to one. */
+delete savedSettings.actionsAt;
 let settings = Object.assign(structuredClone(DEFAULTS), savedSettings);
 delete settings._v;
 /* (more migrations)
@@ -3354,6 +3407,7 @@ const SETTINGS_SCHEMA = [
   { key: "dayDividers", link: true, label: "Day dividers", type: "bool", apply: "render" },
   { key: "hourDividers", link: true, label: "Hour dividers", type: "bool", apply: "render" },
   { key: "showCounts", link: true, label: "Show like/repost counts", type: "bool", apply: "render" },
+  { key: "quoteFirst", link: true, label: "Quote posts show the quote first", sub: "Read the post being quoted, then the reaction to it, instead of the other way round. It also unstacks the two rows of buttons a quote post otherwise ends up with, the quoted post's and the quoting post's, by putting the quoting post's words between them.", type: "bool", apply: "render" },
   { group: "What's in the feed" },
   { key: "showReposts", link: true, label: "Reposts", type: "bool", apply: "render" },
   { key: "replies", link: true, label: "Replies", type: "select", options: [["off", "Hide all"], ["followed", "Only to people I follow"], ["all", "Show all"]], apply: "render" },
@@ -6359,26 +6413,66 @@ function actionsHtml(p) {
     <button class="act right" type="button" data-act="copy" title="Copy link">${ICON.link}</button>
     <a class="act" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Open on ${esc(webLinkHost())}">${ICON.open}</a>`;
 }
+/* The order of the four parts of a post's body: its words, its own
+   attachment, the post it quotes, and the button row. The default is the
+   layout every Bluesky and Twitter-like client uses -- words, attachment,
+   quote, buttons -- and one setting moves it:
+     quoteFirst         a quote post reads quote-then-reaction rather than
+                        reaction-then-quote: you see the thing before the
+                        answer to it. That also pulls the two button rows
+                        apart, the quoted post's and the quoting post's,
+                        which the default stacks against each other with
+                        nothing but the quote's border between them: the
+                        quoting post's words now sit in between.
+   (A second setting, actionsAt, used to offer two other places for the
+   button row. It existed for that stacking and nothing else, so quote-first
+   left it with no job; it went in 1.4.0, unreleased, before anyone had it.)
+   `media` and `quote` are separate because a post can have both (an
+   app.bsky.embed.recordWithMedia: a quote with pictures of its own), and
+   then only the quote moves -- the pictures stay with the words that
+   introduce them. Any of the four parts may be empty.
+
+   Returns {lead, body}. `lead` is what goes ABOVE the post's top bar, which
+   is only ever the quote under quoteFirst: the bar names whoever wrote the
+   words, so it has to sit with the words and not on top of a box by someone
+   else. Everything that attributes the post -- the "Reposted by" line, the
+   bar, the words, the pictures, the buttons -- then follows the quote in one
+   unbroken block (see postViewHtml). */
+function bodyOrder({ text, media, quote, actions }) {
+  if (quote && settings.quoteFirst) return { lead: quote, body: text + media + actions };
+  return { lead: "", body: text + media + quote + actions };
+}
 /* Markup for one post: a top bar (avatar, name, handle, time) and a body
    under it (text, embed, actions) spanning the card. Used for the
    main post and for reply parents. `t` overrides the displayed time (the
    item's sort time); `feedT` is the feed position's time, used to decide
    whether the date is needed (see fmtPostTime); `replyTo` adds a "Replying to @x" line when the parent
-   itself isn't shown. The wrapper's data-uri is how click handlers find
-   which post an action belongs to. */
-function postViewHtml(p, { extraClass = "", replyTo = null, t = null, feedT = null } = {}) {
+   itself isn't shown; `meta` is the "Reposted by" line, which belongs with
+   the bar rather than above the card (see renderItem). The wrapper's
+   data-uri is how click handlers find which post an action belongs to.
+
+   A quote the setting has put first (bodyOrder's `lead`) goes in a row
+   ABOVE the bar, and the meta line in one between the two. Both rows only
+   exist when there is something to put in them, which is what has-lead and
+   has-meta say to the grid. Written in reading order, so the DOM, the eye
+   and the tab order all agree. */
+function postViewHtml(p, { extraClass = "", replyTo = null, t = null, feedT = null, meta = "" } = {}) {
   const a = p.author || {}; const rec = p.record || {};
   const time = t ?? sortAtOf({ post: p });   // the post's own time (for reposts: the original's)
   const avatar = a.avatar ? `<img class="avatar" src="${esc(a.avatar)}" alt="" loading="lazy">` : `<div class="avatar"></div>`;
-  return `<div class="pv ${extraClass}" data-uri="${esc(p.uri)}">
+  const { lead, body } = bodyOrder({
+    text: `<div class="pv-text">${richText(rec.text, rec.facets)}</div>`,
+    ...embedParts(p, 0),
+    actions: `<div class="actions" data-actions="${esc(p.uri)}">${actionsHtml(p)}</div>`,
+  });
+  return `<div class="pv ${extraClass}${lead ? " has-lead" : ""}${meta ? " has-meta" : ""}" data-uri="${esc(p.uri)}">
+    ${lead ? `<div class="pv-lead">${lead}</div>` : ""}
+    ${meta}
     <a class="avatar-link" href="${esc(profileUrl(a))}" target="_blank" rel="noopener" tabindex="-1">${avatar}</a>
     ${headHtml(a, { href: postUrl(p), timeHtml: esc(fmtPostTime(time, feedT ?? time)), timeTitle: new Date(time).toLocaleString() })}
     <div class="pv-body">
       ${replyTo ? `<div class="reply-to">Replying to ${esc(replyTo)}</div>` : ""}
-      <div class="pv-text">${richText(rec.text, rec.facets)}</div>
-      ${p.embed ? `<div class="embed">${embedHtml(p.embed, p, 0)}</div>`
-        : p.record?.embed ? `<div class="embed">${mediaSummaryHtml(p.record.embed, p)}</div>` : ""}
-      <div class="actions" data-actions="${esc(p.uri)}">${actionsHtml(p)}</div>
+      ${body}
     </div>
   </div>`;
 }
@@ -6411,7 +6505,7 @@ function renderItem(it, i, ctx = "none") {
   // are allowed to be wider than the reading column (see the .has-media CSS).
   // postKinds() already works out what a post (and its quote) contains.
   if (wholeMode() && hasWideMedia(p)) el.classList.add("has-media");
-  let html = "";
+  let html = "", meta = "";
   if (isRepost(fi)) {
     const by = fi.reason.by || {};
     // The reposter's name links to their profile, so you can go and turn
@@ -6419,8 +6513,12 @@ function renderItem(it, i, ctx = "none") {
     // text if the feed didn't say who (no handle and no did to link to).
     const byName = esc(by.displayName || by.handle || "someone");
     const byLink = by.handle || by.did ? `<a class="pv-name" href="${esc(profileUrl(by))}" target="_blank" rel="noopener">${byName}</a>` : byName;
+    // Goes INSIDE the post rather than above it, so that a quote the
+    // setting has put first leads the card and this line stays with the bar
+    // it belongs to. A reposted reply shows no parent cards (ctx is "none"),
+    // so nothing can come between the two.
     // it.t for a repost is when it was reposted (fi.reason.indexedAt).
-    html += `<div class="post-meta-line">${ICON.repost}<span>Reposted by ${byLink}</span><span class="repost-time" title="Reposted ${esc(new Date(it.t).toLocaleString())}">${esc(fmtPostTime(it.t, feedT))}</span></div>`;
+    meta = `<div class="post-meta-line">${ICON.repost}<span>Reposted by ${byLink}</span><span class="repost-time" title="Reposted ${esc(new Date(it.t).toLocaleString())}">${esc(fmtPostTime(it.t, feedT))}</span></div>`;
   }
   const parent = fi.reply?.parent, root = fi.reply?.root;
   const parentOk = isPV(parent);
@@ -6442,7 +6540,7 @@ function renderItem(it, i, ctx = "none") {
   } else if (ctx === "line" || (ctx === "none" && p.record?.reply && !isRepost(fi))) {
     replyTo = parent?.author ? "@" + parent.author.handle : "a post";
   }
-  html += postViewHtml(p, { replyTo, t: isRepost(fi) ? null : it.t, feedT });
+  html += postViewHtml(p, { replyTo, t: isRepost(fi) ? null : it.t, feedT, meta });
   el.innerHTML = html;
   return el;
 }
@@ -6781,9 +6879,18 @@ const cdnImg = (kind, did, cid, pds) => {
    up to 4 image thumbnails (zoomable, with the full set in the viewer) or a
    video thumbnail, plus a label line linking to the post. p = a post-like
    object with uri, author, labels (for blurring) and the raw embed. */
-function mediaSummaryHtml(rawEmbed, p) {
-  const m = rawMedia(rawEmbed); const labels = mediaLabels(m);
-  if (!labels.length) return "";
+function mediaSummaryHtml(rawEmbed, p, { withQuote = true } = {}) {
+  const m = rawMedia(rawEmbed);
+  // A quote whose quoted post was actually fetched (protocol mode) is SHOWN
+  // -- here, or on its own when embedParts asked for the two apart so the
+  // setting can place them. Either way the summary doesn't also NAME it:
+  // that said it twice when the box sat right underneath, and with the quote
+  // put first it left "Quotes another post" pointing at a box that had moved
+  // to the top of the card. With nothing else to summarize there is no
+  // summary at all, and the quote is all that comes back.
+  const labels = mediaLabels(p.__quoted ? { ...m, quotes: null } : m);
+  const quoted = withQuote ? protoQuoteHtml(p) : "";
+  if (!labels.length) return quoted;
   const did = p.author?.did || p.uri.split("/")[2];
   // In protocol mode the post says which server holds it, and the pictures
   // come from there rather than from a CDN (see cdnImg).
@@ -6797,12 +6904,11 @@ function mediaSummaryHtml(rawEmbed, p) {
   } else if (m.video?.cid && videoHost) {
     thumbs = `<a class="mini-thumb vid" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Watch on ${esc(webLinkHost())}"><img src="https://${esc(videoHost)}/watch/${esc(did)}/${esc(m.video.cid)}/thumbnail.jpg" alt="" loading="lazy"></a>`;
   }
-  // A quote whose quoted post was actually fetched (protocol mode) shows it,
-  // rather than the bare words "Quotes another post".
-  const quoted = p.__quoted ? `<div class="embed">${quoteHtml(protoViewRecord(p.__quoted), 1)}</div>` : "";
   const inner = `${thumbs ? `<div class="mini-thumbs">${thumbs}</div>` : ""}<a class="ms-label" href="${esc(postUrl(p))}" target="_blank" rel="noopener">${esc(labels.join(" · "))} · View on ${esc(webLinkHost())}</a>`;
   return `<div class="media-summary">${thumbs ? wrapSensitive(inner, p) : inner}</div>${quoted}`;
 }
+/* The post a protocol-mode post quotes, if it was actually fetched. */
+const protoQuoteHtml = p => p.__quoted ? `<div class="embed">${quoteHtml(protoViewRecord(p.__quoted), 1)}</div>` : "";
 /* Dresses a protocol-mode post as the #viewRecord shape quoteHtml draws, so
    a quoted post can be shown with the same renderer as everywhere else. */
 const protoViewRecord = p => ({
@@ -6837,15 +6943,23 @@ function quoteHtml(r, depth) {
       // Attachments: full rendering for a first-level quote when the API sent
       // its embed views; otherwise (a quote inside a quote, or views missing)
       // a compact summary built from the raw record (see mediaSummaryHtml).
-      const inner = depth < 1 && r.embeds?.[0] ? `<div class="embed">${embedHtml(r.embeds[0], fake, depth + 1)}</div>`
-        : v.embed ? mediaSummaryHtml(v.embed, fake) : "";
+      const inner = depth < 1 && r.embeds?.[0] ? embedParts(fake, depth + 1)
+        : { media: v.embed ? mediaSummaryHtml(v.embed, fake) : "", quote: "" };
       const t = Date.parse(r.indexedAt);
       // data-uri lets the delegated click handler find this quoted post (it's
       // the nearest [data-uri] ancestor of the quote's own buttons).
+      // Same shape as a post: anything the settings put first leads the box,
+      // above this quote's own name line. .quote is ordinary flow, so it
+      // needs no grid areas to say so.
+      const q = bodyOrder({
+        text: `<div class="pv-text">${richText(v.text, v.facets)}</div>`,
+        ...inner,
+        actions: r.cid ? `<div class="actions" data-actions="${esc(r.uri)}">${actionsHtml(fake)}</div>` : "",
+      });
       return `<div class="quote" data-uri="${esc(r.uri)}">
+        ${q.lead}
         ${headHtml(a, { href: postUrl(fake), timeHtml: isNaN(t) ? "" : esc(fmtAgo(t)), avatar: true })}
-        <div class="pv-text">${richText(v.text, v.facets)}</div>${inner}
-        ${r.cid ? `<div class="actions" data-actions="${esc(r.uri)}">${actionsHtml(fake)}</div>` : ""}
+        ${q.body}
       </div>`;
     }
     case "app.bsky.embed.record#viewNotFound": return `<div class="quote-missing">The quoted post was deleted.</div>`;
@@ -6857,9 +6971,29 @@ function quoteHtml(r, depth) {
     default: return "";
   }
 }
-/* Dispatches on the embed view type from the app.bsky.embed.* lexicons.
-   To support a new embed type, add a case here (and see quoteHtml for
-   records). */
+/* A post's attachment in two pieces -- {media, quote} -- each already in its
+   own .embed box, either of them possibly empty. They are kept apart because
+   an app.bsky.embed.recordWithMedia is BOTH at once (a quote with pictures of
+   its own), and the settings that reorder a post's body move the quote on its
+   own while the pictures stay with the words (see bodyOrder). Without views
+   to render -- protocol mode -- the pieces come from the raw record instead:
+   a compact summary, and the quoted post if it was fetched. */
+function embedParts(p, depth = 0) {
+  const box = h => (h ? `<div class="embed">${h}</div>` : "");
+  const e = p.embed;
+  if (e?.$type === "app.bsky.embed.recordWithMedia#view")
+    return { media: box(embedHtml(e.media, p, depth)), quote: box(quoteHtml(e.record?.record, depth)) };
+  if (e?.$type === "app.bsky.embed.record#view") return { media: "", quote: box(quoteHtml(e.record, depth)) };
+  if (e) return { media: box(embedHtml(e, p, depth)), quote: "" };
+  const raw = p.record?.embed;
+  if (!raw) return { media: "", quote: "" };
+  return { media: box(mediaSummaryHtml(raw, p, { withQuote: false })), quote: protoQuoteHtml(p) };
+}
+/* Dispatches on the embed view type from the app.bsky.embed.* lexicons --
+   everything EXCEPT the two record-shaped ones, which embedParts takes
+   apart before it gets here so that a quote can be placed on its own, and
+   embedParts is the only way in. To support a new embed type, add a case
+   here, and to embedParts as well if it carries a record. */
 function embedHtml(e, p, depth) {
   if (!e) return "";
   switch (e.$type) {
@@ -6867,8 +7001,6 @@ function embedHtml(e, p, depth) {
     case "app.bsky.embed.gallery#view": return galleryHtml(e, p);
     case "app.bsky.embed.video#view": return videoHtml(e, p);
     case "app.bsky.embed.external#view": return externalHtml(e.external || {}, p);
-    case "app.bsky.embed.record#view": return quoteHtml(e.record, depth);
-    case "app.bsky.embed.recordWithMedia#view": return embedHtml(e.media, p, depth) + `<div class="embed">${quoteHtml(e.record?.record, depth)}</div>`;
     default:
       // New or unknown embed types: say so rather than silently showing
       // nothing (which is how gallery posts went unnoticed before 0.4.0).
