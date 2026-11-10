@@ -116,6 +116,27 @@ test("webHost reaches post, profile and hashtag links", async () => {
     /https:\/\/deer\.example\/hashtag\/x/);
 });
 
+/* The two menu items that link out used to say "bsky.app" in their LABEL while
+   their href followed the setting (fixed in 1.4.2). The href is covered above;
+   this is the words on the item, which is what the reader actually reads before
+   deciding to leave the page. */
+test("webHost reaches the labels of the menu items that link out", async () => {
+  const page = await h.loadPage({ settings: { webHost: "deer.example" }, server });
+  await page.startDate(h.BASE);
+  const item = () => [...page.$$(".menu [data-m]")].find(el => /profile|Open on/i.test(el.textContent));
+
+  page.article("A").querySelector('[data-act="repost"]').click();
+  await h.wait(20);
+  assert.match(item().textContent, /Open on deer\.example/, "the item that links out names the front-end it opens");
+  assert.match(item().href, /^https:\/\/deer\.example\//, "and still points at it");
+  page.article("A").querySelector('[data-act="repost"]').click();   // close
+
+  page.article("A").querySelector('[data-act="follow"]').click();
+  await h.wait(20);
+  assert.match(item().textContent, /Their profile on deer\.example/, "so does the profile item");
+  assert.match(item().href, /^https:\/\/deer\.example\//);
+});
+
 test("webHost reaches the sign-in screen's own links", async () => {
   const page = await h.loadPage({ session: false, settings: { webHost: "deer.example" }, server });
   for (const el of page.$$("[data-weblink]")) assert.match(el.href, /^https:\/\/deer\.example\//);
@@ -151,6 +172,51 @@ test("pasted links from any front-end are understood", async () => {
   assert.equal(page.eval(`parsePostRef("just some words")`), null);
 });
 
+/* The AppView picker is a shortcut for the box under it, and the thing to get
+   right is that the two can never disagree: the picker writes the box, and a
+   value typed into the box moves the picker. */
+test("the AppView picker writes the box, and the box moves the picker", async () => {
+  const page = await h.loadPage({ server });
+  page.$("#btnSettings").click();
+  const pick = () => page.$('#drawer [data-k="appViewPick"]');
+  const box = () => page.$('#drawer [data-k="appView"]');
+
+  assert.equal(pick().value, "", "an unset AppView shows as your server's choice");
+
+  await page.setSetting("appViewPick", "api.blacksky.community");
+  assert.equal(page.eval("settings.appView"), "api.blacksky.community", "picking one writes the setting");
+  assert.equal(box().value, "api.blacksky.community", "and the box below shows it");
+  assert.equal(page.eval("appViewTarget()"), "did:web:api.blacksky.community#bsky_appview",
+    "and it reaches requests as a service DID");
+
+  // Typed by hand to something no preset names: the picker must not go on
+  // showing a preset's name beside an address it doesn't match.
+  await page.setSetting("appView", "appview.example");
+  assert.equal(pick().value, "custom", "an address no preset names shows as 'something else'");
+
+  // Back to a known one by hand: the picker names it again.
+  await page.setSetting("appView", "api.bsky.app");
+  assert.equal(pick().value, "api.bsky.app");
+
+  // "Something else" is only ever shown, never an instruction: choosing it
+  // would have nothing to write.
+  await page.setSetting("appViewPick", "custom");
+  assert.equal(page.eval("settings.appView"), "api.bsky.app", "choosing it changes nothing");
+});
+
+test("picking an AppView forgets the picture hosts learned from the last one", async () => {
+  const page = await h.loadPage({
+    settings: { appView: "api.example" },
+    server: { timeline: [h.item(h.post("M", a, 10, { embed: servedImages("pics.other.example") }))] },
+  });
+  await page.startDate(h.BASE);
+  assert.equal(page.eval(`mediaHost("cdn")`), "pics.other.example");
+  page.$("#btnSettings").click();
+  await page.setSetting("appViewPick", "api.blacksky.community");
+  assert.equal(page.eval(`mediaHostObserved("cdn")`), false,
+    "the picker goes through the same path as the box, so nothing is kept");
+});
+
 /* ---------------------------------------------------------------- media hosts */
 
 test("the deep-quote thumbnail hosts follow the AppView", async () => {
@@ -161,6 +227,116 @@ test("the deep-quote thumbnail hosts follow the AppView", async () => {
   assert.equal(host("appview.example"), "[null,null]", "an AppView whose CDN can't be worked out answers unknown");
   assert.equal(page.eval(`settings.appView = "appview.example"; cdnImg("feed_thumbnail", "did:plc:x", "cid")`), "",
     "and builds no URL at all, rather than quietly calling Bluesky");
+});
+
+/* The hosts above are a GUESS from the AppView's name, and for a real AppView
+   it is the wrong guess: Blacksky's api.blacksky.community serves every
+   picture from cdn.bsky.app (179 of 179 across a real author feed), while the
+   derived cdn.blacksky.community doesn't resolve at all. So what the AppView
+   actually serves has to win over what it is called. */
+const servedImages = host => ({
+  $type: "app.bsky.embed.images#view",
+  images: [{
+    thumb: `https://${host}/img/feed_thumbnail/plain/did:plc:someone/bafyc@jpeg`,
+    fullsize: `https://${host}/img/feed_fullsize/plain/did:plc:someone/bafyc@jpeg`,
+    alt: "", aspectRatio: { width: 4, height: 3 },
+  }],
+});
+
+test("a served picture host beats the one derived from the AppView's name", async () => {
+  const page = await h.loadPage({
+    settings: { appView: "api.example" },
+    server: { timeline: [h.item(h.post("M", a, 10, { embed: servedImages("pics.other.example") }))] },
+  });
+  await page.startDate(h.BASE);
+  assert.equal(page.eval(`mediaHost("cdn")`), "pics.other.example", "learned from the URL the AppView served");
+  assert.equal(page.eval(`mediaHostObserved("cdn")`), true, "and known to be observed, not guessed");
+  assert.equal(page.eval(`cdnImg("feed_thumbnail", "did:plc:x", "cid")`),
+    "https://pics.other.example/img/feed_thumbnail/plain/did:plc:x/cid@jpeg",
+    "so a built thumbnail goes to a host that exists");
+  // Nothing was served for video -- but what WAS served proves this AppView
+  // doesn't keep its pictures where its name suggests, so the same guess must
+  // not be made for video either. "Unknown" is the honest answer, and the
+  // video thumbnail is then left out rather than pointed at a host nothing has
+  // ever seen.
+  assert.equal(page.eval(`mediaHostObserved("video")`), false);
+  assert.equal(page.eval(`mediaHost("video")`), null, "the disproved naming rule isn't reused for video");
+  assert.equal(page.eval(`derivedMediaHost("video")`), "video.example", "though the guess itself is unchanged");
+});
+
+test("a naming convention that holds is still used for the host nothing has served", async () => {
+  // The other side of the rule: when what was served IS where the name said,
+  // the convention has not been disproved and still covers the unseen host.
+  const page = await h.loadPage({
+    settings: { appView: "api.example" },
+    server: { timeline: [h.item(h.post("M", a, 10, { embed: servedImages("cdn.example") }))] },
+  });
+  await page.startDate(h.BASE);
+  assert.equal(page.eval(`mediaHost("cdn")`), "cdn.example", "observed, and it matches the name");
+  assert.equal(page.eval(`mediaHost("video")`), "video.example", "so the unseen host keeps the derivation");
+});
+
+/* Measured against the live services (2026-11-10): Bluesky serves
+   video.bsky.app/watch/did:plc:.../<cid>/thumbnail.jpg, Blacksky serves
+   video.blacksky.community/stream/did%3Aplc%3A.../<cid>/thumbnail.jpg. The
+   host alone isn't enough -- a /watch/ URL built against Blacksky is a 404 --
+   so the path segment and the DID's encoding are learned with it. */
+test("the video URL shape is learned, not just its host", async () => {
+  const page = await h.loadPage({
+    settings: { appView: "api.blacksky.example" },
+    server: { timeline: [h.item(h.post("V", a, 10, { embed: { $type: "app.bsky.embed.video#view", cid: "vid",
+      playlist: "https://video.blacksky.example/stream/did%3Aplc%3Asomeone/bafyv/playlist.m3u8",
+      thumbnail: "https://video.blacksky.example/stream/did%3Aplc%3Asomeone/bafyv/thumbnail.jpg",
+      aspectRatio: { width: 16, height: 9 } } }))] },
+  });
+  await page.startDate(h.BASE);
+  assert.equal(page.eval(`mediaHost("video")`), "video.blacksky.example");
+  assert.equal(page.eval(`videoThumbUrl("did:plc:x", "bafyc")`),
+    "https://video.blacksky.example/stream/did%3Aplc%3Ax/bafyc/thumbnail.jpg",
+    "the learned path segment and DID encoding are both used");
+});
+
+test("Bluesky's video shape is still what's assumed when nothing was served", async () => {
+  const page = await h.loadPage({ settings: { appView: "api.example" }, server });
+  assert.equal(page.eval(`videoThumbUrl("did:plc:x", "bafyc")`),
+    "https://video.example/watch/did:plc:x/bafyc/thumbnail.jpg",
+    "unobserved, the shape is Bluesky's -- the same assumption the host falls back on");
+  assert.equal(page.eval(`settings.appView = "appview.example"; videoThumbUrl("did:plc:x", "bafyc")`), "",
+    "and an unknown host builds nothing at all rather than a broken picture");
+});
+
+test("a video host is learned from a watch URL, and link previews teach nothing", async () => {
+  const page = await h.loadPage({
+    settings: { appView: "api.example" },
+    server: { timeline: [
+      // A link preview's thumbnail is somebody else's host and says nothing
+      // about this AppView.
+      h.item(h.post("L", a, 10, { embed: { $type: "app.bsky.embed.external#view",
+        external: { uri: "https://example.com/a", title: "A", description: "", thumb: "https://farm.example/img/x.jpg" } } })),
+      h.item(h.post("V", a, 11, { embed: { $type: "app.bsky.embed.video#view", cid: "vid",
+        playlist: "https://clips.other.example/watch/did:plc:someone/bafyv/playlist.m3u8",
+        thumbnail: "https://clips.other.example/watch/did:plc:someone/bafyv/thumbnail.jpg",
+        aspectRatio: { width: 16, height: 9 } } })),
+    ] },
+  });
+  await page.startDate(h.BASE);
+  assert.equal(page.eval(`mediaHost("video")`), "clips.other.example", "the watch URL settled the video host");
+  // The link thumbnail IS on an /img/ path, so it is taken -- it came from the
+  // AppView's own answer like any other. What must not happen is the video
+  // host being learned from it.
+  assert.notEqual(page.eval(`mediaHost("video")`), "farm.example");
+});
+
+test("changing the AppView forgets the hosts learned from the last one", async () => {
+  const page = await h.loadPage({
+    settings: { appView: "api.example" },
+    server: { timeline: [h.item(h.post("M", a, 10, { embed: servedImages("pics.other.example") }))] },
+  });
+  await page.startDate(h.BASE);
+  assert.equal(page.eval(`mediaHost("cdn")`), "pics.other.example");
+  await page.setSetting("appView", "api.elsewhere");
+  assert.equal(page.eval(`mediaHostObserved("cdn")`), false, "nothing is remembered from the old AppView");
+  assert.equal(page.eval(`mediaHost("cdn")`), "cdn.elsewhere", "so the new name is what's left to go on");
 });
 
 /* ---------------------------------------------------------------- not shareable */
@@ -204,6 +380,46 @@ test("an ordinary 5xx with no AppView set still retries as before", async () => 
   assert.deepEqual(page.ids(), ["A", "G"], "and recovered");
 });
 
+/* Measured against Blacksky's AppView (2026-11-10): its getFollows cursor is
+   inclusive of the last account, so once the end is reached every further
+   page is that same one account with the SAME cursor -- never empty, never
+   without a cursor. loadFollows asked only those two questions, so it spun
+   for ever, making requests without bound while the progress line sat frozen
+   on the count it already had. A real catch-up hung there. */
+test("a server whose follows cursor never ends doesn't hang the catch-up", async () => {
+  let calls = 0;
+  const stuck = [h.actor(1), h.actor(2), h.actor(3)];
+  const page = await h.loadPage({
+    settings: { hideFollowed: "only", appView: "api.example" },
+    server: {
+      timeline: [h.item(h.post("A", a, 10))],
+      handlers: {
+        "app.bsky.graph.getFollows": () => {
+          calls++;
+          // Past the end: one already-seen account, and the same cursor for ever.
+          return calls === 1
+            ? { follows: stuck, cursor: "stuck" }
+            : { follows: [stuck[stuck.length - 1]], cursor: "stuck" };
+        },
+      },
+    },
+  });
+  await page.startDate(h.BASE);
+  assert.ok(calls < 10, `it stopped asking (made ${calls} requests, not thousands)`);
+  assert.equal(page.eval("state.follows.size"), stuck.length, "and kept every account it did get");
+});
+
+test("a follows list that pages normally is still read to the end", async () => {
+  // The guard above must not cut a well-behaved server short.
+  const many = Array.from({ length: 250 }, (_, i) => h.actor(i + 1));
+  const page = await h.loadPage({
+    settings: { hideFollowed: "only" },
+    server: { timeline: [h.item(h.post("A", a, 10))], follows: many },
+  });
+  await page.startDate(h.BASE);
+  assert.equal(page.eval("state.follows.size"), 250, "all three pages were read");
+});
+
 /* ---------------------------------------------------------------- the readout */
 
 test("the Advanced group prints what this copy is actually talking to", async () => {
@@ -216,6 +432,34 @@ test("the Advanced group prints what this copy is actually talking to", async ()
   assert.match(text, /did:web:api\.bsky\.app#bsky_appview/, "names the chosen AppView");
   assert.match(text, /cdn\.bsky\.app · video\.bsky\.app/, "names the media hosts it would build");
   assert.match(text, /deer\.social/, "names the front-end links open at");
+});
+
+/* The row must not report a guess in the same voice as a fact. This is the
+   Blacksky case exactly: a non-Bluesky AppView whose pictures are nonetheless
+   served from Bluesky's CDN. Someone who switched AppView to get away from
+   Bluesky should be able to SEE that the pictures didn't move. */
+test("the picture row says whether it saw the host or guessed it", async () => {
+  const page = await h.loadPage({
+    settings: { appView: "api.blacksky.example" },
+    server: { timeline: [h.item(h.post("M", a, 10, { embed: servedImages("cdn.bsky.app") }))] },
+  });
+  const row = () => {
+    page.eval("renderDrawer()");
+    const dt = page.$$("#drawer .infra dt").find(d => d.textContent === "Pictures and video");
+    return dt.nextElementSibling;
+  };
+
+  // Before any catch-up: nothing has been served, so the name is all there is
+  // and the row must admit it.
+  assert.match(row().textContent, /Worked out from the AppView/, "a guess reads like a guess");
+  assert.match(row().textContent, /cdn\.blacksky\.example/, "and names what it guessed");
+
+  await page.startDate(h.BASE);
+  const after = row();
+  assert.match(after.textContent, /cdn\.bsky\.app/, "now names the host actually serving pictures");
+  assert.doesNotMatch(after.textContent, /cdn\.blacksky\.example/, "and drops the guess entirely");
+  assert.match(after.textContent, /point at Bluesky/, "and says plainly that the pictures are Bluesky's");
+  assert.ok(after.querySelector(".op")?.classList.contains("op-bluesky"), "the mark agrees rather than claiming independence");
 });
 
 test("the readout says 'not known' rather than guessing", async () => {

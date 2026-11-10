@@ -77,7 +77,7 @@ function post(id, author, min, opts = {}) {
   if (opts.rawEmbed) record.embed = opts.rawEmbed;
   return {
     uri: `at://${author.did}/app.bsky.feed.post/${id}`, cid: `cid-${id}`, author, record, indexedAt: t,
-    likeCount: opts.likeCount ?? 0, repostCount: opts.repostCount ?? 0, replyCount: 0, quoteCount: 0,
+    likeCount: opts.likeCount ?? 0, repostCount: opts.repostCount ?? 0, replyCount: opts.replyCount ?? 0, quoteCount: 0,
     viewer: opts.viewer ?? {}, labels: opts.labels ?? [], ...(opts.embed ? { embed: opts.embed } : {}),
   };
 }
@@ -139,6 +139,9 @@ function viewRecord(p) {
  *                 derived from `timeline` by author/reposter)
  *   posts:        { uri: postView } served by getPosts (default: from timeline)
  *   handles:      { handle: did } for resolveHandle
+ *   profiles:     { didOrHandle: profileView } for getProfile
+ *   threadReplies: { postUri: [postView | threadNode] } exact replies for
+ *                 getPostThread; otherwise they're derived from replyTo
  *   wellKnown:    { host: did } served at https://<host>/.well-known/atproto-did,
  *                 the first thing handle resolution tries. Absent hosts 404,
  *                 which is what a domain that doesn't publish its DID does.
@@ -188,13 +191,26 @@ function makeServer(opts, calls, requests) {
     "com.atproto.identity.resolveHandle": p => {
       const h = p.get("handle");
       if (h === ME.handle) return { did: ME.did };
-      const did = opts.handles?.[h] || follows.find(f => f.handle === h)?.did;
+      const m = /^u(\d+)\.test$/.exec(h || "");
+      const did = opts.handles?.[h] || follows.find(f => f.handle === h)?.did || (m ? `did:plc:u${m[1]}` : null);
       return did ? { did } : { status: 400, error: "InvalidRequest", message: "Unable to resolve handle" };
     },
     "com.atproto.server.createSession": (p, body) => body?.password === "wrong" ? { status: 401, error: "AuthenticationRequired" } : { did: ME.did, handle: ME.handle, accessJwt: "access", refreshJwt: "refresh" },
     "com.atproto.server.refreshSession": () => ({ accessJwt: "access2", refreshJwt: "refresh2" }),
     "com.atproto.server.deleteSession": () => ({}),
-    "app.bsky.actor.getProfile": () => ({ ...ME, followsCount: follows.length }),
+    // Answers about whoever was asked for: the signed-in user by default, but
+    // an author feed asks about the person being read. opts.profiles can add
+    // or override one, keyed by did OR handle.
+    "app.bsky.actor.getProfile": p => {
+      const who = p.get("actor");
+      if (!who || who === ME.did || who === ME.handle) return { ...ME, followsCount: follows.length };
+      const extra = opts.profiles?.[who];
+      if (extra) return extra;
+      const known = follows.find(f => f.did === who || f.handle === who);
+      if (known) return known;
+      const n = /^did:plc:u(\d+)$/.exec(who);
+      return n ? actor(Number(n[1])) : { status: 400, error: "InvalidRequest", message: "Profile not found" };
+    },
     // Custom feeds and lists. opts.feeds maps an at:// URI to its posts;
     // opts.savedFeeds is what getPreferences reports as saved.
     // A URI in opts.rankedFeeds is served in exactly the order the test wrote
@@ -232,7 +248,7 @@ function makeServer(opts, calls, requests) {
     "app.bsky.feed.getTimeline": p => page(timeline().slice(0, served), p),
     "app.bsky.feed.getAuthorFeed": p => page(authorFeeds()[p.get("actor")] || [], p),
     "app.bsky.feed.getPosts": p => { const all = posts(); return { posts: p.getAll("uris").map(u => all[u]).filter(Boolean) }; },
-    // Ancestors only (the page asks with depth 0): walks record.reply.parent
+    // Ancestors, and replies when depth says so: walks record.reply.parent
     // upward through the known posts. A post that isn't known ends the chain
     // as a #notFoundPost, which is what a deleted (or blocked) post in the
     // middle of a chain looks like.
@@ -252,6 +268,19 @@ function makeServer(opts, calls, requests) {
         const next = node(all[cur.up]);
         cur.tvp.parent = next.tvp;
         cur = next;
+      }
+      // Replies, when any were asked for. Taken from opts.threadReplies when
+      // a test wants to say exactly what comes back (including the gaps a
+      // real thread has: a blocked reply, a deleted one), and otherwise
+      // worked out from the known posts, so an ordinary test just builds
+      // posts with replyTo and they show up underneath.
+      if (Number(p.get("depth") || 0) > 0) {
+        const given = opts.threadReplies?.[p.get("uri")];
+        root.tvp.replies = given
+          ? given.map(r => (r.$type ? r : { $type: "app.bsky.feed.defs#threadViewPost", post: r }))
+          : Object.values(all)
+              .filter(x => x.record?.reply?.parent?.uri === p.get("uri"))
+              .map(post => ({ $type: "app.bsky.feed.defs#threadViewPost", post }));
       }
       return { thread: root.tvp };
     },
@@ -487,6 +516,15 @@ async function loadPage({ url = "https://example.test/", session = true, setting
           { message: `feed ${opts.feed} in the picker` });
         $("#inFeed").value = opts.feed;
         $("#inFeed").dispatchEvent(new w.Event("change"));
+      }
+      // opts.author: a handle, DID or profile link, typed into the box the
+      // "One person's posts..." option reveals.
+      if (opts?.author) {
+        await waitFor(() => [...$("#inFeed").options].some(o => o.value === "author"),
+          { message: "the author option in the picker" });
+        $("#inFeed").value = "author";
+        $("#inFeed").dispatchEvent(new w.Event("change"));
+        $("#inAuthor").value = opts.author;
       }
       const loc = t => { const x = new Date(t); return new Date(x - x.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
       $(`input[name="kind"][value="${kind}"]`).checked = true;

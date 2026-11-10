@@ -616,3 +616,120 @@ test("turning on broken feeds brings them back, named for what they are", async 
   const opts = [...page.$("#inFeed").options].map(o => o.textContent);
   assert.ok(opts.includes("Unavailable list (list)"), `shown and named: ${opts.join(" | ")}`);
 });
+
+/* ---------------------------------------------------------------- one person's posts */
+/* The fourth feed source. getAuthorFeed pages newest-first with a cursor just
+   as the other three do, so the point of these is that everything downstream
+   -- the start points, the dividers, the view -- needed nothing added. */
+
+const AUTHOR_POSTS = {
+  "did:plc:u1": [
+    h.item(h.post("P1", a, 10)),
+    h.item(h.post("P2", a, 20)),
+    h.item(h.post("P3", a, 30)),
+  ],
+};
+
+test("one person's posts are read instead of the timeline", async () => {
+  const page = await h.loadPage({ server: {
+    timeline: [h.item(h.post("TL", b, 10))],
+    authorFeeds: AUTHOR_POSTS,
+  } });
+  await page.startDate(h.BASE, null, { author: "u1.test" });
+  assert.deepEqual(page.ids(), ["P1", "P2", "P3"], "their posts, oldest first");
+  assert.ok(!page.calls.some(c => c.includes("getTimeline")), "the timeline was never asked for");
+  const req = page.requests.find(r => r.nsid === "app.bsky.feed.getAuthorFeed");
+  assert.equal(req.search.get("actor"), "did:plc:u1", "asked for that account");
+  assert.match(page.$("#feedHead").textContent, /from @u1\.test/, "and says whose posts these are");
+});
+
+test("a person can be named by handle, DID or profile link", async () => {
+  for (const input of ["u1.test", "@u1.test", "did:plc:u1", "https://bsky.app/profile/u1.test", "deer.social/profile/u1.test"]) {
+    const page = await h.loadPage({ server: { timeline: [], authorFeeds: AUTHOR_POSTS } });
+    await page.startDate(h.BASE, null, { author: input });
+    assert.deepEqual(page.ids(), ["P1", "P2", "P3"], `${input} was understood`);
+  }
+});
+
+test("a handle that doesn't resolve says so under the form", async () => {
+  const page = await h.loadPage({ server: { timeline: [], authorFeeds: AUTHOR_POSTS } });
+  await page.start("date", h.BASE, null, { author: "nobody.test" }).catch(() => {});
+  await h.waitFor(() => page.$("#startErr").textContent, { message: "an error" });
+  assert.match(page.$("#startErr").textContent, /Couldn't find @nobody\.test/);
+  assert.ok(page.visible("viewStart"), "and stays on the start screen");
+});
+
+test("the handle box refuses something that isn't a person at all", async () => {
+  const page = await h.loadPage({ server: { timeline: [] } });
+  await page.start("date", h.BASE, null, { author: "not a handle" }).catch(() => {});
+  await h.waitFor(() => page.$("#startErr").textContent, { message: "an error" });
+  assert.match(page.$("#startErr").textContent, /doesn't look like a person/);
+  assert.equal(page.calls.filter(c => c.includes("resolveHandle")).length, 0, "nothing was looked up");
+});
+
+test("which of their posts to read is a setting, sent to the API", async () => {
+  const page = await h.loadPage({
+    settings: { authorPosts: "posts_no_replies" },
+    server: { timeline: [], authorFeeds: AUTHOR_POSTS },
+  });
+  await page.startDate(h.BASE, null, { author: "u1.test" });
+  const req = page.requests.find(r => r.nsid === "app.bsky.feed.getAuthorFeed");
+  assert.equal(req.search.get("filter"), "posts_no_replies");
+});
+
+test("the default for which posts is read from DEFAULTS, not written twice", async () => {
+  const page = await h.loadPage({ server: { timeline: [], authorFeeds: AUTHOR_POSTS } });
+  await page.startDate(h.BASE, null, { author: "u1.test" });
+  const req = page.requests.find(r => r.nsid === "app.bsky.feed.getAuthorFeed");
+  assert.equal(req.search.get("filter"), page.eval("DEFAULTS.authorPosts"));
+});
+
+test("'Hide people I follow' is off and greyed out for one person's posts", async () => {
+  const page = await h.loadPage({
+    settings: { hideFollowed: "only" },
+    server: { timeline: [], authorFeeds: AUTHOR_POSTS },
+  });
+  await page.startDate(h.BASE, null, { author: "u1.test" });
+  assert.deepEqual(page.ids(), ["P1", "P2", "P3"], "a value from saved settings doesn't empty the page");
+  assert.equal(page.eval("hideFollowedMode()"), "off");
+  page.$("#btnSettings").click();
+  assert.ok(page.$('#drawer [data-row="hideFollowed"]').classList.contains("off"), "and the row is greyed out");
+});
+
+test("a catch-up link can name one person, and round-trips", async () => {
+  const page = await h.loadPage({ server: { timeline: [], authorFeeds: AUTHOR_POSTS } });
+  await page.startDate(h.BASE, null, { author: "u1.test" });
+  assert.match(page.window.location.hash, /author=did%3Aplc%3Au1/, "the link names them by DID");
+  assert.match(page.window.location.hash, /v=5/, "and marks the format that can carry it");
+
+  // Opened fresh, the link reads the same catch-up.
+  const url = "https://site.example/i.html" + page.window.location.hash;
+  const back = await h.loadPage({ url, server: { timeline: [], authorFeeds: AUTHOR_POSTS } });
+  await back.settle();
+  assert.deepEqual(back.ids(), ["P1", "P2", "P3"], "the same posts");
+  assert.match(back.$("#feedHead").textContent, /from @u1\.test/, "and the handle is fetched for the name");
+});
+
+test("the author= link format bump is complete", async () => {
+  // A link naming one person would be IGNORED by a copy of the page from
+  // before this existed, which would then quietly read Following instead --
+  // the exact thing LINK_FORMAT exists to prevent. So the bump has to be
+  // real, and the defaults table has to have grown an entry for it, or
+  // settings carried by a format-5 link are filled in from format 4's.
+  const page = await h.loadPage({ server: { timeline: [], authorFeeds: AUTHOR_POSTS } });
+  assert.equal(page.eval("LINK_FORMAT"), 5, "this copy writes format 5");
+  assert.ok(page.eval("5 in LINK_FORMAT_DEFAULTS"), "format 5 has its own defaults entry");
+  assert.equal(page.eval("Math.max(...Object.keys(LINK_FORMAT_DEFAULTS).map(Number))"), 5,
+    "and it is the newest one described");
+});
+
+test("a link from a format newer than this copy still says so", async () => {
+  // The other half of the bump: this is what an older copy does with OUR
+  // author links, simulated by handing this copy a format it doesn't know.
+  const page = await h.loadPage({
+    url: "https://site.example/i.html#from=2026-01-01T00:00:00Z&author=did:plc:u1&v=99",
+    server: { timeline: [], authorFeeds: AUTHOR_POSTS },
+  });
+  await h.waitFor(() => page.$("#bannerText").textContent, { message: "the notice" });
+  assert.match(page.$("#bannerText").textContent, /newer version/);
+});

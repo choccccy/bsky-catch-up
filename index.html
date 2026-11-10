@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.4.1
+  Version 1.5.0
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -510,7 +510,9 @@ KNOWN LIMITATIONS / THINGS TO VERIFY AGAINST THE LIVE API
   - Rebuild mode re-implements the Following feed's reply rule ("only show
     replies to people I follow") and skips muted accounts itself; it does not
     apply muted words or list-based moderation.
-  - Replying and quoting open bsky.app in a new tab (no in-page composer).
+  - Posting, quoting and replying are all done here (see the composer). It
+    writes words only: no pictures or video, no alt text, no threadgates, no
+    self-labels, and no quoting with pictures of your own.
   - Setting an end point doesn't speed up loading: Bluesky only pages
     newest-first, so everything from now back to the start is fetched.
 
@@ -696,6 +698,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.5.0] - 2026-11-10
+
+### Fixed
+
+- **The two menu items that open another front-end now name it.** With a web
+  front-end of your own set (Settings → Advanced), “Quote on bsky.app” and
+  “Their profile on bsky.app” still said bsky.app while the links beside them
+  correctly went to the site you had chosen. Both now name whichever front-end
+  they will actually open, like every other label on the page.
+- **Pictures work when you read through an AppView that isn’t named after its
+  own CDN.** For quotes nested too deep for the API to describe, the page has
+  to build picture addresses itself, and it worked the host out from the
+  AppView’s name by swapping a leading `api.` for `cdn.`. That is simply wrong
+  for a real AppView: Blacksky’s `api.blacksky.community` serves every picture
+  from `cdn.bsky.app`, and the `cdn.blacksky.community` this page invented
+  doesn’t exist at all. It now learns the host from the addresses the AppView
+  actually hands over — which it does on every page of every feed — and falls
+  back to the old guess only until the first picture arrives.
+- **And it stops reusing a naming rule it has already watched fail.** A feed
+  full of pictures and no video settles one host and leaves the other unseen.
+  If the host that was served isn’t where the AppView’s name said it would be,
+  the other one is now reported as unknown rather than guessed the same way:
+  its thumbnails are left out, which is what this page does everywhere else
+  when it doesn’t know something.
+- **A catch-up no longer hangs on a server whose follow list never ends.**
+  Reading the accounts you follow stopped only when a page came back empty or
+  without a cursor. Blacksky’s AppView ends its follow list differently — the
+  last page repeats one account with the cursor unchanged — so neither ever
+  arrived and the page spun, firing requests without bound while the progress
+  line sat frozen on the count it already had, until the server rate-limited
+  it. Paging now stops when the cursor doesn’t move or a page adds nobody new,
+  and is bounded like every other paging loop in the file.
+- **Video thumbnails follow the AppView’s own URL shape, not just its host.**
+  Bluesky serves video from `/watch/`, Blacksky from `/stream/` with the
+  account id encoded differently. The shape is now learned from the addresses
+  the AppView hands over, alongside the host; unobserved, it still assumes
+  Bluesky’s, and an unknown host still builds nothing at all.
+
+### Added
+
+- **Write posts and replies without leaving.** A **Write** button in the top
+  bar opens the composer for a post of your own. And the replies box under a
+  post — which now opens even when nobody has answered yet, because that is
+  where you answer from — leads with **Write a reply…**. Replying to a reply
+  works the same way: open its replies, write there. A reply records both the
+  post it answers and the thread it belongs to, so it lands in the right
+  conversation in every other client, not just this one.
+
+- **Quote posts, written here.** The repost button's menu now offers
+  **Quote**, which opens a composer over the feed with the post you're
+  quoting shown above the box. Links, @mentions and #hashtags you type are
+  marked up properly, so they work as links everywhere else — and a mention
+  that isn't a real handle is left as plain words rather than guessed at. The
+  counter counts what a reader sees: one emoji is one character, however many
+  bytes it takes. Ctrl/⌘+Enter posts; Escape or Back closes without losing
+  anything. After it goes, a toast offers **Undo** for a few seconds, which
+  takes the post back out of your repository.
+  Deliberately not in this one, rather than half-done: pictures and video,
+  alt text, threadgates, self-labels, and quoting with pictures of your own.
+  Replying still opens your web front-end.
+
+- **The reply button unfolds a post's replies underneath it.** No more leaving
+  for a front-end to read a thread: press it and the replies appear under the
+  post, oldest first, each one carrying the same button so its own replies
+  unfold under it — one request per level, made only when you ask. Press it
+  again to fold them away. Bluesky hands back every reply in a single answer
+  with no way to ask for fewer, so the page caps what it draws: ten at a time
+  (**Replies to show at a time**, Settings → What's in the feed) with a
+  “more replies” button that costs nothing, because they are already here. A
+  deleted or blocked reply is named rather than silently dropped. In “Build
+  the catch-up without an AppView” mode the button stays a link out: replies
+  are found through an AppView, and there is no way to discover who replied by
+  reading repositories.
+
+- **Clicking a name opens the person over the feed.** A panel floats above the
+  catch-up with their banner, avatar, bio, counts, a follow button and their
+  latest posts — which like, repost and open exactly as posts in the feed do,
+  because they are the same cards. It is an overlay rather than a screen of
+  its own, so the catch-up underneath keeps its posts and your place in them;
+  Back, Escape or clicking outside puts you straight back. **Read their posts
+  here** turns the panel into a full catch-up of just that person (the last
+  week, which you can then change). Names, avatars, “reposted by” lines and
+  @mentions in post text all open it; a middle click or a ⌘/Ctrl click still
+  goes out to your web front-end, as the link says it will. Nothing opens in
+  “Build the catch-up without an AppView” mode, where the two reads it needs
+  aren't available — there the name stays a link out, as before. On a phone,
+  swiping down from the top of the panel puts it away; from further down that
+  is a scroll, and stays one. A muted account says it is muted and shows their
+  posts anyway (muting keeps someone out of your feed, it doesn't hide them);
+  a blocked one says so and shows none.
+
+- **Read one person's posts as a catch-up.** The feed picker on the start
+  screen gains “One person's posts…”: give a handle, a DID or a link to
+  someone's profile, and their posts are read exactly like any other feed —
+  from a date, from a particular post, the most recent N, or where you left
+  off — oldest first, with the same day and hour markers. A new setting,
+  **Which of their posts** (Settings → What's in the feed), chooses between
+  their posts and replies, posts only, or posts and their own threads. Catch-up
+  links can name a person too (`#from=…&author=did:plc:…`), which is why a
+  link made now is marked format 5: a copy of this page from before today
+  would have ignored that and quietly read your Following feed instead.
+  “Hide people I follow” is greyed out here — on one person it either empties
+  the page or does nothing.
+
+- **An AppView picker, so choosing one doesn’t mean knowing a hostname.**
+  Settings → Advanced now opens with “Read the network through”: your server’s
+  choice, Bluesky, or **Blacksky** — the one independent AppView whose address
+  this page has checked against the live service. Anything else still goes in
+  the AppView box underneath, which the picker simply writes; type an address
+  it doesn’t know and the picker says “something else” rather than keeping a
+  name that no longer matches. Reading through Blacksky has one gap and the
+  page already handles it: Blacksky doesn’t serve saved-feed preferences, so
+  the start screen offers Following and pasted feed links rather than your
+  saved feeds list.
+
+### Changed
+
+- **The readout no longer reports a guessed picture host as though it had seen
+  it.** “Pictures and video” now says which it is: where the AppView’s own
+  answers point, or merely what was worked out from its name. And when those
+  answers point at Bluesky’s CDN while you have chosen a different AppView, it
+  says so outright, because that is the one thing someone making that choice
+  would otherwise assume they had changed. Choosing Blacksky moves the reads;
+  it does not, today, move the pictures.
 
 ## [1.4.1] - 2026-11-09
 
@@ -2076,7 +2203,7 @@ site with this release.
      from the <link> below (which is why the icon is not written out here: that
      base64 is 14KB, and it may appear in this file exactly once). -->
 <link rel="manifest" id="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Bluesky%20Catch-up%22%2C%22short_name%22%3A%22Catch-up%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230F141B%22%2C%22theme_color%22%3A%22%230F141B%22%7D">
-<title>Catch-up v1.4.1 · Bluesky</title>
+<title>Catch-up v1.5.0 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -2818,6 +2945,78 @@ body{transition:padding-right .18s ease}
 .banner button{background:none; border:0; cursor:pointer; color:var(--muted); font-size:1.2em; line-height:1; padding:0 4px}
 
 /* ---------- overlays: image lightbox, toast notifications, repost menu ---------- */
+/* ---------- the composer ----------
+   The same fixed-overlay reasoning as the profile panel below: writing a post
+   must not tear down the catch-up underneath it. */
+.comp-scrim{position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:52}
+.composer{position:fixed; z-index:53; left:50%; transform:translateX(-50%);
+  top:max(40px, env(safe-area-inset-top)); width:min(560px, calc(100vw - 32px));
+  background:var(--surface); border:1px solid var(--line); border-radius:14px; box-shadow:0 10px 40px rgba(0,0,0,.45);
+  padding:14px; display:flex; flex-direction:column; gap:10px}
+.composer textarea{width:100%; box-sizing:border-box; resize:vertical; min-height:7em;
+  background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:10px; padding:10px; font:inherit}
+.comp-foot{display:flex; align-items:center; gap:8px}
+.comp-count{color:var(--muted); font-size:.9em; font-variant-numeric:tabular-nums}
+.toast-action{color:inherit; font-weight:700; text-decoration:underline; margin-left:8px}
+.comp-count.over{color:#f87171; font-weight:700}
+.comp-err{color:#f87171; font-size:.9em; flex:1}
+.comp-foot .btn:nth-last-child(2){margin-left:auto}
+/* The post being quoted, shown as it will read. */
+.comp-quote{border:1px solid var(--line); border-radius:10px; padding:8px 10px; font-size:.92em; max-height:9em; overflow:auto}
+.comp-quote .cq-who{color:var(--muted); font-size:.9em; margin-bottom:2px}
+.comp-quote .cq-text{white-space:pre-wrap}
+@media (max-width:600px){ .composer{top:0; width:100vw; border:0; border-radius:0} }
+/* ---------- the profile panel ----------
+   A floating panel rather than a fifth view (see show()): the catch-up
+   underneath is never torn down, so closing it puts the reader back exactly
+   where they were -- which matters more here than anywhere, because leaving
+   the page with #from=... in the address re-runs the whole catch-up.
+   Fixed to the viewport, so the tiled layout can't reach it (the same
+   reasoning as the lightbox and the drawer). Its own scrim sits below it and
+   above everything else. */
+.prof-scrim{position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:50}
+.profile{position:fixed; z-index:51; left:50%; transform:translateX(-50%);
+  top:max(24px, env(safe-area-inset-top)); bottom:max(24px, env(safe-area-inset-bottom));
+  width:min(600px, calc(100vw - 32px)); overflow:auto; overscroll-behavior:contain;
+  background:var(--surface); border:1px solid var(--line); border-radius:14px; box-shadow:0 10px 40px rgba(0,0,0,.45)}
+.profile .pf-banner{height:120px; background:var(--line); background-size:cover; background-position:center}
+.profile .pf-head{padding:0 16px 12px; margin-top:-34px}
+.profile .pf-avatar{width:68px; height:68px; border-radius:50%; border:3px solid var(--surface); background:var(--line); object-fit:cover; display:block}
+.profile .pf-name{font-size:1.25em; font-weight:700; margin:8px 0 0}
+.profile .pf-handle{color:var(--muted); font-size:.95em}
+.profile .pf-bio{margin:10px 0 0; white-space:pre-wrap; font-size:.95em}
+.profile .pf-counts{display:flex; gap:14px; margin:10px 0 0; font-size:.9em; color:var(--muted); flex-wrap:wrap}
+.profile .pf-counts b{color:var(--fg)}
+.profile .pf-actions{display:flex; gap:8px; margin:12px 0 0; flex-wrap:wrap}
+.profile .pf-close{position:sticky; top:8px; float:right; margin:8px 8px 0 0; z-index:1}
+.profile .pf-posts{border-top:1px solid var(--line); margin-top:14px}
+.profile .pf-posts h3{font-size:.9em; color:var(--muted); margin:0; padding:12px 16px 0; font-weight:700}
+.profile .pf-note{padding:14px 16px; color:var(--muted); font-size:.95em}
+/* The posts inside are postViewHtml's .pv, the same markup the feed wraps in
+   an article.post -- so they are given that wrapper's padding and separator
+   here rather than borrowing a column width the panel doesn't have. */
+.profile .pv{padding:14px 16px; border-bottom:1px solid var(--line)}
+.profile .pv:last-child{border-bottom:0}
+@media (max-width:600px){
+  .profile{top:0; bottom:0; width:100vw; border:0; border-radius:0}
+}
+/* ---------- replies unfolded under a post ----------
+   Indented and ruled on the left, so the nesting is readable without the
+   thread lines the feed deliberately dropped. A reply's own replies nest
+   inside this, which is why the rule and the padding are on the container
+   rather than on each card. */
+/* grid-column is for the box inside a post's .pv, which is a grid; inside a
+   .quote (ordinary flow) it does nothing, which is why one rule serves both. */
+.replies{grid-column:1/-1; margin:2px 0 6px 10px; padding-left:12px; border-left:2px solid var(--line)}
+.replies .pv{padding-top:8px}
+.reply-note{color:var(--muted); font-size:.9em; padding:6px 0}
+.reply-write{display:block; width:100%; text-align:left; background:none; border:0; border-bottom:1px solid var(--line);
+  color:var(--muted); font:inherit; font-size:.9em; padding:4px 0 8px; cursor:pointer}
+@media (hover:hover){ .reply-write:hover{text-decoration:underline} }
+.more-replies{display:block; width:100%; text-align:left; background:none; border:0; border-top:1px solid var(--line);
+  color:var(--accent, var(--muted)); font:inherit; font-size:.9em; padding:8px 0 4px; cursor:pointer}
+@media (hover:hover){ .more-replies:hover{text-decoration:underline} }
+.act.on{color:var(--accent, inherit)}
 .lightbox{position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:60; display:flex; flex-direction:column; align-items:center; justify-content:center;
   padding:max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); cursor:zoom-out}
 .lightbox img{max-width:100%; max-height:calc(100vh - 110px); max-height:calc(100svh - 110px); object-fit:contain}
@@ -2992,7 +3191,7 @@ body{transition:padding-right .18s ease}
     </div>
     <div class="bar-actions">
       <a class="bar-src" id="barSrc" href="https://github.com/choccccy/bsky-catch-up" target="_blank" rel="noopener" title="Open source, MIT licence — see the code on GitHub"><span class="src-v">v<span id="barVersion"></span> &middot; </span>MIT</a>
-      <!-- Below 600px these three go icon-only (see the narrow-screens block
+      <!-- Below 600px these four go icon-only (see the narrow-screens block
            in the stylesheet). Both the icon and the words are always here and
            CSS chooses which is shown, so the accessible name is never absent
            and nothing has to run to restore it. The icons are inline rather
@@ -3000,6 +3199,7 @@ body{transition:padding-right .18s ease}
            ICON would mean script writing them in at boot for no gain.
            The title is what a touch user long-presses to find out what an
            icon means, and matches every other icon-only control on the page. -->
+      <button class="btn hidden" id="btnWrite" type="button" title="Write a post"><span class="btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span><span class="btn-label">Write</span></button>
       <button class="btn hidden" id="btnNew" type="button" title="New catch-up"><span class="btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/></svg></span><span class="btn-label">New catch-up</span></button>
       <button class="btn" id="btnSettings" type="button" title="Settings"><span class="btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/></svg></span><span class="btn-label">Settings</span></button>
       <button class="btn hidden" id="btnSignOut" type="button" title="Sign out"><span class="btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg></span><span class="btn-label">Sign out</span></button>
@@ -3085,6 +3285,10 @@ body{transition:padding-right .18s ease}
           <input type="url" id="inFeedUrl" placeholder="https://bsky.app/profile/someone.bsky.social/feed/whats-hot">
           <span class="hint">Paste a link to a feed or a list.</span>
         </div>
+        <div class="field hidden field-indent" id="authorBox">
+          <input type="text" id="inAuthor" placeholder="someone.bsky.social" spellcheck="false" autocomplete="off">
+          <span class="hint">A handle, or a link to someone's profile. Read their posts from any point in time, the same way as a feed.</span>
+        </div>
         <div class="hint" id="feedHint"></div>
       </div>
       <!-- The two answers to "where did I leave off?": this page's memory of
@@ -3160,6 +3364,19 @@ body{transition:padding-right .18s ease}
 </main>
 
 <!-- Settings drawer contents are generated by renderDrawer() from SETTINGS_SCHEMA. -->
+<div class="comp-scrim hidden" id="compScrim"></div>
+<div class="composer hidden" id="composer" role="dialog" aria-modal="true" aria-label="Write a post">
+  <div class="comp-quote hidden" id="compQuote"></div>
+  <textarea id="compText" rows="5" placeholder="Write something…" spellcheck="true"></textarea>
+  <div class="comp-foot">
+    <span class="comp-count" id="compCount"></span>
+    <span class="comp-err" id="compErr"></span>
+    <button class="btn" type="button" id="compCancel">Cancel</button>
+    <button class="btn primary" type="button" id="compPost">Post</button>
+  </div>
+</div>
+<div class="prof-scrim hidden" id="profScrim"></div>
+<div class="profile hidden" id="profile" role="dialog" aria-modal="true" aria-label="Profile"></div>
 <div class="drawer-scrim hidden" id="scrim"></div>
 <aside class="drawer hidden" id="drawer" aria-label="Settings"></aside>
 <!-- Full-size image viewer. Nav buttons and counter only show for multi-image posts. -->
@@ -3171,7 +3388,7 @@ body{transition:padding-right .18s ease}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.4.1";
+const APP_VERSION = "1.5.0";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -3212,7 +3429,23 @@ const isHidden = sel => $(sel).classList.contains("hidden");
 const viewing = name => !isHidden("#view" + name[0].toUpperCase() + name.slice(1));
 /* Brief message at the bottom of the screen (e.g. "Link copied"). */
 let toastTimer;
-function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.remove("hidden"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add("hidden"), 2200); }
+/* A short message at the bottom of the screen. `action` adds one button to
+   it -- used by the composer's "Undo", which wants longer on screen than a
+   message does, hence `ms`. Everything else calls this with a string alone
+   and behaves exactly as it always did. */
+function toast(msg, { action = null, ms = 2200 } = {}) {
+  const t = $("#toast");
+  t.textContent = msg;
+  if (action) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "linkbtn toast-action"; b.textContent = action.label;
+    b.addEventListener("click", () => { t.classList.add("hidden"); action.run(); });
+    t.append(" ", b);
+  }
+  t.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add("hidden"), ms);
+}
 
 /* Inline SVG icons (stroke uses currentColor so CSS colour states apply). */
 const ICON = {
@@ -3291,6 +3524,7 @@ const DEFAULTS = {
   hideFollowedBy: {},
   sensitive: "blur", videoMode: "click", gifMode: "auto", preloadVideos: defaultPreloadVideos(), confirmRepost: true, confirmFollow: true, galleryProxy: true, galleryProxyHost: "xbsky.app",
   wholeImages: "app", mediaWidth: 1, wholeAlt: true, wholeVideo: true, wholeLinkThumbs: true,
+  authorPosts: "posts_with_replies", repliesShown: 10,
   contextCount: 12, scrollTo: "anchor", trackPosition: true, showBrokenFeeds: false, fetchMethod: "auto",
   concurrency: 6, rpm: 500, batchSize: 150,
   appView: "", webHost: "bsky.app",
@@ -3362,6 +3596,34 @@ saveSettings();
    values are what postKinds() returns. */
 const POST_KINDS = [["images", "Images (1–4)"], ["gallery", "Galleries (5+)"], ["video", "Videos"], ["gif", "GIFs"], ["link", "Link cards"], ["quote", "Quote posts"], ["text", "Text only"]];
 
+/* AppViews this page knows the address of, so choosing one doesn't mean
+   knowing a hostname. Short, and deliberately so: an entry here is a claim
+   that the service answers what this page asks of it, and each was checked
+   against the live service rather than taken from a README.
+   Checked for Blacksky (2026-11-10, api.blacksky.community): its did:web
+   document publishes a #bsky_appview service, so the did:web:<host>#bsky_appview
+   convention above reaches it unchanged; getFeed, getListFeed, getAuthorFeed,
+   getPosts, getPostThread, getFeedGenerators, getFollows, getList and
+   getProfile all answer; getAuthorFeed returned byte-identical posts to
+   Bluesky's for three accounts, so it is a full-network index rather than a
+   scoped one. Two things it does NOT do, both already handled:
+     - app.bsky.actor.getPreferences answers 501, so there is no saved-feeds
+       list on the start screen. loadSavedFeeds' caller already treats that as
+       "no preferences" and leaves Following and pasted feed links working.
+     - it serves its pictures from Bluesky's own CDN, which the readout now
+       says out loud (see noteMediaHosts).
+   getTimeline needs authentication, so the Following feed through it could
+   not be checked without an account: that one is unverified.
+   NOT included, and why: Eurosky publishes no AppView address (eurosky.social
+   is a PDS, mu.social a web front-end); api.parakeet.at is scoped to its own
+   accounts and answers 400 for an ordinary one; Blacksky has no web front-end
+   of its own -- blacksky.app is their PDS -- so no entry here touches the
+   front-end box, which is a separate choice with its own setting. */
+const APPVIEW_PRESETS = [
+  ["", "Whatever your server picks"],
+  ["api.bsky.app", "Bluesky"],
+  ["api.blacksky.community", "Blacksky"],
+];
 /* Describes the settings drawer, top to bottom.
    - {group}           renders a section heading
    - key               property in `settings`
@@ -3387,6 +3649,14 @@ const POST_KINDS = [["images", "Images (1–4)"], ["gallery", "Galleries (5+)"],
                        greyed out (and its control disabled) while it doesn't
                        apply; see .set.sub-set / .off, renderDrawer and
                        syncDependents.
+   - derived           this row stores NOTHING of its own: it is a view over
+                       other settings, which it reads with value() and writes
+                       with set() (the AppView picker is a shortcut for the
+                       AppView box under it). No default, never saved, and no
+                       changed dot -- the dot means "this would be saved", and
+                       what would be saved is the row it writes, which carries
+                       its own. Its control is re-read from value() on every
+                       change, so editing the box it writes moves the picker.
    - value / set       a setting that isn't simply settings[key]: value()
                        returns what the row should show and set(v) stores a
                        change (hideFollowed is remembered per feed, so both
@@ -3439,6 +3709,18 @@ const SETTINGS_SCHEMA = [
     needs: () => hideFollowedFits(feedInQuestion()),
     needsWhy: "Your Following feed is nothing but posts from people you follow, so there would be nothing left. This applies to a custom feed or a list.", apply: "render" },
   { key: "sensitive", link: true, label: "Adult or graphic media", type: "select", options: [["blur", "Blur"], ["show", "Show"], ["hide", "Hide the post"]], apply: "render" },
+  { key: "repliesShown", link: true, label: "Replies to show at a time", sub: "The reply button under a post unfolds its replies underneath it. A popular post can have hundreds, and they all arrive in one answer — this is how many go on screen before a “more replies” button, which costs nothing to press.", type: "number", min: 1, max: 200,
+    needs: () => !settings.protocolOnly,
+    needsWhy: "Replies are found through an AppView, which “Build the catch-up without an AppView” doesn't use — there the reply button stays a link out." },
+  // Only an author feed has this question to answer, so the row greys out
+  // everywhere else -- and feedQuery falls back to the default rather than
+  // reading a value that arrived from a link or saved settings (see
+  // EXTENDING: the drawer alone isn't enough).
+  { key: "authorPosts", link: true, label: "Which of their posts", sub: "When reading one person's posts. Bluesky offers these three; “posts and replies” is everything they wrote, which is what a catch-up usually wants.", type: "select",
+    options: [["posts_with_replies", "Posts and replies"], ["posts_no_replies", "Posts only"], ["posts_and_author_threads", "Posts and their own threads"]],
+    needs: () => feedInQuestion().kind === "author",
+    needsWhy: "Only applies while you're reading one person's posts.",
+    apply: "render" },
   { group: "Media and actions" },
   { key: "wholeImages", link: true, label: "Show images whole", sub: "The Bluesky app crops pictures to squares and hides most of a gallery. \u201cShow them whole\u201d gives every picture its own shape, and lets posts with pictures be wider than the text column.", type: "select",
     options: [["app", "Like the Bluesky app"], ["whole", "Show them whole"]], apply: "both" },
@@ -3465,6 +3747,12 @@ const SETTINGS_SCHEMA = [
     needs: () => !settings.protocolOnly,
     needsWhy: "Not used while “Build the catch-up without an AppView” is on, which has its own way of gathering posts." },
   { group: "Advanced" },
+  // A shortcut for the box below, not a setting of its own: see `derived`.
+  { key: "appViewPick", derived: true, label: "Read the network through", sub: "The ones this page knows the address of. Anything else goes in the box below, which this writes.", type: "select",
+    options: [...APPVIEW_PRESETS, ["custom", "Something else — see below"]],
+    value: () => currentAppViewPreset(),
+    set: v => applyAppViewPreset(v),
+    docs: [["What an AppView is", "services"]] },
   { key: "appView", label: "AppView", sub: "An [AppView](services) is the server that assembles feeds, threads and profiles out of the network. Leave this empty and your own server picks one for you — for a bsky.social account, Bluesky’s. Give a hostname (api.bsky.app) or a full [service DID](did) (did:web:api.bsky.app#bsky_appview) to choose. Your posts, likes and follows never come here: those always go to your own server.", type: "text", placeholder: "api.bsky.app",
     docs: [["What an AppView is", "services"], ["How requests work", "xrpc"], ["Lexicons", "lexicon"]] },
   // Deliberately NOT link: true, unlike galleryProxyHost. This one decides
@@ -3701,6 +3989,11 @@ const state = {
   band: null,             // tiled mode: the .band being filled, and
   tile: null,             // the .tile a joined reply gets fused into
   shownUris: new Set(),
+  // Post URIs whose replies are unfolded. Kept on state rather than read off
+  // the DOM because buildView rebuilds the feed from scratch (a setting
+  // change, tiling coming on), and an unfolded thread should survive that
+  // the way the reading position does.
+  openReplies: new Set(),
   itemByKey: new Map(),
   viewIdxByKey: new Map(),
   clockKey: null,
@@ -3756,6 +4049,29 @@ function appViewHost() {
   }
   return hostFromSetting(v);
 }
+/* Which preset the AppView box currently holds, or "custom" for anything
+   else -- including a service DID, which the box takes and no preset uses.
+   The picker is a VIEW over that box (see `derived` in the schema notes), so
+   this is the only thing that decides what it shows, and a value typed in by
+   hand moves it to "custom" rather than leaving a preset's name on screen
+   beside an address it doesn't match. */
+function currentAppViewPreset() {
+  const v = (settings.appView || "").trim().toLowerCase();
+  return APPVIEW_PRESETS.some(([id]) => id === v) ? v : "custom";
+}
+/* Picking one writes the AppView box and does what changing that box does:
+   the readout is redrawn, and the picture hosts learned from the old AppView
+   are forgotten (see noteMediaHosts). "Something else" is only ever SHOWN --
+   it names where the box already is, so choosing it would have nothing to
+   write and leaves everything alone. */
+function applyAppViewPreset(id) {
+  if (id === "custom") return;
+  setSetting("appView", id);
+  const box = $('#drawer [data-k="appView"]');
+  if (box) box.value = id;
+  resetSeenMediaHosts();
+  refreshProtocolReadout();
+}
 /* The value for the `atproto-proxy` header: a service DID, then a # and the
    name of the service on it. A hostname becomes did:web, which is how an
    AppView reached by name identifies itself. null = send no header, i.e. let
@@ -3772,17 +4088,91 @@ function appViewTarget() {
   // A did:web can't contain a bare colon: a port is percent-encoded.
   return host ? `did:web:${host.replace(":", "%3A")}#bsky_appview` : null;
 }
+/* The picture and video hosts the AppView is actually using, LEARNED from the
+   URLs it hands over rather than guessed from its name.
+   Every picture on the page but one comes from an address the AppView gave us
+   (see imgSrcAttrs), so the answer is already arriving on every feed page: the
+   avatar on a post, the thumbnail on an image, the playlist on a video. We
+   just have to notice it. The one exception -- the thumbnails of quotes nested
+   too deep for the API to describe -- is the thing mediaHost() is for, and
+   until 1.4.3 it guessed, by swapping a leading "api." for "cdn."/"video.".
+   That guess is WRONG for a real AppView: Blacksky's api.blacksky.community
+   serves every picture from cdn.bsky.app, and the derived
+   cdn.blacksky.community does not resolve at all. So the guess is now only a
+   fallback for a feed in which nothing has been seen yet.
+   Reset per session alongside postState: a different AppView serves different
+   hosts, and a host learned from the last account must not outlive it. */
+const seenMediaHosts = { cdn: null, video: null, videoPath: null, videoEncodedDid: false };
+function resetSeenMediaHosts() {
+  seenMediaHosts.cdn = null; seenMediaHosts.video = null;
+  seenMediaHosts.videoPath = null; seenMediaHosts.videoEncodedDid = false;
+}
+/* An AppView's media URLs are https://<host>/img/... for pictures and
+   https://<host>/watch/... for video -- the two shapes cdnImg and
+   mediaSummaryHtml build. Anything else is somebody's link preview or an
+   avatar served from elsewhere, and says nothing about this AppView. */
+/* Pictures are .../img/..., video .../watch/... on Bluesky -- but the video
+   path is NOT the same everywhere, and this is the one place a second
+   AppView's shape could be measured rather than assumed. Blacksky serves
+   video from /stream/ with the DID percent-encoded
+   (video.blacksky.community/stream/did%3Aplc%3A.../<cid>/thumbnail.jpg)
+   where Bluesky has video.bsky.app/watch/did:plc:.../<cid>/thumbnail.jpg.
+   So the SHAPE is learned alongside the host: knowing the host alone would
+   have built a /watch/ URL against a server that answers /stream/. */
+const MEDIA_URL_RE = /^https:\/\/([a-z0-9.-]+)\/(img|watch|stream)\/([^/]+)\//i;
+function noteMediaUrl(u) {
+  const m = MEDIA_URL_RE.exec(u);
+  if (!m) return;
+  const kind = m[2].toLowerCase();
+  if (kind === "img") { if (!seenMediaHosts.cdn) seenMediaHosts.cdn = m[1].toLowerCase(); return; }
+  if (seenMediaHosts.video) return;
+  seenMediaHosts.video = m[1].toLowerCase();
+  seenMediaHosts.videoPath = kind;
+  // Whether this AppView writes the DID in the path encoded or plain.
+  seenMediaHosts.videoEncodedDid = /^did%3A/i.test(m[3]);
+}
+/* The address of a video's thumbnail on whichever AppView is in use, or ""
+   when it isn't known -- in which case the caller shows the label alone
+   rather than a broken picture (see mediaSummaryHtml). Only the deeply
+   nested quotes need this; every other video carries its own address from
+   the AppView's answer. */
+function videoThumbUrl(did, cid) {
+  const host = mediaHost("video");
+  if (!host) return "";
+  // Unobserved, the shape is Bluesky's, which is the same assumption the
+  // host's own fallback makes (see mediaHost).
+  const seg = seenMediaHosts.videoPath || "watch";
+  const who = seenMediaHosts.videoEncodedDid ? encodeURIComponent(did) : did;
+  return `https://${host}/${seg}/${who}/${cid}/thumbnail.jpg`;
+}
+/* Walks one feed entry for those URLs. Depth-capped, and it stops the moment
+   both hosts are known, which the first post carrying an avatar usually
+   settles -- so this costs nothing on all but the first few items. The walk is
+   deliberately shape-agnostic rather than a list of known embed fields: a new
+   embed type then teaches it the host without anyone remembering to come back
+   here (see EXTENDING). */
+function noteMediaHosts(v, depth = 0) {
+  if (seenMediaHosts.cdn && seenMediaHosts.video) return;
+  if (typeof v === "string") { if (v.startsWith("https://")) noteMediaUrl(v); return; }
+  if (!v || typeof v !== "object" || depth > 6) return;
+  for (const x of Object.values(v)) noteMediaHosts(x, depth + 1);
+}
 /* The hosts that serve an AppView's pictures and video. No part of the
-   protocol names them, so there is nothing to look up: Bluesky's AppView at
-   api.bsky.app serves pictures from cdn.bsky.app and video from
-   video.bsky.app, and the AppViews forked from it keep that
-   "api." -> "cdn."/"video." arrangement. So the leading label is swapped when
-   there is one to swap, and otherwise we answer "unknown" (null) rather than
-   guess. Only the thumbnails of deeply nested quotes are built from these (see
-   mediaSummaryHtml); they're decoration, and leaving one out is better than
-   both a broken picture and a quiet request to Bluesky after someone asked
-   this page not to make any. */
+   protocol names them, so there is nothing to look up. What the AppView has
+   actually served wins (see above); failing that, Bluesky's AppView at
+   api.bsky.app serves pictures from cdn.bsky.app and video from video.bsky.app
+   and the AppViews forked from it keep that "api." -> "cdn."/"video."
+   arrangement, so the leading label is swapped when there is one to swap, and
+   otherwise we answer "unknown" (null) rather than guess. Only the thumbnails
+   of deeply nested quotes are built from these (see mediaSummaryHtml); they're
+   decoration, and leaving one out is better than both a broken picture and a
+   quiet request to Bluesky after someone asked this page not to make any. */
 function mediaHost(prefix) {
+  if (seenMediaHosts[prefix]) return seenMediaHosts[prefix];
+  return namingDisproved() ? null : derivedMediaHost(prefix);
+}
+/* The guess itself: the AppView's name with its leading label swapped. */
+function derivedMediaHost(prefix) {
   // "No AppView chosen" and "an AppView chosen whose host can't be worked
   // out" are different answers. Only the first means Bluesky's CDN: a
   // did:plc AppView has no host in its identifier, and falling back there
@@ -3791,6 +4181,26 @@ function mediaHost(prefix) {
   const host = appViewHost();
   if (!host) return null;
   return /^api\./i.test(host) ? prefix + host.slice(3) : null;
+}
+/* Was this host seen in the AppView's own answers, or only worked out from its
+   name? The readout says which, because the two are not the same claim. */
+const mediaHostObserved = prefix => !!seenMediaHosts[prefix];
+/* Has this AppView already shown that the "api." -> "cdn."/"video." naming
+   convention does not hold for it?
+   This is the mixed case, and it is the common one: a feed full of pictures
+   and no video at all settles the CDN and leaves the video host unseen. If
+   what we saw is NOT where the AppView's name said it would be -- as with
+   Blacksky, whose api.blacksky.community serves cdn.bsky.app -- then the
+   convention is disproved FOR THIS APPVIEW, and using it for the other host
+   would be guessing from a rule we have already watched fail. So that host
+   answers "unknown" instead, the thumbnails for it are left out, and the
+   readout stops naming a host nothing has seen beside one that was. */
+function namingDisproved() {
+  for (const prefix of ["cdn", "video"]) {
+    const seen = seenMediaHosts[prefix];
+    if (seen && seen !== derivedMediaHost(prefix)) return true;
+  }
+  return false;
 }
 /* An https:// endpoint out of a setting that holds one, or null. Used for the
    two settings that name a whole service rather than a bare host (a DNS-over-
@@ -4165,6 +4575,8 @@ function forgetAccount() {
   state.hiddenFollowed = 0;
   state.items = []; state.view = []; state.rendered = 0;
   state.postState = new Map(); state.authors = new Map(); hydrateQueue.clear();
+  // Learned from the last account's AppView, so it must not outlive it.
+  resetSeenMediaHosts();
   state.savedFeeds = null; state.run = null; state.maxRead = null;
   chosenFeed = null;
   // The picker is filled once per sign-in (its data-filled marker), so it has
@@ -4218,6 +4630,11 @@ function sortAtOf(fi) {
    anyway. */
 function mkItem(fi, t = sortAtOf(fi)) {
   const key = isRepost(fi) ? "r:" + (fi.reason.uri || fi.reason.by?.did + "@" + fi.reason.indexedAt) + "|" + fi.post.uri : "p:" + fi.post.uri;
+  // Every entry, whichever strategy fetched it, is also where we learn which
+  // hosts this AppView serves pictures and video from (see noteMediaHosts).
+  // This runs while the catch-up is being gathered, so the answer is in hand
+  // before anything is drawn.
+  noteMediaHosts(fi);
   return { key, t, fi };
 }
 /* How far a feed may step BACKWARDS (towards newer) between consecutive items
@@ -4301,13 +4718,28 @@ async function loadProfile() {
    Used by rebuild mode (the list of feeds to fetch) and by the reply filter
    ("only replies to people I follow") in both modes. ~100 per request. */
 async function loadFollows(signal, onProgress) {
-  const m = new Map(); let cursor, r;
-  do {
-    r = await xrpc("app.bsky.graph.getFollows", { actor: me(), limit: 100, cursor }, { signal });
+  const m = new Map(); let cursor;
+  // Bounded, like every other paging loop here (fetchFeed, fetchRebuild).
+  // 500 pages is 50,000 accounts: past any real follow list, and the point
+  // is that there IS a last page rather than what the number is.
+  for (let page = 0; page < 500; page++) {
+    const r = await xrpc("app.bsky.graph.getFollows", { actor: me(), limit: 100, cursor }, { signal });
+    const before = m.size;
     for (const p of r.follows || []) m.set(p.did, p);
     onProgress?.(m.size);
+    if (!r.cursor || !(r.follows || []).length) break;
+    // A cursor that doesn't move, or a page that adds nobody new, means the
+    // server is serving the same page for ever. Measured against Blacksky's
+    // AppView (2026-11-10): its getFollows cursor is inclusive of the last
+    // account, so the final page comes back as that one account with the
+    // cursor unchanged -- never empty, never without a cursor. The old
+    // do/while asked only those two questions, so it spun, making requests
+    // without bound, with the progress line frozen on the count it had.
+    // Stopping here can only lose accounts a server was never going to hand
+    // over anyway: it has already said it has nothing further.
+    if (r.cursor === cursor || m.size === before) break;
     cursor = r.cursor;
-  } while (cursor && (r.follows || []).length);
+  }
   state.follows = m;
 }
 /* Loads the follow list in the middle of a catch-up, for the one setting that
@@ -4344,11 +4776,13 @@ const FOLLOWING = { kind: "timeline", name: "Following" };
    but posts from people you follow, so there the filter would empty the page.
    gather() only ever rebuilds a timeline source (canRebuild), so this one test
    covers both. */
-const hideFollowedFits = src => (src || FOLLOWING).kind !== "timeline";
+/* Nor on one person's posts: you either follow them, and it empties the page,
+   or you don't, and it does nothing. */
+const hideFollowedFits = src => !["timeline", "author"].includes((src || FOLLOWING).kind);
 /* How a feed is keyed in settings.hideFollowedBy: its at:// URI. The timeline
    has none and never needs one (the filter can't fit there), so it keys to "",
    which hideFollowedFor and setHideFollowed both read as "no slot". */
-const feedKey = src => { const s = src || FOLLOWING; return s.kind === "timeline" ? "" : s.uri; };
+const feedKey = src => { const s = src || FOLLOWING; return hideFollowedFits(s) ? s.uri : ""; };
 /* What "Hide people I follow" means on one particular feed, which is the only
    question anything should ask. Newest wins:
      1. "off" wherever the filter doesn't fit (hideFollowedFits) -- that is what
@@ -4382,6 +4816,12 @@ const hideFollowedMode = () => hideFollowedFor(feedInQuestion());
 function feedQuery(src) {
   if (src?.kind === "feed") return ["app.bsky.feed.getFeed", { feed: src.uri }];
   if (src?.kind === "list") return ["app.bsky.feed.getListFeed", { list: src.uri }];
+  // One person's posts. getAuthorFeed pages newest-first with a cursor exactly
+  // as the other three do, which is why everything downstream -- fetchFeed,
+  // gather, computeView, the dividers, every starting point -- needed nothing
+  // added for it. fetchRebuild has read author feeds since 0.5.0; this is the
+  // same call aimed at one account the reader chose.
+  if (src?.kind === "author") return ["app.bsky.feed.getAuthorFeed", { actor: src.did, filter: settings.authorPosts || DEFAULTS.authorPosts }];
   return ["app.bsky.feed.getTimeline", {}];
 }
 /* Strategy (a): page a feed newest-first until it reaches `until` (a
@@ -4718,7 +5158,9 @@ async function gather(src, until, max, signal, label) {
   // Following feed and is ignored elsewhere, with the note saying so.
   if (settings.protocolOnly) {
     if (!canRebuild) {
-      note = `${src.name || "This feed"} is put together by an AppView, so it can't be read from repositories. This one came the usual way.`;
+      note = src.kind === "author"
+        ? `${src.name}'s posts came through an AppView: reading one account straight from its own repository isn't built yet.`
+        : `${src.name || "This feed"} is put together by an AppView, so it can't be read from repositories. This one came the usual way.`;
     } else {
       setProgress({ title: label, stage: "Finding the accounts you follow…", fraction: 0 });
       const r = await fetchProtocol(until, signal, p => setProgress({
@@ -4743,7 +5185,9 @@ async function gather(src, until, max, signal, label) {
     if (!r.exhausted || fm === "timeline") {
       if (r.exhausted) note = canRebuild
         ? `The timeline only reached back to ${fmtClock(r.oldest)}.`
-        : `${src.name || "This feed"} only goes back to ${fmtClock(r.oldest)}. Custom feeds decide for themselves how much history they keep.`;
+        : src.kind === "author"
+          ? `${src.name} only goes back to ${fmtClock(r.oldest)} here — that looks like the whole of what they've posted.`
+          : `${src.name || "This feed"} only goes back to ${fmtClock(r.oldest)}. Custom feeds decide for themselves how much history they keep.`;
       return { items: r.items, method, note, ranked: r.ranked };
     }
     note = `The timeline stopped at ${fmtClock(r.oldest)}, so the feed was rebuilt from your follows.`;
@@ -4774,6 +5218,40 @@ function feedSourceFromUri(uri) {
   if (m) return { kind: "list", uri: `at://${m[1]}/app.bsky.graph.list/${m[2]}` };
   return null;
 }
+/* A person, however they were named: a bare handle, a DID, an @handle, or a
+   link to their profile on ANY front-end (the same reasoning as parsePostRef
+   -- whoever set webHost elsewhere will be pasting that site's links). */
+function parseActorRef(input) {
+  const s = String(input || "").trim().replace(/^@/, "");
+  if (!s) return null;
+  if (/^did:[a-z]+:/i.test(s)) return s;
+  const m = s.replace(/^https?:\/\//i, "").match(/^[\w.-]+\/profile\/([^/?#\s]+)/);
+  if (m) return decodeURIComponent(m[1]).replace(/^@/, "");
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(s) ? s : null;
+}
+/* Turns that into the feed source. The handle is resolved through
+   com.atproto.identity.resolveHandle, which goes to the user's OWN server and
+   is never proxied, so this works whatever AppView is in use -- including one
+   whose own handle resolution has gaps. The display name is a nicety: if
+   getProfile can't answer (protocol mode, or an AppView that doesn't know
+   them) the DID stands in rather than the whole thing failing. */
+async function authorSourceFrom(input, signal) {
+  const ref = parseActorRef(input);
+  if (!ref) throw new Error("That doesn't look like a person. Use a handle like name.bsky.social, or a link to their profile.");
+  let did = ref, handle = ref.startsWith("did:") ? null : ref;
+  if (!did.startsWith("did:")) {
+    try { did = (await xrpc("com.atproto.identity.resolveHandle", { handle: ref }, { signal })).did; }
+    catch { throw new Error(`Couldn't find @${ref}. Check the handle, or paste a link to their profile.`); }
+  }
+  if (!handle && !settings.protocolOnly) {
+    try { handle = (await xrpc("app.bsky.actor.getProfile", { actor: did }, { signal })).handle; } catch {}
+  }
+  return authorSource(did, handle);
+}
+const authorSource = (did, handle) => ({ kind: "author", did, handle: handle || null, name: "@" + (handle || did) });
+/* How the picker and catch-up links name an author source, which has no
+   at:// URI of its own the way a feed or list does. */
+const srcValue = src => (src?.kind === "author" ? "author:" + src.did : src?.uri || "");
 /* Resolves what someone typed into a feed source, looking up the handle if
    the link uses one. Throws a readable message if it isn't a feed or list. */
 async function parseFeedInput(input, signal) {
@@ -5010,6 +5488,20 @@ function readHashRequest() {
   const feedUri = q.get("feed");
   const feed = feedUri ? feedSourceFromUri(feedUri) : null;
   if (feedUri && !feed) return { error: "The feed in this page's link couldn't be read." };
+  // One person's posts. The link carries their DID, which is the part that
+  // doesn't change when a handle does; the handle is fetched for the name
+  // when the catch-up starts (see startCatchup).
+  const author = q.get("author");
+  if (author && !feed) {
+    if (!/^did:[a-z]+:/i.test(author)) return { error: "The person in this page's link couldn't be read." };
+    return readHashStart(q, end, authorSource(author));
+  }
+  return readHashStart(q, end, feed);
+}
+/* The start point of a link, once the feed it names has been worked out.
+   Shared so a feed, a list, one person's posts and the plain timeline all
+   read their start the same way. */
+function readHashStart(q, end, feed) {
   if (q.has("resume")) return { start: { kind: "resume" }, end, feed };
   if (q.has("recent")) {
     const n = Number(q.get("recent"));
@@ -5065,7 +5557,8 @@ function writeHash(kind, value, end, src, atT = null) {
   };
   let h = kind === "resume" ? "resume" : kind === "recent" ? "recent=" + Math.max(1, Number(value) || 0) : "from=" + point(kind, value, atT);
   if (end) h += "&to=" + point(end.kind, end.kind === "date" ? end.t : end.input);
-  if (src && src.kind !== "timeline" && src.uri) h += "&feed=" + encodeURIComponent(src.uri);
+  if (src?.kind === "author") h += "&author=" + encodeURIComponent(src.did);
+  else if (src && src.kind !== "timeline" && src.uri) h += "&feed=" + encodeURIComponent(src.uri);
   h += `&v=${LINK_FORMAT}` + overlayParams();
   setAddress(location.pathname + location.search + "#" + h);
 }
@@ -5080,9 +5573,10 @@ function clearHash() { setAddress(location.pathname + location.search); }
    so a 0.13.x copy says something instead of quietly reading Following, and
    4 marks the links whose post points can carry a time (<post link>@<secs>),
    which an older copy would read as part of the rkey and then report the post
-   as deleted.
+   as deleted, and 5 marks the links that can name one person (author=<did>),
+   which an older copy would ignore and read Following instead.
    Links without v were made by 0.7.0/0.8.0 and count as format 0. */
-const LINK_FORMAT = 4;
+const LINK_FORMAT = 5;
 /* For each link format: linkable defaults that were DIFFERENT back then,
    as {key: oldDefault}. Links only carry non-default settings, so when a
    link that carries settings is opened, keys it omits are filled from this
@@ -5096,6 +5590,7 @@ const LINK_FORMAT_DEFAULTS = {
   2: { tileMax: 4 },   // 1.1.0 shipped "Most columns" at 4; 1.1.1 made it 2
   3: {},               // 0.14.0's bump (to 2) was for feed= links, not a default
   4: {},               // 1.3.0's bump (to 4) was for timed post points, likewise
+  5: {},               // and 1.5.0's (to 5) for author= links, likewise
 };
 /* Renamed settings and values, so old links keep working. Never rename a
    linkable setting key or option value without adding an entry here.
@@ -5291,6 +5786,16 @@ async function startCatchup(kind, value, end = null, feed = null, atT = null) {
     // something different to every person who opened it, and would change
     // under its own author the moment they liked something else.
     let startNote = null;
+    // A catch-up link names a person by DID, which is what doesn't change
+    // when a handle does. Their handle is only for showing, so a failure
+    // here leaves the DID on screen rather than stopping the catch-up.
+    if (src.kind === "author" && !src.handle) {
+      setProgress({ stage: "Looking up the account\u2026" });
+      try {
+        const prof = await xrpc("app.bsky.actor.getProfile", { actor: src.did }, { signal });
+        if (prof?.handle) { src.handle = prof.handle; src.name = "@" + prof.handle; }
+      } catch {}
+    }
     if (kind === "like") {
       setProgress({ stage: "Finding the last post you liked…" });
       const like = await latestLike(signal);
@@ -6240,7 +6745,7 @@ function profileUrl(a) { return profileLinkFor(a.handle && a.handle !== "handle.
      timeTitle only the post has one. */
 function headHtml(a, { href, timeHtml, timeTitle = "", avatar = false }) {
   return `<div class="pv-head">${avatar && a.avatar ? `<img class="avatar" src="${esc(a.avatar)}" alt="" loading="lazy">` : ""}
-        <a class="pv-name" href="${esc(profileUrl(a))}" target="_blank" rel="noopener">${esc(a.displayName || a.handle)}</a>
+        <a class="pv-name" href="${esc(profileUrl(a))}" target="_blank" rel="noopener" data-act="profile" data-actor="${esc(a.did || a.handle || "")}">${esc(a.displayName || a.handle)}</a>
         <span class="pv-handle">@${esc(a.handle)}</span>
         <a class="pv-time" href="${esc(href)}" target="_blank" rel="noopener"${timeTitle ? ` title="${esc(timeTitle)}"` : ""}>${timeHtml}</a></div>`;
 }
@@ -6260,11 +6765,13 @@ function richText(text, facets) {
     if (s < pos || e > bytes.length || e <= s) continue;
     out += esc(dec.decode(bytes.slice(pos, s)));
     const seg = esc(dec.decode(bytes.slice(s, e)));
-    const feat = f.features[0]; let href = null;
+    const feat = f.features[0]; let href = null, actor = null;
     if (feat.$type === "app.bsky.richtext.facet#link") href = safeUrl(feat.uri);
-    else if (feat.$type === "app.bsky.richtext.facet#mention") href = profileLinkFor(feat.did);
+    else if (feat.$type === "app.bsky.richtext.facet#mention") { href = profileLinkFor(feat.did); actor = feat.did; }
     else if (feat.$type === "app.bsky.richtext.facet#tag") href = `https://${webLinkHost()}/hashtag/${encodeURIComponent(feat.tag)}`;
-    out += href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${seg}</a>` : seg;
+    // A mention opens the person in the panel, like a name or an avatar does.
+    const mention = actor ? ` data-act="profile" data-actor="${esc(actor)}"` : "";
+    out += href ? `<a href="${esc(href)}" target="_blank" rel="noopener"${mention}>${seg}</a>` : seg;
     pos = e;
   }
   return out + esc(dec.decode(bytes.slice(pos)));
@@ -6410,7 +6917,23 @@ function observeVideos(root) {
     if (settings.videoMode === "autoplay" || (v.dataset.gif && gifAutoplay())) videoObserver().observe(v);
   });
 }
-/* Action bar markup. Reply opens bsky.app (no in-page composer by design). */
+/* The reply button. Ordinarily it unfolds the replies underneath the post
+   (toggleReplies); the button at the end of the bar is still the way out to a
+   front-end, so nothing is lost by it no longer being a link.
+   In protocol mode it stays a link: replies are found with getPostThread,
+   which only an AppView can answer, and there is no way to discover who
+   replied by reading repositories.
+   A post with NO replies still gets the toggle, because that box is also
+   where you write one from (see drawReplies): without it, the one kind of
+   post you most want to answer -- the one nobody has answered yet -- would
+   be the one you couldn't answer from here. */
+function repliesBtnHtml(p, s, c) {
+  const out = `<a class="act" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Reply on ${esc(webLinkHost())}">${ICON.reply}${c(s.replyCount)}</a>`;
+  if (settings.protocolOnly) return out;
+  const open = state.openReplies.has(p.uri);
+  return `<button class="act${open ? " on" : ""}" type="button" data-act="replies" title="${open ? "Hide the replies" : "Show the replies"}">${ICON.reply}${c(s.replyCount)}</button>`;
+}
+/* Action bar markup. Reply unfolds the replies in place (see repliesBtnHtml). */
 function actionsHtml(p) {
   const s = ps(p); const c = n => settings.showCounts && n ? `<span>${fmtNum(n)}</span>` : "";
   // Like/repost are disabled until we know this user's current state (see ps).
@@ -6419,7 +6942,7 @@ function actionsHtml(p) {
   const pend = f => (s[f] === "pending" ? " pending" : "");
   const waitTitle = s.unavailable ? "This post isn't available" : "Checking whether you've already liked or reposted this…";
   return `${followBtnHtml(p.author || {})}
-    <a class="act" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Reply on ${esc(webLinkHost())}">${ICON.reply}${c(s.replyCount)}</a>
+    ${repliesBtnHtml(p, s, c)}
     <button class="act${s.repost ? " reposted" : ""}${wait}${pend("repost")}" type="button" data-act="repost" title="${s.repost === "pending" ? "Saving…" : s.hydrated ? (s.repost ? "Undo repost" : "Repost") : waitTitle}">${ICON.repost}${c(s.repostCount)}</button>
     <button class="act${s.like ? " liked" : ""}${wait}${pend("like")}" type="button" data-act="like" title="${s.like === "pending" ? "Saving…" : s.hydrated ? (s.like ? "Unlike" : "Like") : waitTitle}">${s.like ? ICON.liked : ICON.like}${c(s.likeCount)}</button>
     <button class="act right" type="button" data-act="copy" title="Copy link">${ICON.link}</button>
@@ -6468,6 +6991,22 @@ function bodyOrder({ text, media, quote, actions }) {
    exist when there is something to put in them, which is what has-lead and
    has-meta say to the grid. Written in reading order, so the DOM, the eye
    and the tab order all agree. */
+/* The "Reposted by X" line. Drawn by the feed and by the profile panel, which
+   shows a person's reposts among their posts and would otherwise put someone
+   else's words under their name with nothing to say so.
+   Goes INSIDE the post rather than above it, so that a quote the setting has
+   put first leads the card and this line stays with the bar it belongs to. A
+   reposted reply shows no parent cards (ctx is "none"), so nothing can come
+   between the two. `t` is when it was reposted (fi.reason.indexedAt), not
+   when the post was written.
+   The reposter's name links to their profile, so you can go and turn their
+   reposts off if they're flooding your feed. Falls back to plain text if the
+   feed didn't say who (no handle and no did to link to). */
+function repostMetaHtml(by, t, feedT) {
+  const byName = esc(by.displayName || by.handle || "someone");
+  const byLink = by.handle || by.did ? `<a class="pv-name" href="${esc(profileUrl(by))}" target="_blank" rel="noopener" data-act="profile" data-actor="${esc(by.did || by.handle || "")}">${byName}</a>` : byName;
+  return `<div class="post-meta-line">${ICON.repost}<span>Reposted by ${byLink}</span><span class="repost-time" title="Reposted ${esc(new Date(t).toLocaleString())}">${esc(fmtPostTime(t, feedT))}</span></div>`;
+}
 function postViewHtml(p, { extraClass = "", replyTo = null, t = null, feedT = null, meta = "" } = {}) {
   const a = p.author || {}; const rec = p.record || {};
   const time = t ?? sortAtOf({ post: p });   // the post's own time (for reposts: the original's)
@@ -6480,7 +7019,7 @@ function postViewHtml(p, { extraClass = "", replyTo = null, t = null, feedT = nu
   return `<div class="pv ${extraClass}${lead ? " has-lead" : ""}${meta ? " has-meta" : ""}" data-uri="${esc(p.uri)}">
     ${lead ? `<div class="pv-lead">${lead}</div>` : ""}
     ${meta}
-    <a class="avatar-link" href="${esc(profileUrl(a))}" target="_blank" rel="noopener" tabindex="-1">${avatar}</a>
+    <a class="avatar-link" href="${esc(profileUrl(a))}" target="_blank" rel="noopener" tabindex="-1" data-act="profile" data-actor="${esc(a.did || a.handle || "")}">${avatar}</a>
     ${headHtml(a, { href: postUrl(p), timeHtml: esc(fmtPostTime(time, feedT ?? time)), timeTitle: new Date(time).toLocaleString() })}
     <div class="pv-body">
       ${replyTo ? `<div class="reply-to">Replying to ${esc(replyTo)}</div>` : ""}
@@ -6517,21 +7056,7 @@ function renderItem(it, i, ctx = "none") {
   // are allowed to be wider than the reading column (see the .has-media CSS).
   // postKinds() already works out what a post (and its quote) contains.
   if (wholeMode() && hasWideMedia(p)) el.classList.add("has-media");
-  let html = "", meta = "";
-  if (isRepost(fi)) {
-    const by = fi.reason.by || {};
-    // The reposter's name links to their profile, so you can go and turn
-    // their reposts off if they're flooding your feed. Falls back to plain
-    // text if the feed didn't say who (no handle and no did to link to).
-    const byName = esc(by.displayName || by.handle || "someone");
-    const byLink = by.handle || by.did ? `<a class="pv-name" href="${esc(profileUrl(by))}" target="_blank" rel="noopener">${byName}</a>` : byName;
-    // Goes INSIDE the post rather than above it, so that a quote the
-    // setting has put first leads the card and this line stays with the bar
-    // it belongs to. A reposted reply shows no parent cards (ctx is "none"),
-    // so nothing can come between the two.
-    // it.t for a repost is when it was reposted (fi.reason.indexedAt).
-    meta = `<div class="post-meta-line">${ICON.repost}<span>Reposted by ${byLink}</span><span class="repost-time" title="Reposted ${esc(new Date(it.t).toLocaleString())}">${esc(fmtPostTime(it.t, feedT))}</span></div>`;
-  }
+  let html = "", meta = isRepost(fi) ? repostMetaHtml(fi.reason.by || {}, it.t, feedT) : "";
   const parent = fi.reply?.parent, root = fi.reply?.root;
   const parentOk = isPV(parent);
   let replyTo = null;
@@ -6609,6 +7134,104 @@ async function expandThreadGap(btn) {
   schedulePreload();
 }
 
+/* ---------- replies in place ----------
+   Modelled on expandThreadGap above: ask the AppView, render with the same
+   postViewHtml the feed uses, splice into the live DOM, then let the video
+   and span observers catch up.
+   HOW MANY. getPostThread takes uri, depth and parentHeight and nothing else
+   -- no limit, no cursor -- so one request brings back whatever it brings
+   back. The budget is therefore ours and has two parts: depth 1, so only the
+   direct replies come (a reply's own replies are a second request, made only
+   if you ask for them), and a render cap, so a post with four hundred replies
+   puts ten on screen and a button for the rest. Everything fetched is in
+   hand, so "more" is instant.
+   ORDER is oldest first, like the catch-up itself: a thread read downwards is
+   the same motion as the feed.
+   Replies nest for free -- every reply card is drawn by the same code and so
+   carries the same reply button, which unfolds ITS replies underneath it. */
+const replyCache = new Map();        // post URI -> the replies fetched for it
+async function toggleReplies(btn) {
+  // [data-uri], not .pv: a QUOTED post is a .quote carrying its own action
+  // bar (see quoteHtml), and .pv would walk straight past it to the post
+  // doing the quoting -- fetching the wrong post's replies and hanging them
+  // under the wrong card. Every other action in the bar finds its post this
+  // way, and both .pv and .quote can host the box.
+  const pv = btn.closest("[data-uri]"); const uri = pv?.dataset.uri;
+  if (!uri || btn.disabled) return;
+  const box = pv.querySelector(":scope > .replies");
+  if (box) {                          // open: fold it away again
+    box.remove();
+    state.openReplies.delete(uri);
+    refreshActions(uri);
+    return;
+  }
+  btn.disabled = true; btn.classList.add("busy");
+  try {
+    if (!replyCache.has(uri)) {
+      const res = await xrpc("app.bsky.feed.getPostThread", { uri, depth: 1, parentHeight: 0 }, { priority: true, retries: 2 });
+      if (!isTVP(res.thread)) throw new Error("no thread");
+      replyCache.set(uri, (res.thread.replies || []).slice().sort((a, b) => replyTime(a) - replyTime(b)));
+    }
+  } catch {
+    btn.disabled = false; btn.classList.remove("busy");
+    toast("Couldn't load the replies");
+    return;
+  }
+  btn.disabled = false; btn.classList.remove("busy");
+  state.openReplies.add(uri);
+  const el = document.createElement("div");
+  el.className = "replies";
+  el.dataset.for = uri;
+  // INSIDE the post's own .pv, not after it: the replies belong to that post,
+  // nesting then works identically at every level, and "the card's last .pv
+  // is the post itself" stays true for anything that walks the markup.
+  pv.append(el);
+  drawReplies(el, uri, numSetting("repliesShown"));
+  refreshActions(uri);
+}
+const replyTime = node => (isTVP(node) ? sortAtOf({ post: node.post }) : 0);
+/* Opens the composer to answer one post. A reply names the post it answers
+   (parent) AND the post the thread hangs off (root). They differ the moment
+   you answer a reply: taking the parent for the root would file the whole
+   exchange under the wrong conversation, which every other client would then
+   show in the wrong place. The post's own record says what its root is; a
+   post that isn't a reply IS the root. */
+function replyToPost(uri) {
+  const st = state.postState.get(uri); const post = st?.post;
+  if (!post?.cid) return;
+  const ref = { uri: post.uri, cid: post.cid };
+  const theirRoot = post.record?.reply?.root;
+  const root = theirRoot?.uri && theirRoot?.cid ? { uri: theirRoot.uri, cid: theirRoot.cid } : ref;
+  openComposer({ to: { post }, reply: { root, parent: ref } });
+}
+/* Draws the first `shown` of a post's replies, with a button for the rest.
+   Called again by that button with a bigger number -- nothing is refetched,
+   because the whole page came in one response. */
+function drawReplies(el, uri, shown) {
+  const all = replyCache.get(uri) || [];
+  const n = Math.max(0, Math.min(shown, all.length));
+  const rest = all.length - n;
+  // The box leads with the way to answer, so replying costs the same one
+  // press whether a post has four hundred replies or none.
+  el.innerHTML = `<button type="button" class="reply-write" data-act="reply-to" data-uri="${esc(uri)}">Write a reply\u2026</button>`
+    + (n ? all.slice(0, n).map(replyNodeHtml).join("") : `<div class="reply-note">No replies yet.</div>`)
+    + (rest ? `<button type="button" class="more-replies" data-act="more-replies" data-uri="${esc(uri)}" data-shown="${n}">${rest.toLocaleString()} more ${plural(rest, "reply", "replies")}</button>` : "");
+  observeVideos(el);
+  // The card just got taller. Tiled, its row span is measured, and the
+  // observer only reports a change after it has happened -- fixIfShort is the
+  // same catch-up pass a loading picture uses.
+  const tile = el.closest(".tile");
+  if (tile) fixIfShort(tile);
+}
+/* One reply. A thread can come back with gaps in it -- a deleted post, a
+   block either way -- and those are nodes too; saying so is better than a
+   silently shorter thread. */
+function replyNodeHtml(node) {
+  if (isTVP(node)) return postViewHtml(node.post, { extraClass: "parent reply" });
+  if (node?.$type === "app.bsky.feed.defs#blockedPost") return `<div class="reply-note">A reply from someone blocked.</div>`;
+  if (node?.$type === "app.bsky.feed.defs#notFoundPost") return `<div class="reply-note">A reply that's been deleted.</div>`;
+  return "";
+}
 /* One-line reminder of a parent post: "Replying to [avatar] Name: text…",
    or of a thread's first post ("Thread started by…") when which = "root".
    It's a real <button> (keyboard accessible); the delegated click handler
@@ -6914,7 +7537,7 @@ function mediaSummaryHtml(rawEmbed, p, { withQuote = true } = {}) {
     // but only the first four are visible.
     thumbs = m.images.map((im, i) => `<button class="mini-thumb${i >= 4 ? " hidden" : ""}" type="button" data-act="zoom" data-full="${esc(cdnImg("feed_fullsize", did, im.cid, pds))}" data-alt="${esc(im.alt)}" title="${esc(im.alt || "View image")}"><img src="${esc(cdnImg("feed_thumbnail", did, im.cid, pds))}" alt="${esc(im.alt)}" loading="lazy"></button>`).join("");
   } else if (m.video?.cid && videoHost) {
-    thumbs = `<a class="mini-thumb vid" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Watch on ${esc(webLinkHost())}"><img src="https://${esc(videoHost)}/watch/${esc(did)}/${esc(m.video.cid)}/thumbnail.jpg" alt="" loading="lazy"></a>`;
+    thumbs = `<a class="mini-thumb vid" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Watch on ${esc(webLinkHost())}"><img src="${esc(videoThumbUrl(did, m.video.cid))}" alt="" loading="lazy"></a>`;
   }
   const inner = `${thumbs ? `<div class="mini-thumbs">${thumbs}</div>` : ""}<a class="ms-label" href="${esc(postUrl(p))}" target="_blank" rel="noopener">${esc(labels.join(" · "))} · View on ${esc(webLinkHost())}</a>`;
   return `<div class="media-summary">${thumbs ? wrapSensitive(inner, p) : inner}</div>${quoted}`;
@@ -7423,12 +8046,16 @@ function showMenu(btn, items) {
   m.addEventListener("click", ev => { const b = ev.target.closest("[data-m]"); if (!b) return; items[Number(b.dataset.m)].run?.(); closeMenu(); });
   openMenu = m;
 }
-/* Repost / Quote on bsky.app, when "Ask before reposting" is on. */
+/* Repost / Quote, when "Ask before reposting" is on. The quote item names
+   the front-end it will actually open (webHost), like every other label
+   that links out; it said "bsky.app" until 1.4.2, while the link beside it
+   already followed the setting. */
 function showRepostMenu(btn, uri) {
   const s = state.postState.get(uri);
   showMenu(btn, [
     { icon: ICON.repost, label: s.repost ? "Undo repost" : "Repost", run: () => toggleRecord(uri, "repost") },
-    { icon: ICON.open, label: "Quote on bsky.app", href: postUrl(s.post) },
+    { icon: ICON.reply, label: "Quote", run: () => openComposer({ quote: { uri, cid: s.post.cid, post: s.post } }) },
+    { icon: ICON.open, label: `Open on ${webLinkHost()}`, href: postUrl(s.post) },
   ]);
 }
 /* Follow / Unfollow, when "Ask before following" is on. Both directions ask:
@@ -7439,7 +8066,7 @@ function showFollowMenu(btn, did) {
   const on = !!fs(a).follow;
   showMenu(btn, [
     { icon: on ? ICON.following : ICON.follow, label: `${on ? "Unfollow" : "Follow"} @${a.handle}`, run: () => toggleFollow(did) },
-    { icon: ICON.open, label: "Their profile on bsky.app", href: profileUrl(a) },
+    { icon: ICON.open, label: `Their profile on ${webLinkHost()}`, href: profileUrl(a) },
   ]);
 }
 /* One delegated click handler for every interactive element inside the feed
@@ -7448,7 +8075,9 @@ function showFollowMenu(btn, did) {
    data-act="like|repost|follow|copy|zoom|gscroll|reveal|play|retry|expand-parent|expand-gap". */
 document.addEventListener("click", ev => {
   if (openMenu && !openMenu.contains(ev.target) && !ev.target.closest('[data-act="repost"], [data-act="follow"]')) closeMenu();
-  const btn = ev.target.closest("[data-act]"); if (!btn || !btn.closest("#feed")) return;
+  // The panel's posts carry the same action buttons as the feed's, and its
+  // own controls use the same mechanism, so it is served from here too.
+  const btn = ev.target.closest("[data-act]"); if (!btn || !(btn.closest("#feed") || btn.closest("#profile"))) return;
   const act = btn.dataset.act;
   const uri = btn.closest("[data-uri]")?.dataset.uri;
   if (act === "like") toggleRecord(uri, "like");
@@ -7486,6 +8115,18 @@ document.addEventListener("click", ev => {
     }
   }
   else if (act === "expand-gap") expandThreadGap(btn);
+  else if (act === "replies") toggleReplies(btn);
+  else if (act === "more-replies") drawReplies(btn.parentElement, btn.dataset.uri, Number(btn.dataset.shown) + numSetting("repliesShown"));
+  else if (act === "reply-to") replyToPost(btn.dataset.uri);
+  else if (act === "prof-close") closeProfile();
+  else if (act === "prof-read") readAuthorHere(btn.dataset.actor);
+  else if (act === "profile") {
+    // Modified clicks and middle clicks belong to the browser: someone
+    // asking for a new tab gets the front-end, as the href says.
+    if (ev.defaultPrevented || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) return;
+    ev.preventDefault();
+    openProfile(btn.dataset.actor);
+  }
   else if (act === "retry") videoRetry(btn.closest(".video"));
   else if (act === "play") {
     // Resolves immediately when HLS is native or hls.js is already in; only a
@@ -7519,7 +8160,7 @@ document.addEventListener("click", ev => {
    functions return early when their overlay is already hidden, which is
    what keeps Escape -- which closes all of them, unconditionally -- from
    popping an entry that isn't there. */
-const OVERLAY_CLOSE = { lightbox: () => closeLightbox(), drawer: () => closeDrawer() };
+const OVERLAY_CLOSE = { lightbox: () => closeLightbox(), drawer: () => closeDrawer(), profile: () => closeProfile(), composer: () => closeComposer() };
 /* Each open overlay, with the address as it stood when it was opened. The
    address matters: see dropOverlay. */
 const overlays = [];
@@ -7577,6 +8218,325 @@ window.addEventListener("popstate", () => {
   if (history.state?.bcuOverlay) return;
   const entry = overlays.pop();
   if (entry) OVERLAY_CLOSE[entry.name]();   // closes without popping again: it is already gone
+});
+
+/* ---------- the composer ----------
+   The first thing this page WRITES that is words rather than a reaction.
+   Likes, reposts and follows are one-click records; a post is something you
+   compose, so it gets an overlay of its own -- over the feed, like the
+   profile panel, so the catch-up underneath is never torn down.
+   What it does NOT do, deliberately, and said out loud in the changelog
+   rather than left to be discovered: no pictures or video, no alt text, no
+   threadgates, no self-labels, and no quote-with-media. Each of those is a
+   second thing to get right, and a composer that quietly drops the alt text
+   off a picture is worse than one that can't attach pictures at all.
+   The limits are Bluesky's: 300 GRAPHEMES and 3000 bytes. Graphemes, not
+   JavaScript's string length -- an emoji is one character to a reader and
+   two or more to .length, and counting the wrong one rejects posts a client
+   should accept. Intl.Segmenter is the one thing that counts them the way a
+   person does. */
+const POST_MAX_GRAPHEMES = 300, POST_MAX_BYTES = 3000;
+const graphemeSeg = typeof Intl !== "undefined" && Intl.Segmenter ? new Intl.Segmenter() : null;
+/* How long a post reads as, the way the limit means it. Without Segmenter
+   (very old browsers) the string length is the honest fallback: it never
+   UNDER-counts, so nothing is submitted that the server would refuse. */
+function graphemeLength(text) {
+  if (!text) return 0;
+  if (!graphemeSeg) return [...text].length;
+  let n = 0;
+  for (const _ of graphemeSeg.segment(text)) n++;
+  return n;
+}
+/* What is being written: {quote} for a quote post, {} for a plain one. null
+   when the composer is shut. */
+let composing = null;
+function openComposer(opts = {}) {
+  if (!state.session) return;
+  composing = opts;
+  const shown = opts.quote || opts.to;     // the post being quoted, or replied to
+  const qb = $("#compQuote");
+  qb.classList.toggle("hidden", !shown);
+  if (shown) {
+    const a = shown.post?.author || {};
+    const what = opts.quote ? "Quoting" : "Replying to";
+    qb.innerHTML = `<div class="cq-who">${what} ${esc(a.displayName || a.handle || "a post")}</div>` +
+      `<div class="cq-text">${esc((shown.post?.record?.text || "").slice(0, 300))}</div>`;
+  }
+  $("#compText").placeholder = opts.reply ? "Write a reply\u2026" : "Write something\u2026";
+  $("#compText").value = "";
+  $("#compErr").textContent = "";
+  $("#composer").classList.remove("hidden");
+  $("#compScrim").classList.remove("hidden");
+  updateComposerCount();
+  pushOverlay("composer");
+  $("#compText").focus();
+}
+function closeComposer() {
+  if (isHidden("#composer")) return;     // see closeLightbox
+  $("#composer").classList.add("hidden");
+  $("#compScrim").classList.add("hidden");
+  composing = null;
+  dropOverlay("composer");
+}
+const composerOpen = () => !isHidden("#composer");
+/* The counter, and whether Post can be pressed. Both limits are shown the
+   moment either is passed, because a post of 200 emoji is under the grapheme
+   limit and over the byte one. */
+function updateComposerCount() {
+  const text = $("#compText").value;
+  const g = graphemeLength(text), b = new TextEncoder().encode(text).length;
+  const over = g > POST_MAX_GRAPHEMES || b > POST_MAX_BYTES;
+  const c = $("#compCount");
+  c.textContent = b > POST_MAX_BYTES && g <= POST_MAX_GRAPHEMES
+    ? `${b.toLocaleString()} / ${POST_MAX_BYTES.toLocaleString()} bytes`
+    : `${g} / ${POST_MAX_GRAPHEMES}`;
+  c.classList.toggle("over", over);
+  $("#compPost").disabled = over || !text.trim();
+  return { text, over };
+}
+/* Rich text: the links, mentions and hashtags in a post, as the protocol
+   wants them -- by BYTE offset into the UTF-8 text, not by character. Get
+   that wrong and the link lands on the wrong part of somebody else's post.
+   The page already READS facets (see richText); this is the other half, and
+   without it a link you type is plain text everywhere else.
+   Mentions are resolved to DIDs, because that is what a mention names; one
+   that can't be resolved is left as plain text rather than guessed at. */
+const URL_RE = /(^|[\s([])(https?:\/\/[^\s<>()[\]]+[^\s<>()[\].,;:!?'"])/g;
+const MENTION_RE = /(^|[\s([])@([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+)/gi;
+const TAG_RE = /(^|[\s([])#([^\s#.,;:!?'"()[\]]+)/g;
+async function detectFacets(text, signal) {
+  const enc = new TextEncoder();
+  const at = i => enc.encode(text.slice(0, i)).length;   // byte offset of a character offset
+  const out = [];
+  const add = (start, end, feature) => out.push({ index: { byteStart: at(start), byteEnd: at(end) }, features: [feature] });
+  for (const m of text.matchAll(URL_RE)) {
+    const s2 = m.index + m[1].length;
+    add(s2, s2 + m[2].length, { $type: "app.bsky.richtext.facet#link", uri: m[2] });
+  }
+  for (const m of text.matchAll(TAG_RE)) {
+    const s2 = m.index + m[1].length;
+    add(s2, s2 + 1 + m[2].length, { $type: "app.bsky.richtext.facet#tag", tag: m[2] });
+  }
+  for (const m of text.matchAll(MENTION_RE)) {
+    const handle = m[2];
+    let did = null;
+    // com.atproto, so it goes to the user's own server and is never proxied:
+    // a mention resolves the same whatever AppView is in use.
+    try { did = (await xrpc("com.atproto.identity.resolveHandle", { handle }, { signal, priority: true })).did; } catch {}
+    if (!did) continue;                 // not a real handle: leave it as words
+    const s2 = m.index + m[1].length;
+    add(s2, s2 + 1 + handle.length, { $type: "app.bsky.richtext.facet#mention", did });
+  }
+  return out.sort((x, y) => x.index.byteStart - y.index.byteStart);
+}
+/* The language a post is written in, as a bare code. Bluesky uses it for
+   the "translate" offer and for language filters; getting it wrong is worse
+   than leaving it out, so anything that doesn't look like a language code
+   is left out. */
+function postLangs() {
+  const l = (typeof navigator !== "undefined" && navigator.language || "").split("-")[0].toLowerCase();
+  return /^[a-z]{2,3}$/.test(l) ? [l] : undefined;
+}
+/* Writes the post. Goes through createConfirmedRecord like every other
+   record this page creates, so "saved" means the same thing here as it does
+   for a like: the server named it in THIS account's repo and reading it back
+   found it. */
+async function publishComposed() {
+  const { text, over } = updateComposerCount();
+  if (over || !text.trim() || !composing) return;
+  const btn = $("#compPost"), cancel = $("#compCancel");
+  btn.disabled = cancel.disabled = true;
+  $("#compErr").textContent = "";
+  const log = (...x) => console.info("[catch-up]", "post", ...x);
+  try {
+    const collection = "app.bsky.feed.post";
+    const record = {
+      $type: collection,
+      text: text.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    const langs = postLangs(); if (langs) record.langs = langs;
+    const facets = await detectFacets(record.text); if (facets.length) record.facets = facets;
+    if (composing.quote?.uri && composing.quote?.cid) {
+      record.embed = { $type: "app.bsky.embed.record", record: { uri: composing.quote.uri, cid: composing.quote.cid } };
+    }
+    // A reply names two posts: the one being answered, and the one the whole
+    // thread hangs off. They are the same only for a reply to a top-level
+    // post -- get the root wrong and the reply is filed under the wrong
+    // conversation everywhere.
+    if (composing.reply) record.reply = composing.reply;
+    const uri = await createConfirmedRecord(collection, record, "post", log);
+    closeComposer();
+    // Undo rather than a second "are you sure": the composer IS the
+    // deliberate act (you typed it and pressed Post), and a confirm on top
+    // of that is friction. What a stray press actually wants is a way back.
+    toast("Posted", { ms: 9000, action: { label: "Undo", run: () => undoPost(uri) } });
+  } catch (e) {
+    console.warn("[catch-up] post failed", e);
+    $("#compErr").textContent = e.message || String(e);
+  } finally {
+    btn.disabled = cancel.disabled = false;
+    updateComposerCount();
+  }
+}
+/* Takes a just-made post back out of the repository. */
+async function undoPost(uri) {
+  const log = (...x) => console.info("[catch-up]", "post", ...x);
+  try { await deleteOwnRecord("app.bsky.feed.post", uri, log); toast("Post deleted"); }
+  catch (e) { showBanner("Couldn't delete that post: " + (e.message || e)); }
+}
+$("#compText").addEventListener("input", updateComposerCount);
+$("#compCancel").addEventListener("click", closeComposer);
+$("#compPost").addEventListener("click", publishComposed);
+$("#compScrim").addEventListener("click", closeComposer);
+
+/* ---------- the profile panel ----------
+   Clicking a name or an avatar opens the person over the feed instead of
+   leaving the page for a front-end. It is an OVERLAY, not a view: the
+   catch-up underneath keeps its posts, its scroll position and its history
+   entry, so closing the panel costs nothing -- where leaving the page with
+   #from=... in the address would re-run the whole catch-up on the way back.
+   Everything in it is borrowed: pushOverlay for the Back button, the
+   lightbox's fixed-overlay reasoning for the layout, fs()/toggleFollow for
+   the follow button, and postViewHtml/ps() for the posts, which therefore
+   like, repost and open exactly as they do in the feed.
+   One page of posts and no more: going deeper is "Read their posts here",
+   which starts a proper author catch-up (see authorSource). A second
+   infinite scroll in here would be a second thing to keep right. */
+const PROFILE_POSTS = 12;
+let profileFor = null;         // the DID or handle the open panel is about
+function openProfile(actor) {
+  if (!actor) return;
+  // The panel is built from getProfile and getAuthorFeed, both AppView
+  // reads. In protocol mode there is no AppView to ask, and quietly making
+  // the call would break the one promise that mode makes (see the test that
+  // asserts not a single app.bsky request). So the name link stays a link
+  // out, which is what it was before this existed.
+  if (settings.protocolOnly) return;
+  profileFor = actor;
+  const box = $("#profile");
+  box.innerHTML = `<button class="btn pf-close" type="button" data-act="prof-close">Close</button><div class="pf-note">Loading\u2026</div>`;
+  box.scrollTop = 0;
+  box.classList.remove("hidden"); $("#profScrim").classList.remove("hidden");
+  pushOverlay("profile");
+  loadProfilePanel(actor);
+}
+function closeProfile() {
+  if (isHidden("#profile")) return;    // see closeLightbox
+  $("#profile").classList.add("hidden"); $("#profScrim").classList.add("hidden");
+  $("#profile").innerHTML = "";
+  profileFor = null;
+  dropOverlay("profile");
+}
+const profileOpen = () => !isHidden("#profile");
+/* Fetches the person and one page of their posts, then draws. Either request
+   can fail on its own: a profile that won't load is the whole panel's error,
+   but posts that won't load leave the profile itself on screen with a line
+   saying so, because the useful half is already there. */
+async function loadProfilePanel(actor) {
+  const mine = actor;
+  let prof = null, posts = null, postsErr = null;
+  try {
+    prof = await xrpc("app.bsky.actor.getProfile", { actor }, { priority: true, retries: 1 });
+  } catch (e) {
+    if (profileFor === mine) drawProfileError(e);
+    return;
+  }
+  if (profileFor !== mine) return;     // closed, or another one opened, while we waited
+  drawProfile(prof, null);             // the profile at once; posts fill in under it
+  try {
+    const r = await xrpc("app.bsky.feed.getAuthorFeed", { actor: prof.did, limit: PROFILE_POSTS, filter: settings.authorPosts || DEFAULTS.authorPosts }, { priority: true, retries: 1 });
+    posts = r.feed || [];
+  } catch (e) { postsErr = e; }
+  if (profileFor !== mine) return;
+  drawProfile(prof, posts, postsErr);
+}
+function drawProfileError(e) {
+  $("#profile").innerHTML = `<button class="btn pf-close" type="button" data-act="prof-close">Close</button>
+    <div class="pf-note">Couldn't load that profile: ${esc(e?.message || String(e))}</div>`;
+}
+/* The panel's markup. `posts` null means they haven't arrived yet. */
+function drawProfile(p, posts, postsErr) {
+  const a = { did: p.did, handle: p.handle, displayName: p.displayName, viewer: p.viewer };
+  const n = v => (typeof v === "number" ? v.toLocaleString() : "\u2014");
+  const blocked = p.viewer?.blocking || p.viewer?.blockedBy;
+  // Muted is not blocked: their posts are still readable, they are just kept
+  // out of your feed. Saying so beats leaving someone to wonder why they
+  // never see a person they follow. (A deactivated or suspended account
+  // doesn't reach here at all -- getProfile errors, and drawProfileError
+  // shows what the server said.)
+  const muted = !blocked && (p.viewer?.muted || p.viewer?.mutedByList);
+  const body = posts === null
+    ? `<div class="pf-note">Loading their posts\u2026</div>`
+    : postsErr
+      ? `<div class="pf-note">Couldn't load their posts: ${esc(postsErr.message || String(postsErr))}</div>`
+      : posts.length
+        ? posts.map(fi => {
+            // Their reposts come back among their posts. Without this line
+            // someone else's words sit under this person's name with nothing
+            // to say so -- which is just what the feed uses it for.
+            const rt = isRepost(fi) ? new Date(fi.reason.indexedAt).getTime() : null;
+            return postViewHtml(fi.post, { extraClass: "parent", meta: rt ? repostMetaHtml(fi.reason.by || {}, rt, rt) : "" });
+          }).join("")
+        : `<div class="pf-note">Nothing to show here.</div>`;
+  $("#profile").innerHTML = `
+    <button class="btn pf-close" type="button" data-act="prof-close">Close</button>
+    <div class="pf-banner"${p.banner ? ` style="background-image:url('${esc(p.banner)}')"` : ""}></div>
+    <div class="pf-head">
+      ${p.avatar ? `<img class="pf-avatar" src="${esc(p.avatar)}" alt="" loading="lazy">` : `<div class="pf-avatar"></div>`}
+      <div class="pf-name">${esc(p.displayName || p.handle)}</div>
+      <div class="pf-handle">@${esc(p.handle)}</div>
+      ${p.description ? `<div class="pf-bio">${esc(p.description)}</div>` : ""}
+      <div class="pf-counts">
+        <span><b>${n(p.followersCount)}</b> followers</span>
+        <span><b>${n(p.followsCount)}</b> following</span>
+        <span><b>${n(p.postsCount)}</b> posts</span>
+      </div>
+      <div class="pf-actions">
+        ${p.did === me() ? "" : followBtnHtml(a)}
+        <button class="btn primary" type="button" data-act="prof-read" data-actor="${esc(p.did)}">Read their posts here</button>
+        <a class="btn" href="${esc(profileUrl(p))}" target="_blank" rel="noopener">Open on ${esc(webLinkHost())}</a>
+      </div>
+    </div>
+    ${blocked ? `<div class="pf-note">${p.viewer?.blockedBy ? "They block you, so their posts aren't available here." : "You block them. Their posts aren't shown."}</div>`
+      : `<div class="pf-posts"><h3>Latest posts</h3>${muted ? `<div class="pf-note">You've muted ${p.viewer?.mutedByList ? "them through a list" : "them"}, so they're kept out of your feed \u2014 but their posts are here.</div>` : ""}${body}</div>`}`;
+  observeVideos($("#profile"));
+}
+/* "Read their posts here": closes the panel and starts a catch-up of just
+   this person, from a sensible default rather than asking twice. The start
+   screen is left showing that choice, so changing the date and loading again
+   does what it looks like it will. */
+function readAuthorHere(did) {
+  const handle = profileFor && !String(profileFor).startsWith("did:") ? String(profileFor) : null;
+  const src = authorSource(did, handle || $("#profile .pf-handle")?.textContent?.replace(/^@/, "") || null);
+  closeProfile();
+  show("start");
+  setFeedChoice(src);
+  $('input[name="kind"][value="date"]').checked = true;
+  const from = Date.now() - PROFILE_READ_DAYS * 864e5;
+  $("#inDate").value = toLocalInput(from);
+  startCatchup("date", from, null, src);
+}
+const PROFILE_READ_DAYS = 7;
+$("#profScrim").addEventListener("click", closeProfile);
+/* Swipe down to dismiss, as the lightbox has. The panel SCROLLS, which the
+   lightbox doesn't, and that is the whole difficulty: a downward drag inside
+   a scrollable box is a scroll, and dismissing on one would make the panel
+   impossible to read. So the gesture only counts when the panel was already
+   at the top when the finger went down -- the same place a phone's own
+   "pull down to dismiss" sheets draw the line. Its own state, deliberately
+   not the lightbox's `swipe`, so neither gesture can end the other. */
+let profSwipe = null;
+$("#profile").addEventListener("pointerdown", ev => {
+  profSwipe = ev.isPrimary && $("#profile").scrollTop <= 0 ? { x: ev.clientX, y: ev.clientY } : null;
+});
+$("#profile").addEventListener("pointercancel", () => { profSwipe = null; });
+$("#profile").addEventListener("pointerup", ev => {
+  const s = profSwipe; profSwipe = null;
+  if (!s) return;
+  const dx = ev.clientX - s.x, dy = ev.clientY - s.y;
+  if (Math.hypot(dx, dy) <= TAP_SLOP) return;            // a tap belongs to whatever it hit
+  if (dy >= SWIPE_Y && dy > Math.abs(dx)) closeProfile();  // downwards, and more down than across
 });
 
 /* Full-screen image viewer; click anywhere, swipe it away or press Escape to
@@ -7663,7 +8623,9 @@ $("#lightbox").addEventListener("pointerup", ev => {
   else if (dy >= SWIPE_Y) closeLightbox();         // downwards only; flicking up is not "away"
 });
 document.addEventListener("keydown", ev => {
-  if (ev.key === "Escape") { closeLightbox(); closeMenu(); closeDrawer(); }
+  if (ev.key === "Escape") { closeLightbox(); closeMenu(); closeDrawer(); closeProfile(); closeComposer(); }
+  // Ctrl/Cmd+Enter posts, the shortcut every composer has.
+  if (composerOpen() && ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); publishComposed(); }
   if (lightboxOpen() && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) { ev.preventDefault(); stepLightbox(ev.key === "ArrowRight" ? 1 : -1); }
 });
 
@@ -7788,6 +8750,7 @@ function show(name) {
   document.documentElement.setAttribute("data-view", name);
   for (const v of ["login", "start", "progress", "feed"]) $("#view" + v[0].toUpperCase() + v.slice(1)).classList.toggle("hidden", v !== name);
   $("#btnNew").classList.toggle("hidden", !(name === "feed"));
+  $("#btnWrite").classList.toggle("hidden", name === "login");
   $("#btnSignOut").classList.toggle("hidden", name === "login");
   if (name !== "feed") { $("#clockTime").textContent = "Catch-up"; $("#clockSub").textContent = "Read your Bluesky Following feed from any point in time"; $("#stripFill").style.width = "0"; }
   if (name === "start") prepareStart();
@@ -7822,19 +8785,21 @@ let chosenFeed = null;
 function setFeedChoice(src) {
   chosenFeed = src && src.kind !== "timeline" ? src : null;
   const sel = $("#inFeed"); if (!sel) return;
-  const uri = chosenFeed?.uri || "";
-  if (uri && ![...sel.options].some(o => o.value === uri)) {
-    sel.insertBefore(new Option(chosenFeed.name || uri.split("/").pop(), uri), sel.querySelector('option[value="url"]'));
+  const value = srcValue(chosenFeed);
+  if (value && ![...sel.options].some(o => o.value === value)) {
+    sel.insertBefore(new Option(chosenFeed.name || value.split("/").pop(), value), sel.querySelector('option[value="url"]'));
   }
-  sel.value = uri;
+  sel.value = value;
   $("#feedUrlBox").classList.add("hidden");
+  $("#authorBox").classList.add("hidden");
   updateFeedHint();
 }
 function updateFeedHint() {
   const h = $("#feedHint"); if (!h) return;
-  h.textContent = chosenFeed
-    ? "Custom feeds decide how much history they keep, so this may not reach as far back as you ask. One that ranks its posts is read in the order it gives them."
-    : "";
+  h.textContent = !chosenFeed ? ""
+    : chosenFeed.kind === "author"
+      ? "Everything they posted, oldest first. Whether replies and reposts come too is “Which of their posts” in Settings → What's in the feed."
+      : "Custom feeds decide how much history they keep, so this may not reach as far back as you ask. One that ranks its posts is read in the order it gives them.";
 }
 /* Fills the picker from the account's saved feeds. Read-only; a failure just
    leaves you with Following and the paste box. */
@@ -7856,6 +8821,7 @@ async function fillFeedPicker() {
     if (f.broken && !settings.showBrokenFeeds && f.uri !== chosenFeed?.uri) continue;
     frag.appendChild(new Option(`${f.pinned ? "\u2605 " : ""}${f.name}${f.kind === "list" ? " (list)" : ""}`, f.uri));
   }
+  frag.appendChild(new Option("One person's posts\u2026", "author"));
   frag.appendChild(new Option("Paste a feed or list link\u2026", "url"));
   sel.appendChild(frag);
   if (chosenFeed) setFeedChoice(chosenFeed);
@@ -7923,6 +8889,10 @@ $("#btnLoad").addEventListener("click", ev => {
       catch (e) { $("#startErr").textContent = e.message; return; }
       feed.name = feed.name || feed.uri.split("/").pop();
       setFeedChoice(feed);
+    } else if ($("#inFeed").value === "author") {
+      try { feed = await authorSourceFrom($("#inAuthor").value); }
+      catch (e) { $("#startErr").textContent = e.message; return; }
+      setFeedChoice(feed);
     }
     if (kind === "date") {
       const v = $("#inDate").value; if (!v) { $("#startErr").textContent = "Pick a date and time."; return; }
@@ -7944,7 +8914,14 @@ $("#btnLoad").addEventListener("click", ev => {
 $("#inFeed").addEventListener("change", () => {
   const v = $("#inFeed").value;
   $("#feedUrlBox").classList.toggle("hidden", v !== "url");
-  chosenFeed = v && v !== "url" ? (state.savedFeeds || []).find(f => f.uri === v) || feedSourceFromUri(v) : (v === "url" ? chosenFeed : null);
+  $("#authorBox").classList.toggle("hidden", v !== "author");
+  // "url" and "author" are the two "I'll say which" options: they keep
+  // whatever was chosen last until the box below them is filled in and the
+  // form is submitted.
+  const asking = v === "url" || v === "author";
+  chosenFeed = v && !asking
+    ? (state.savedFeeds || []).find(f => srcValue(f) === v) || feedSourceFromUri(v) || (v.startsWith("author:") ? authorSource(v.slice(7)) : null)
+    : (asking ? chosenFeed : null);
   if (v === "") chosenFeed = null;
   updateFeedHint();
   // "Hide people I follow" is about the feed in question, which this just
@@ -7964,6 +8941,7 @@ $("#inEndPost").addEventListener("focus", () => ($('input[name="endKind"][value=
 $("#inPost").addEventListener("focus", () => ($('input[name="kind"][value="post"]').checked = true));
 $("#btnCancel").addEventListener("click", () => state.abort?.abort());
 $("#btnNew").addEventListener("click", () => { state.abort?.abort(); disconnectVideos(); clearHash(); show("start"); window.scrollTo(0, 0); });
+$("#btnWrite").addEventListener("click", () => openComposer());
 $("#btnSignOut").addEventListener("click", () => { state.abort?.abort(); signOut(); });
 
 /* ============================== settings drawer ============================== */
@@ -7977,7 +8955,9 @@ function changedInGroup(name) {
   let inGroup = false, n = 0;
   for (const s of SETTINGS_SCHEMA) {
     if (s.group) { if (inGroup) break; inGroup = s.group === name; continue; }
-    if (inGroup && !isDefaultValue(s.key, rowValue(s))) n++;
+    // A derived row writes another row's setting, which carries the change
+    // itself; counting both would say "2 changed" for one choice.
+    if (inGroup && !s.derived && !isDefaultValue(s.key, rowValue(s))) n++;
   }
   return n;
 }
@@ -8044,9 +9024,25 @@ function protocolReadout() {
     : "Not chosen, so your server proxies these reads to whichever AppView it prefers — for a bsky.social account, Bluesky's.",
     [["How requests work", "specs/xrpc"], ["Lexicons", "specs/lexicon"]], operatorOf(appViewHost())]);
   const cdn = mediaHost("cdn"), vid = mediaHost("video");
-  rows.push(["Pictures and video", cdn || vid ? [cdn, vid].filter(Boolean).join(" · ") : null, cdn || vid
-    ? "Most picture addresses come from the AppView’s own answers. These two are the hosts this page has to work out for itself, for quotes nested too deep for the API to describe."
-    : "The chosen AppView isn't named api.something, so there's no telling where it keeps pictures. Nothing is guessed: thumbnails for deeply nested quotes are left out, and their descriptions shown instead.",
+  // Three different claims, and the row says which one it is making. Until
+  // 1.4.3 a host worked out from the AppView's NAME was reported in the same
+  // voice as one that had been seen, which for Blacksky meant naming a host
+  // that doesn't exist (see noteMediaHosts).
+  const seenPics = mediaHostObserved("cdn") || mediaHostObserved("video");
+  // Pictures coming from Bluesky while the reads come from somewhere else is
+  // an ordinary arrangement -- an AppView is free to serve its images from
+  // Bluesky's CDN, and Blacksky's does -- but it is the exact thing someone
+  // who chose another AppView would assume they had left behind. So it is
+  // said out loud here rather than left to the mark at the end of the row.
+  const picsAreBluesky = seenPics && appViewTarget() && isBlueskyHost(cdn || vid);
+  rows.push(["Pictures and video", cdn || vid ? [cdn, vid].filter(Boolean).join(" · ") : null,
+    !cdn && !vid
+      ? "The chosen AppView isn't named api.something and hasn't served a picture yet, so there's no telling where it keeps them. Nothing is guessed: thumbnails for deeply nested quotes are left out, and their descriptions shown instead."
+      : seenPics
+        ? (picsAreBluesky
+            ? "Where the AppView’s own answers point — and they point at Bluesky’s CDN. The AppView you chose serves its pictures from Bluesky, so that choice moved the reads and not the pictures."
+            : "Where the AppView’s own answers point. Most picture addresses come from those answers directly; these are the hosts used for quotes nested too deep for the API to describe.")
+        : "Worked out from the AppView’s name, not from anything it has served — no catch-up has carried a picture yet. Used only for quotes nested too deep for the API to describe, and replaced as soon as a real address arrives.",
     [["Blobs", "specs/blob"]], operatorOf(cdn || vid)]);
   const did = s?.did || "";
   const plcHost = new URL(plcDirectory()).host;
@@ -8249,6 +9245,11 @@ $("#drawer").addEventListener("input", ev => {
   // Every setting the readout reports on, not just the two it started with:
   // toggling the AppView mode left the row two lines below it still saying
   // "an AppView", which is the staleness this exists to prevent.
+  // Changing which AppView is in use invalidates the picture and video hosts
+  // learned from the old one (see noteMediaHosts); they're relearned from the
+  // next catch-up's first page. Done BEFORE the readout refresh below, so the
+  // row doesn't redraw with the host it is about to stop using.
+  if (s.key === "appView" || s.key === "protocolOnly") resetSeenMediaHosts();
   if (READOUT_SETTINGS.has(s.key)) refreshProtocolReadout();
   // Tiling coming on or going off changes the markup, so the feed is rebuilt;
   // a change in the number of columns alone only moves the posts about.
@@ -8284,6 +9285,14 @@ function syncDependents() {
       row?.classList.toggle("off", !on);
       for (const el of $$(`#drawer [data-k="${s.key}"]`)) el.disabled = !on;
       $(`#drawer [data-why="${s.key}"]`)?.classList.toggle("hidden", on);
+    }
+    // A derived row is a view over other settings: it has nothing of its own
+    // to save, so it gets no dot, and its control is re-read from value() so
+    // that editing the box it writes moves it (by hand to an address no
+    // preset names, the AppView picker drops to "Something else").
+    if (s.derived) {
+      for (const el of $$(`#drawer [data-k="${s.key}"]`)) el.value = rowValue(s);
+      continue;
     }
     const changed = !isDefaultValue(s.key, rowValue(s));
     row?.classList.toggle("changed", changed);

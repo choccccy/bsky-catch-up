@@ -38,11 +38,33 @@ test("display settings apply immediately while reading", async () => {
 test("every schema setting has a default and a drawer control", async () => {
   const page = await h.loadPage();
   page.$("#btnSettings").click();
-  const keys = page.eval("SETTINGS_SCHEMA.filter(s => s.key).map(s => s.key)");
+  const keys = page.eval("SETTINGS_SCHEMA.filter(s => s.key && !s.derived).map(s => s.key)");
   for (const k of keys) {
     assert.ok(page.eval(`"${k}" in DEFAULTS`), `${k} has a default`);
     assert.ok(page.$(`#drawer [data-k="${k}"]`), `${k} has a control`);
   }
+});
+
+/* A derived row is the exception to the rule above, and the exception has its
+   own rules: it stores nothing, so it must have NO default (or saveSettings
+   would persist a view), and it must say how it is read and written. */
+test("a derived setting stores nothing of its own", async () => {
+  const page = await h.loadPage();
+  page.$("#btnSettings").click();
+  const derived = page.eval("SETTINGS_SCHEMA.filter(s => s.derived).map(s => s.key)");
+  assert.ok(derived.length, "there is at least one, or this test is vacuous");
+  for (const k of derived) {
+    assert.ok(!page.eval(`"${k}" in DEFAULTS`), `${k} has no default, having nothing to save`);
+    assert.ok(!page.eval(`"${k}" in settings`), `${k} is not in settings`);
+    assert.ok(page.$(`#drawer [data-k="${k}"]`), `${k} still has a control`);
+    const row = page.eval(`JSON.stringify(SETTINGS_SCHEMA.filter(s => s.key === "${k}").map(s => [typeof s.value, typeof s.set])[0])`);
+    assert.equal(row, '["function","function"]', `${k} declares both value() and set()`);
+    assert.equal(page.eval(`linkable(SETTINGS_SCHEMA.find(s => s.key === "${k}"))`), false,
+      `${k} is not shareable: a link must write the real setting, not a view of it`);
+  }
+  // And it is never saved, however the drawer is used.
+  page.eval(`saveSettings()`);
+  for (const k of derived) assert.ok(!page.eval(`JSON.stringify(LS.get("settings")).includes("${k}")`), `${k} was not saved`);
 });
 
 test("request-tuning settings are not shareable", async () => {

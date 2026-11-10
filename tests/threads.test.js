@@ -181,3 +181,209 @@ test("'Just Replying to @name' doesn't add thread context", async () => {
   await page.startDate(h.BASE);
   assert.equal(page.article("R2").querySelectorAll(".pv.parent, .parent-mini").length, 0);
 });
+
+/* ---------------------------------------------------------------- replies in place */
+/* The reply button unfolds a post's replies underneath it instead of sending
+   you to a front-end. getPostThread has no limit and no cursor, so the budget
+   is the page's own: depth 1, and a render cap with a button for the rest. */
+
+const R = h.actor(9);
+/** A post with `n` replies to it. */
+const withReplies = (n, extra = {}) => {
+  const top = h.post("TOP", u1, 10, { replyCount: n });
+  const replies = Array.from({ length: n }, (_, i) => h.post("R" + (i + 1), R, 11 + i, { replyTo: top }));
+  return { timeline: [h.item(top)], posts: Object.fromEntries([top, ...replies].map(x => [x.uri, x])), ...extra };
+};
+const openReplies = async page => {
+  const btn = page.article("TOP").querySelector('[data-act="replies"]');
+  assert.ok(btn, "the reply button is a toggle");
+  btn.click();
+  await h.waitFor(() => page.article("TOP").querySelector(".replies"), { message: "the replies" });
+  return page.article("TOP").querySelector(".replies");
+};
+
+test("the reply button unfolds the replies under the post", async () => {
+  const page = await h.loadPage({ server: withReplies(3) });
+  await page.startDate(h.BASE);
+  const box = await openReplies(page);
+  assert.deepEqual([...box.querySelectorAll(".pv")].map(el => el.textContent.match(/post (R\d+)/)[1]),
+    ["R1", "R2", "R3"], "oldest first, like the catch-up itself");
+  const req = page.requests.find(r => r.nsid === "app.bsky.feed.getPostThread");
+  assert.equal(req.search.get("depth"), "1", "direct replies only");
+  assert.equal(req.search.get("parentHeight"), "0", "and no ancestors, which are already on screen");
+});
+
+test("pressing it again folds them away", async () => {
+  const page = await h.loadPage({ server: withReplies(2) });
+  await page.startDate(h.BASE);
+  await openReplies(page);
+  page.article("TOP").querySelector('[data-act="replies"]').click();
+  assert.ok(!page.article("TOP").querySelector(".replies"), "folded away");
+  assert.equal(page.eval("state.openReplies.size"), 0, "and the page knows it is shut");
+});
+
+test("only a batch is drawn, and the rest come without another request", async () => {
+  const page = await h.loadPage({ settings: { repliesShown: 4 }, server: withReplies(10) });
+  await page.startDate(h.BASE);
+  const box = await openReplies(page);
+  assert.equal(box.querySelectorAll(".pv").length, 4, "the cap is honoured");
+  assert.match(box.querySelector(".more-replies").textContent, /6 more replies/);
+
+  const before = page.calls.filter(c => c === "app.bsky.feed.getPostThread").length;
+  box.querySelector(".more-replies").click();
+  assert.equal(page.article("TOP").querySelector(".replies").querySelectorAll(".pv").length, 8, "another batch");
+  assert.equal(page.calls.filter(c => c === "app.bsky.feed.getPostThread").length, before,
+    "from the answer already in hand, with no second request");
+
+  page.article("TOP").querySelector(".more-replies").click();
+  const box3 = page.article("TOP").querySelector(".replies");
+  assert.equal(box3.querySelectorAll(".pv").length, 10, "and the last of them");
+  assert.ok(!box3.querySelector(".more-replies"), "with the button gone");
+});
+
+test("a reply's own replies unfold under it, one request each", async () => {
+  const top = h.post("TOP", u1, 10, { replyCount: 1 });
+  const mid = h.post("MID", R, 11, { replyTo: top, replyCount: 1 });
+  const deep = h.post("DEEP", u1, 12, { replyTo: mid });
+  const page = await h.loadPage({ server: { timeline: [h.item(top)], posts: Object.fromEntries([top, mid, deep].map(x => [x.uri, x])) } });
+  await page.startDate(h.BASE);
+  const box = await openReplies(page);
+
+  const midBtn = box.querySelector('.pv[data-uri$="MID"] [data-act="replies"]');
+  assert.ok(midBtn, "a reply carries the same button");
+  midBtn.click();
+  await h.waitFor(() => box.querySelector(".replies"), { message: "the nested replies" });
+  assert.match(box.querySelector(".replies").textContent, /post DEEP/);
+  assert.equal(page.calls.filter(c => c === "app.bsky.feed.getPostThread").length, 2,
+    "one request per level, asked for only when opened");
+});
+
+test("gaps in a thread are named rather than silently dropped", async () => {
+  const top = h.post("TOP", u1, 10, { replyCount: 3 });
+  const ok = h.post("R1", R, 11, { replyTo: top });
+  const page = await h.loadPage({ server: {
+    timeline: [h.item(top)], posts: Object.fromEntries([top, ok].map(x => [x.uri, x])),
+    threadReplies: { [top.uri]: [
+      ok,
+      { $type: "app.bsky.feed.defs#blockedPost", uri: "at://x/app.bsky.feed.post/b", blocked: true },
+      { $type: "app.bsky.feed.defs#notFoundPost", uri: "at://x/app.bsky.feed.post/n", notFound: true },
+    ] },
+  } });
+  await page.startDate(h.BASE);
+  const box = await openReplies(page);
+  assert.equal(box.querySelectorAll(".pv").length, 1, "the one real reply");
+  const notes = [...box.querySelectorAll(".reply-note")].map(n => n.textContent);
+  assert.equal(notes.length, 2, "and a line for each gap");
+  assert.ok(notes.some(t => /blocked/i.test(t)) && notes.some(t => /deleted/i.test(t)));
+});
+
+test("a post with no replies still opens, because that is where you reply", async () => {
+  // Until replies could be written here, a post nobody had answered kept a
+  // plain link out. Now that box is the way to answer, so the one kind of
+  // post you most want to reply to must be able to open it.
+  const page = await h.loadPage({ server: { timeline: [h.item(h.post("TOP", u1, 10))] } });
+  await page.startDate(h.BASE);
+  assert.ok(page.article("TOP").querySelector('[data-act="replies"]'), "the toggle is there");
+  const box = await openReplies(page);
+  assert.match(box.textContent, /No replies yet/);
+  assert.ok(box.querySelector('[data-act="reply-to"]'), "and the way to write one");
+});
+
+/* Replies are found with getPostThread, which only an AppView can answer, so
+   that mode keeps the link out. Asked of the builder directly and both ways
+   round: an earlier version of this test went through the feed and wrapped
+   its assertions in "if the post rendered", which in protocol mode it didn't
+   -- so the test passed while checking nothing, and sabotage.py caught it. */
+const fakePost = `{ uri: "at://did:plc:u1/app.bsky.feed.post/abc", author: { handle: "u1.test", did: "did:plc:u1" } }`;
+const replyBtn = page => page.eval(`repliesBtnHtml(${fakePost}, { replyCount: 5 }, n => String(n))`);
+
+test("in protocol mode the reply button stays a link out", async () => {
+  const page = await h.loadPage({ settings: { protocolOnly: true }, server: withReplies(3) });
+  const html = replyBtn(page);
+  assert.match(html, /^<a /, "a link out, not a toggle");
+  assert.ok(!/data-act="replies"/.test(html), "and nothing to press for replies");
+});
+
+test("with an AppView in use the same post gets the toggle", async () => {
+  const page = await h.loadPage({ server: withReplies(3) });
+  const html = replyBtn(page);
+  assert.match(html, /data-act="replies"/, "the toggle is offered");
+  assert.ok(!/^<a /.test(html), "and it is no longer a link");
+});
+
+test("replies that won't load say so and leave the post alone", async () => {
+  const page = await h.loadPage({ server: withReplies(2, {
+    handlers: { "app.bsky.feed.getPostThread": () => ({ status: 500, error: "InternalServerError", message: "nope" }) },
+  }) });
+  await page.startDate(h.BASE);
+  page.article("TOP").querySelector('[data-act="replies"]').click();
+  await h.waitFor(() => page.$("#toast") && !page.$("#toast").classList.contains("hidden"), { timeout: 8000, message: "the toast" });
+  assert.match(page.$("#toast").textContent, /Couldn't load the replies/);
+  assert.ok(!page.article("TOP").querySelector(".replies"), "nothing was opened");
+  assert.ok(!page.article("TOP").querySelector('[data-act="replies"]').disabled, "and the button works again");
+});
+
+test("folding away and reopening doesn't ask the server again", async () => {
+  // The replies for a post are kept once fetched: one answer holds all of
+  // them, so reopening is a redraw, not a request.
+  const page = await h.loadPage({ server: withReplies(3) });
+  await page.startDate(h.BASE);
+  await openReplies(page);
+  const once = page.calls.filter(c => c === "app.bsky.feed.getPostThread").length;
+  assert.equal(once, 1, "one request to open it");
+
+  page.article("TOP").querySelector('[data-act="replies"]').click();   // fold
+  assert.ok(!page.article("TOP").querySelector(".replies"), "folded");
+  await openReplies(page);                                              // and open again
+  assert.equal(page.calls.filter(c => c === "app.bsky.feed.getPostThread").length, once,
+    "reopening used what was already fetched");
+});
+
+/* A quoted post carries its own action bar, including its own reply button.
+   Its markup is a .quote, not a .pv (see quoteHtml), so finding "the post
+   this button belongs to" by .pv walked straight past it to the post doing
+   the quoting -- which fetched the wrong post's replies and hung them under
+   the wrong card. Every other action finds its post with [data-uri]; this
+   one has to as well. */
+test("the reply button on a QUOTED post opens that post's replies", async () => {
+  const inner = h.post("INNER", u2, 5, { replyCount: 2 });
+  const innerReply = h.post("IR1", u3, 6, { replyTo: inner });
+  const outer = h.post("OUTER", u1, 10, { embed: h.embeds.quote(inner), replyCount: 0 });
+  const page = await h.loadPage({ server: {
+    timeline: [h.item(outer)],
+    posts: Object.fromEntries([outer, inner, innerReply].map(x => [x.uri, x])),
+  } });
+  await page.startDate(h.BASE);
+
+  const art = page.article("OUTER");
+  const quote = art.querySelector(`.quote[data-uri="${inner.uri}"]`);
+  assert.ok(quote, "the quoted post is on screen");
+  quote.querySelector('[data-act="replies"]').click();
+  await h.waitFor(() => quote.querySelector(":scope > .replies"), { message: "the quoted post's replies" });
+
+  // Asked about the QUOTED post, not the one quoting it.
+  const req = page.requests.find(r => r.nsid === "app.bsky.feed.getPostThread");
+  assert.equal(req.search.get("uri"), inner.uri, "asked for the quoted post");
+
+  // And landed inside the quote, not under the outer post.
+  const box = quote.querySelector(":scope > .replies");
+  assert.match(box.textContent, /post IR1/, "showing the quoted post's reply");
+  assert.ok(!art.querySelector(":scope > .pv > .replies"), "and nothing was hung under the quoting post");
+  assert.ok(page.eval(`state.openReplies.has(${JSON.stringify(inner.uri)})`), "the quoted post is the one marked open");
+});
+
+test("replying from a quoted post answers that post", async () => {
+  const inner = h.post("INNER", u2, 5);
+  const outer = h.post("OUTER", u1, 10, { embed: h.embeds.quote(inner) });
+  const page = await h.loadPage({ server: {
+    timeline: [h.item(outer)],
+    posts: Object.fromEntries([outer, inner].map(x => [x.uri, x])),
+  } });
+  await page.startDate(h.BASE);
+  const quote = page.article("OUTER").querySelector(`.quote[data-uri="${inner.uri}"]`);
+  quote.querySelector('[data-act="replies"]').click();
+  await h.waitFor(() => quote.querySelector('[data-act="reply-to"]'), { message: "the reply button" });
+  quote.querySelector('[data-act="reply-to"]').click();
+  await h.waitFor(() => page.visible("composer"), { message: "the composer" });
+  assert.equal(page.eval("composing.reply.parent.uri"), inner.uri, "answers the quoted post");
+});
