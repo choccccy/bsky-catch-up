@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.4.0
+  Version 1.4.1
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -696,6 +696,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
 ## [Unreleased]
+
+## [1.4.1] - 2026-11-09
+
+### Fixed
+
+- **The arrows in the image viewer are visible on pale pictures.** They were
+  a white arrow on a faint white circle, which vanished whenever the picture
+  behind them was light. They now carry their own dark circle and a thin
+  light edge, so they read on any picture.
 
 ## [1.4.0] - 2026-11-09
 
@@ -2067,7 +2076,7 @@ site with this release.
      from the <link> below (which is why the icon is not written out here: that
      base64 is 14KB, and it may appear in this file exactly once). -->
 <link rel="manifest" id="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Bluesky%20Catch-up%22%2C%22short_name%22%3A%22Catch-up%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230F141B%22%2C%22theme_color%22%3A%22%230F141B%22%7D">
-<title>Catch-up v1.4.0 · Bluesky</title>
+<title>Catch-up v1.4.1 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -2814,8 +2823,11 @@ body{transition:padding-right .18s ease}
 .lightbox img{max-width:100%; max-height:calc(100vh - 110px); max-height:calc(100svh - 110px); object-fit:contain}
 .lightbox .lb-alt{color:#eee; max-width:760px; margin-top:12px; font-size:.9em; white-space:pre-wrap; max-height:80px; overflow:auto}
 /* Previous/next and "2 / 5" counter when a post has several images. */
-.lb-nav{position:fixed; top:50%; transform:translateY(-50%); width:48px; height:48px; border-radius:50%; border:0; background:rgba(255,255,255,.15); color:#fff; font-size:30px; line-height:1; cursor:pointer; padding:0 0 4px}
-@media (hover:hover){ .lb-nav:hover{background:rgba(255,255,255,.28)} }
+/* The arrows sit on top of the picture, so they can't borrow contrast from
+   what's behind them: a pale image swallowed a white glyph on a faint white
+   disc. Dark disc, white glyph, light ring -- readable either way round. */
+.lb-nav{position:fixed; top:50%; transform:translateY(-50%); width:48px; height:48px; border-radius:50%; border:1px solid rgba(255,255,255,.55); background:rgba(0,0,0,.6); color:#fff; font-size:30px; line-height:1; cursor:pointer; padding:0 0 4px; box-shadow:0 2px 10px rgba(0,0,0,.45)}
+@media (hover:hover){ .lb-nav:hover{background:rgba(0,0,0,.78)} }
 .lb-nav.prev{left:16px} .lb-nav.next{right:16px}
 .lb-count{color:#ccc; font-size:.85em; margin-top:8px; font-variant-numeric:tabular-nums}
 .toast{position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--ink); color:var(--surface); padding:8px 16px; border-radius:8px; z-index:70; font-size:.92em}
@@ -3159,7 +3171,7 @@ body{transition:padding-right .18s ease}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.4.1";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
