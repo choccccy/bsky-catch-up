@@ -387,3 +387,55 @@ test("replying from a quoted post answers that post", async () => {
   await h.waitFor(() => page.visible("composer"), { message: "the composer" });
   assert.equal(page.eval("composing.reply.parent.uri"), inner.uri, "answers the quoted post");
 });
+
+test("unfolded replies survive a rebuild, as the button claims they do", async () => {
+  // state.openReplies is kept across buildView on purpose -- "an unfolded
+  // thread should survive that the way the reading position does". The set
+  // survived and the markup didn't, so a display setting change brought the
+  // button back wearing .on and "Hide the replies" over a post showing none,
+  // and pressing it unfolded instead of folding.
+  const page = await h.loadPage({ server: withReplies(2) });
+  await page.startDate(h.BASE);
+  await openReplies(page);
+  const before = page.requests.filter(r => r.nsid === "app.bsky.feed.getPostThread").length;
+
+  await page.setSetting("collapseRepeats", false);   // any display setting: rebuilds the feed
+  await h.wait(60);
+
+  const art = page.article("TOP");
+  const box = art.querySelector(".replies");
+  assert.ok(box, "the replies are still unfolded after the rebuild");
+  assert.deepEqual([...box.querySelectorAll(".pv")].map(el => el.textContent.match(/post (R\d+)/)[1]),
+    ["R1", "R2"], "with the same replies, in the same order");
+
+  const btn = art.querySelector('[data-act="replies"]');
+  assert.ok(btn.classList.contains("on"), "and the button agrees that they are open");
+  assert.equal(btn.getAttribute("title"), "Hide the replies");
+
+  assert.equal(page.requests.filter(r => r.nsid === "app.bsky.feed.getPostThread").length, before,
+    "putting them back asked the server nothing: replyCache already had them");
+
+  // And it still folds, rather than unfolding a second copy.
+  btn.click();
+  await h.wait(20);
+  assert.ok(!page.article("TOP").querySelector(".replies"), "one press folds it away");
+});
+
+test("replies that can't be put back stop the button claiming they are open", async () => {
+  // A reload empties replyCache. Nothing can be restored, so the set is
+  // corrected instead -- a button that says "Show" and shows beats one that
+  // says "Hide" and doesn't.
+  const page = await h.loadPage({ server: withReplies(2) });
+  await page.startDate(h.BASE);
+  await openReplies(page);
+  page.eval("replyCache.clear()");
+
+  await page.setSetting("collapseRepeats", false);
+  await h.wait(60);
+
+  const btn = page.article("TOP").querySelector('[data-act="replies"]');
+  assert.ok(!page.article("TOP").querySelector(".replies"), "nothing is shown");
+  assert.ok(!btn.classList.contains("on"), "and the button doesn't pretend otherwise");
+  assert.equal(btn.getAttribute("title"), "Show the replies");
+  assert.equal(page.eval("state.openReplies.size"), 0, "the stale entry is gone");
+});

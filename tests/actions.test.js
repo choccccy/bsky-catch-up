@@ -381,8 +381,8 @@ test("Back closes the profile panel instead of leaving the page", async () => {
   assert.equal(page.eval("overlays.length"), 1, "and it is holding that entry");
 
   page.window.history.back();
-  await h.wait(20);
-  assert.ok(page.$("#profile").classList.contains("hidden"), "Back closed the panel");
+  await h.waitFor(() => page.$("#profile").classList.contains("hidden"),
+    { message: "Back to close the panel" });   // the traversal is async: don't race it with a fixed sleep
   assert.deepEqual(page.ids(), ["A", "B"], "and the catch-up is still on screen, not restarted");
 
   // Closing by the button has to give the entry back the same way, or the
@@ -392,6 +392,62 @@ test("Back closes the profile panel instead of leaving the page", async () => {
   page.$('#profile [data-act="prof-close"]').click();
   await h.wait(20);
   assert.equal(page.eval("overlays.length"), 0, "the button gave the entry back too");
+});
+
+test("following a name inside the panel doesn't take a second entry", async () => {
+  // The panel REPLACES its contents rather than stacking, so it is still
+  // one panel and must stay one history entry. Pushing a second left a
+  // phantom on the stack that Close could not reach, and the Back press
+  // that should have left the panel was spent on it instead.
+  const page = await h.loadPage({ server: { timeline: profTimeline } });
+  await page.startDate(h.BASE);
+  const depth = page.window.history.length;
+
+  page.eval(`openProfile("did:plc:u1")`);
+  await h.waitFor(() => page.$("#profile .pf-name"), { message: "the panel" });
+  const inner = page.$('#profile [data-act="profile"]');
+  assert.ok(inner, "the panel's own posts carry name links");
+  inner.click();
+  await h.wait(60);
+
+  assert.equal(page.eval("overlays.length"), 1, "still one panel, still one entry");
+  assert.equal(page.window.history.length, depth + 1, "and no second entry was pushed");
+
+  page.$('#profile [data-act="prof-close"]').click();
+  // overlays.length drops synchronously; the entry only comes back when the
+  // traversal lands, so wait on that rather than on a fixed sleep.
+  await h.waitFor(() => page.window.history.state?.bcuOverlay === undefined,
+    { message: "the entry to come back" });
+  assert.equal(page.eval("overlays.length"), 0, "one Close empties the stack");
+});
+
+test("Escape closes a stack of overlays and gives every entry back", async () => {
+  // The composer opens OVER the panel (Quote, from the repost menu on one of
+  // the panel's own posts). Closing the buried panel first only splices it
+  // out, so a fixed close order gave back one entry for the two taken --
+  // and the reader's next Back press was spent on the leftover.
+  const page = await h.loadPage({ server: { timeline: profTimeline } });
+  await page.startDate(h.BASE);
+
+  page.eval(`openProfile("did:plc:u1")`);
+  await h.waitFor(() => page.$("#profile .pf-name"), { message: "the panel" });
+  page.$('#profile [data-act="repost"]').click();
+  await h.wait(20);
+  const quote = [...page.$$(".menu [data-m]")].find(el => el.textContent.trim() === "Quote");
+  assert.ok(quote, "the panel's repost menu offers Quote");
+  quote.click();
+  await h.waitFor(() => page.visible("composer"), { message: "the composer" });
+  assert.deepEqual(page.json("overlays.map(o => o.name)"), ["profile", "composer"],
+    "both are open, composer over panel");
+
+  page.document.dispatchEvent(new page.window.KeyboardEvent("keydown",
+    { key: "Escape", bubbles: true }));
+  assert.ok(!page.visible("composer"), "Escape closed the composer");
+  assert.ok(!page.visible("profile"), "and the panel under it");
+  assert.equal(page.eval("overlays.length"), 0, "the stack is empty");
+  // Both entries come back in one go(-2), which lands on its own turn.
+  await h.waitFor(() => page.window.history.state?.bcuOverlay === undefined,
+    { message: "both entries to come back" });
 });
 
 /* Two requests are in flight for every panel, and either can land after the
@@ -521,6 +577,30 @@ const openQuote = async page => {
   quote.click();
   await h.waitFor(() => page.visible("composer"), { message: "the composer" });
 };
+/* 1.5.1 removed "Ask before reposting". Quote lived in the menu that setting
+   controlled and had no other door, so anyone who turned it off for one-click
+   reposting lost the ability to quote a post at all, with nothing saying so.
+   Upgrading has to give it back: the saved `false` must not keep working. */
+test("Quote is reachable however reposting used to be set", async () => {
+  const page = await h.loadPage({
+    settings: { confirmRepost: false }, server: { timeline: compTimeline },
+  });
+  await page.startDate(h.BASE);
+  await openQuote(page);   // asserts the menu offered Quote
+  assert.equal(page.saved().confirmRepost, undefined,
+    "and the dead key is cleared out of saved settings rather than kept forever");
+});
+
+test("the repost button opens a menu rather than reposting on the click", async () => {
+  const page = await h.loadPage({ server: { timeline: compTimeline } });
+  await page.startDate(h.BASE);
+  page.article("A").querySelector('[data-act="repost"]').click();
+  await h.wait(20);
+  assert.ok(page.$(".menu"), "the menu is up");
+  assert.ok(!page.records().some(r => r.collection === "app.bsky.feed.repost"),
+    "and nothing was reposted by the click that opened it");
+});
+
 const write = (page, text) => {
   page.$("#compText").value = text;
   page.$("#compText").dispatchEvent(new page.window.Event("input", { bubbles: true }));
@@ -638,11 +718,16 @@ test("Escape closes the composer, and Back does too", async () => {
   page.document.dispatchEvent(new page.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   assert.ok(!page.visible("composer"), "Escape closed it");
   assert.equal(page.eval("overlays.length"), 0, "and gave the entry back");
+  // Let the traversal Escape asked for actually land before pushing another
+  // entry on top of it, or the two race and the second Back has nothing to
+  // undo. (A person cannot reopen this fast; a test can.)
+  await h.waitFor(() => page.window.history.state?.bcuOverlay === undefined,
+    { message: "the entry to come back" });
 
   await openQuote(page);
   page.window.history.back();
-  await h.wait(20);
-  assert.ok(!page.visible("composer"), "Back closed it too");
+  await h.waitFor(() => !page.visible("composer"),
+    { message: "Back to close the composer" });   // async traversal, not a fixed sleep
   assert.deepEqual(page.ids(), ["A"], "and the catch-up is still there");
 });
 
@@ -668,6 +753,98 @@ test("the keyboard shortcut can't post past the limit either", async () => {
     { key: "Enter", metaKey: true, bubbles: true }));
   await h.waitFor(() => posted(page), { message: "the post" });
   assert.equal(posted(page).record.text, "short enough");
+});
+
+test("pressing the shortcut twice writes the post once", async () => {
+  // The disabled Post button does not cover this: the shortcut never reads
+  // it, and publishComposed's own first call to updateComposerCount turns it
+  // back on while the words are still in the box. Two quick presses wrote the
+  // post twice, and Undo only took back the second of them.
+  const page = await h.loadPage({ server: { timeline: compTimeline } });
+  await page.startDate(h.BASE);
+  await openQuote(page);
+  write(page, "said once");
+
+  const press = () => page.document.dispatchEvent(new page.window.KeyboardEvent("keydown",
+    { key: "Enter", metaKey: true, bubbles: true }));
+  press(); press();            // no await between them: the first is still in flight
+  await h.waitFor(() => posted(page), { message: "the post" });
+  await h.wait(150);           // long enough for a second one to land, if it were going to
+
+  const posts = page.records().filter(r => r.collection === "app.bsky.feed.post");
+  assert.equal(posts.length, 1, "one press, one post -- and two presses, still one post");
+  assert.equal(posts[0].record.text, "said once");
+});
+
+test("clicking Post twice writes the post once", async () => {
+  const page = await h.loadPage({ server: { timeline: compTimeline } });
+  await page.startDate(h.BASE);
+  await openQuote(page);
+  write(page, "clicked twice");
+
+  page.$("#compPost").click(); page.$("#compPost").click();
+  await h.waitFor(() => posted(page), { message: "the post" });
+  await h.wait(150);
+
+  assert.equal(page.records().filter(r => r.collection === "app.bsky.feed.post").length, 1,
+    "the second click found a publish already running");
+});
+
+test("closing the composer keeps the words, as the changelog promises", async () => {
+  // "Ctrl/\u2318+Enter posts; Escape or Back closes without losing anything."
+  // Closing used to empty the box outright.
+  const page = await h.loadPage({ server: { timeline: compTimeline } });
+  await page.startDate(h.BASE);
+  page.$("#btnWrite").click();
+  await h.waitFor(() => page.visible("composer"), { message: "the composer" });
+  write(page, "half a thought");
+
+  page.document.dispatchEvent(new page.window.KeyboardEvent("keydown",
+    { key: "Escape", bubbles: true }));
+  await h.wait(120);
+  assert.ok(!page.visible("composer"), "Escape closed it");
+
+  page.$("#btnWrite").click();
+  await h.waitFor(() => page.visible("composer"), { message: "the composer again" });
+  assert.equal(page.$("#compText").value, "half a thought", "and the words came back");
+});
+
+test("a draft belongs to the post it was written for", async () => {
+  const page = await h.loadPage({ server: { timeline: compTimeline } });
+  await page.startDate(h.BASE);
+  await openQuote(page);
+  write(page, "about A");
+  page.document.dispatchEvent(new page.window.KeyboardEvent("keydown",
+    { key: "Escape", bubbles: true }));
+  await h.wait(120);
+
+  // A different composition starts clean rather than showing somebody
+  // else's half-sentence...
+  page.$("#btnWrite").click();
+  await h.waitFor(() => page.visible("composer"), { message: "the composer" });
+  assert.equal(page.$("#compText").value, "", "a new post starts empty");
+  page.document.dispatchEvent(new page.window.KeyboardEvent("keydown",
+    { key: "Escape", bubbles: true }));
+  await h.wait(120);
+
+  // ...and writing that second thing didn't throw the first one away.
+  await openQuote(page);
+  assert.equal(page.$("#compText").value, "about A", "the quote's own draft is still there");
+});
+
+test("words that have been posted are not handed back as a draft", async () => {
+  const page = await h.loadPage({ server: { timeline: compTimeline } });
+  await page.startDate(h.BASE);
+  page.$("#btnWrite").click();
+  await h.waitFor(() => page.visible("composer"), { message: "the composer" });
+  write(page, "this one gets posted");
+  page.$("#compPost").click();
+  await h.waitFor(() => posted(page), { message: "the post" });
+  await h.wait(80);
+
+  page.$("#btnWrite").click();
+  await h.waitFor(() => page.visible("composer"), { message: "the composer again" });
+  assert.equal(page.$("#compText").value, "", "the box is empty: they have been said");
 });
 
 /* ---------------------------------------------------------------- posts and replies */

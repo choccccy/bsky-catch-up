@@ -194,18 +194,28 @@ test("the mode says what it costs, in the setting and above the feed", async () 
     assert.match(sub, claim, `the setting mentions ${claim}`);
 });
 
-test("a custom feed can't be read from repositories, and says so", async () => {
-  // A feed or list is something an AppView computed; there is nothing to
-  // read it out of. It must fall back rather than silently return nothing.
+/* Protocol mode only rebuilds the Following feed. Anything else -- a custom
+   feed, a list, or one person's posts -- still goes through an AppView, and
+   the header has to SAY so: the entire point of the mode is knowing what
+   reached an AppView, so a silent fallback is the one failure that matters.
+   The old version of this test built a literal object and asserted its own
+   `name` matched, which could not fail and never touched the page. */
+test("one person's posts still need an AppView, and the header says so", async () => {
+  const a = h.actor(1);
   const page = await h.loadPage({
     settings: { protocolOnly: true },
-    server: { ...world(), timeline: [h.item(h.post("A", h.actor(1), 10))] },
+    server: { ...world(), timeline: [], authorFeeds: { "did:plc:u1": [h.item(h.post("P1", a, 10))] } },
   });
-  assert.ok(page.eval("settings.protocolOnly"), "mode is on");
-  assert.match(page.eval(`(${function () {
-    const s = { kind: "feed", name: "Discover" };
-    return s.name;
-  }})()`), /Discover/);
+  await page.startDate(h.BASE, null, { author: "u1.test" });
+  assert.deepEqual(page.ids(), ["P1"], "their posts were read");
+  assert.match(page.$("#feedHead").textContent, /came from an AppView after all/,
+    "and the fallback is disclosed, not silent");
+  // The regression this guards: the disclosure was assigned, then the
+  // "only goes back to" note was assigned OVER it. For one account, running
+  // out of posts is the NORMAL case, so the disclosure was lost almost
+  // every time it mattered. Both have to survive.
+  assert.match(page.$("#feedHead").textContent, /only goes back to/,
+    "alongside how far back it reached, rather than one replacing the other");
 });
 
 test("the readout says how the catch-up will be assembled", async () => {
@@ -423,4 +433,21 @@ test("an unreadable host shares one queue rather than getting a free one", async
   page.eval(`pacer.lanes.clear(); pacer.wait(null, "not a url"); pacer.wait(null, "")`);
   assert.deepEqual(page.json("[...pacer.lanes.keys()]"), ["(unknown)"],
     "they queue together, which is the cautious way round");
+});
+
+test("a name is still a link out, since there is no panel to open", async () => {
+  // openProfile needs getProfile and getAuthorFeed, both AppView reads, so
+  // in this mode it does nothing. The click handler used to call
+  // preventDefault() before finding that out, which left the name dead:
+  // no panel, and no link out either. The link is the whole fallback.
+  const page = await run();
+  const link = page.$('#feed [data-act="profile"]');
+  assert.ok(link, "names in the feed are profile links");
+  assert.match(link.getAttribute("href"), /^https:\/\//, "pointing out at a front-end");
+
+  const ev = new page.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+  link.dispatchEvent(ev);
+  await h.wait(80);
+  assert.ok(!ev.defaultPrevented, "the click is left to the browser, which follows the href");
+  assert.ok(!page.visible("profile"), "and no panel was opened behind it");
 });

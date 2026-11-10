@@ -91,8 +91,8 @@ test("Back closes the lightbox instead of leaving the page", async () => {
   assert.equal(page.window.history.length, depth + 1, "opening it pushed an entry to go back to");
 
   page.window.history.back();
-  await h.wait(20);
-  assert.ok(lb.classList.contains("hidden"), "Back closed the viewer");
+  await h.waitFor(() => lb.classList.contains("hidden"),
+    { message: "Back to close the viewer" });  // the traversal is async: don't race it with a fixed sleep
   assert.deepEqual(page.ids(), ["G"], "and the catch-up is still on screen, not restarted");
 });
 
@@ -137,8 +137,15 @@ test("closing an overlay gives its history entry back", async () => {
     page.$$('.gallery [data-act="zoom"]')[0].click();
     assert.equal(page.eval("overlays.length"), 1, `viewer ${i} is holding one entry`);
     page.$("#lightbox").click();                     // tap to close
-    await h.wait(20);
-    assert.ok(page.$("#lightbox").classList.contains("hidden"), `viewer ${i} closed`);
+    // Closing gives a history entry back, which is a traversal and lands on
+    // its own turn; a fixed sleep here is a race a loaded machine loses.
+    await h.waitFor(() => page.$("#lightbox").classList.contains("hidden"),
+      { message: `viewer ${i} to close` });
+    // overlays.length drops synchronously inside dropOverlay; the history
+    // entry only comes back when the traversal lands, so that is the one to
+    // wait on.
+    await h.waitFor(() => page.window.history.state?.bcuOverlay === undefined,
+      { message: `viewer ${i} to give its entry back` });
     // history.length is the wrong measure: going back doesn't shorten the
     // list, it moves the cursor, and the next push overwrites what was
     // ahead. What matters is that the entry was GIVEN BACK -- the page is
@@ -152,8 +159,8 @@ test("closing an overlay gives its history entry back", async () => {
   page.$("#btnSettings").click();
   assert.equal(page.eval("overlays.length"), 1, "the drawer pushed one too");
   page.window.history.back();
-  await h.wait(20);
-  assert.ok(page.$("#drawer").classList.contains("hidden"), "Back closed the drawer");
+  await h.waitFor(() => page.$("#drawer").classList.contains("hidden"),
+    { message: "Back to close the drawer" });  // the traversal is async: don't race it with a fixed sleep
 });
 
 test("the lightbox steps through all images in a post", async () => {

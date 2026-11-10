@@ -307,7 +307,7 @@ test("a 1.1.0 link still shows what its author saw", async () => {
 
 test("only the feed is allowed the tiled width", async () => {
   // main holds the start screen as well, so the width cap is scoped to the
-  // screen that's up (data-view, set by show()).
+  // screen that's up (data-view, set by showView()).
   const page = await h.loadPage({ settings: TILED, server });
   const root = page.document.documentElement;
   assert.equal(root.dataset.view, "start", "the start screen is up at first");

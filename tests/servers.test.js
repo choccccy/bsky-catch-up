@@ -327,6 +327,30 @@ test("a video host is learned from a watch URL, and link previews teach nothing"
   assert.notEqual(page.eval(`mediaHost("video")`), "farm.example");
 });
 
+test("the address an author typed teaches nothing, however it is shaped", async () => {
+  // external.thumb is the AppView's own proxy and counts (the test above).
+  // external.uri is what the AUTHOR typed, and a site of their choosing may
+  // perfectly well serve from /img/. Learning from it set the picture host
+  // to a stranger, which disagreed with the AppView's name, which made
+  // namingDisproved() true -- and that silently dropped every
+  // deeply-nested-quote video thumbnail while the readout still called it
+  // "where the AppView's own answers point".
+  const page = await h.loadPage({
+    settings: { appView: "api.example" },
+    server: { timeline: [h.item(h.post("L", a, 10, {
+      embed: { $type: "app.bsky.embed.external#view",
+        external: { uri: "https://media.stranger.example/img/abc/x.png", title: "A", description: "" } },
+    }))] },
+  });
+  await page.startDate(h.BASE);
+
+  assert.equal(page.eval(`mediaHostObserved("cdn")`), false, "nothing was learned from it");
+  assert.notEqual(page.eval(`mediaHost("cdn")`), "media.stranger.example");
+  assert.equal(page.eval("namingDisproved()"), false, "so the AppView's naming is not contradicted");
+  assert.ok(page.eval(`videoThumbUrl("did:plc:x", "cid1")`),
+    "and nested-quote video thumbnails still have an address");
+});
+
 test("changing the AppView forgets the hosts learned from the last one", async () => {
   const page = await h.loadPage({
     settings: { appView: "api.example" },
@@ -438,6 +462,25 @@ test("the Advanced group prints what this copy is actually talking to", async ()
    Blacksky case exactly: a non-Bluesky AppView whose pictures are nonetheless
    served from Bluesky's CDN. Someone who switched AppView to get away from
    Bluesky should be able to SEE that the pictures didn't move. */
+test("choosing Bluesky's own AppView isn't described as moving the reads", async () => {
+  // The "that choice moved the reads and not the pictures" line is only true
+  // of SOMEONE ELSE'S AppView that still serves Bluesky pictures. Picking
+  // Bluesky's own from the picker also satisfies appViewTarget(), and the
+  // row used to tell those readers their choice had done something it
+  // plainly hadn't.
+  const page = await h.loadPage({
+    settings: { appView: "api.bsky.app" },
+    server: { timeline: [h.item(h.post("M", a, 10, { embed: servedImages("cdn.bsky.app") }))] },
+  });
+  await page.startDate(h.BASE);
+  page.eval("renderDrawer()");
+  const dt = page.$$("#drawer .infra dt").find(d => d.textContent === "Pictures and video");
+  const text = dt.nextElementSibling.textContent;
+
+  assert.doesNotMatch(text, /moved the reads/, "no claim about a choice that moved nothing");
+  assert.match(text, /Where the AppView/, "it still says where the addresses came from");
+});
+
 test("the picture row says whether it saw the host or guessed it", async () => {
   const page = await h.loadPage({
     settings: { appView: "api.blacksky.example" },

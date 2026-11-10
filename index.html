@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.5.0
+  Version 1.5.1
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -333,7 +333,7 @@ TILED MODE ("Tile posts side by side", settings.tile)
       that carries a margin has to be measured the same way.
     - Only the feed gets the extra width: main carries the login, start and
       progress screens too, so the cap is scoped to data-view="feed" (set by
-      show()). The top bar keeps its own measure at every width.
+      showView()). The top bar keeps its own measure at every width.
     - Posts lose content-visibility:auto while tiled: an unpainted post
       reports its contain-intrinsic-size, so every span in a batch would be
       measured wrong and then jump as you reached it.
@@ -445,7 +445,7 @@ FILE LAYOUT
              properties on :root, redefined for dark mode (both the OS
              preference and the explicit data-theme="dark" override).
   <body>     Four mutually exclusive "views" (login / start / progress / feed)
-             toggled by show(), plus the settings drawer, lightbox and toast.
+             toggled by showView(), plus the settings drawer, lightbox and toast.
   <script>   Sections, in order (search for the "----------" headings):
              utilities; settings (DEFAULTS, migrations, SETTINGS_SCHEMA);
              state; network (netFetch, pacer, xrpc, sign-in); feed items &
@@ -455,12 +455,17 @@ FILE LAYOUT
              view building
              (computeView, arrangeThreads) & rendering (renderMore,
              renderItem, post/action markup, quote-like-state hydration);
+             replies in place (unfolding a post's replies under it);
              embeds (images, galleries, video, links, quotes, summaries of
              deeply nested attachments; the "Show images whole" layout lives
              with them, see WHOLE-IMAGE MODE below); video (players, preloading,
-             autoplay); interactions (likes/reposts, copy, menus, lightbox);
-             reading position (header clock); views/forms; banner & global
-             error handling; settings drawer; boot.
+             autoplay); interactions (likes/reposts, follows, copy, menus);
+             overlays & the Back button (the history stack every full-screen
+             overlay goes through); the composer (posts, quotes, replies);
+             the profile panel; the image viewer (lightbox, and the swipe
+             gestures both it and the panel use); reading position
+             (header clock); views/forms;
+             settings drawer; banner & global error handling; boot.
 
 LOCALSTORAGE KEYS (all prefixed "bcu:")
   (formats can change between versions; see the settings migrations block
@@ -697,7 +702,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
-## [Unreleased]
+## [1.5.1] - 2026-11-10
+
+### Fixed
+
+- **Quote is always reachable.** Quote lived in the menu the "Ask before
+  reposting" setting put up, and nowhere else, so anyone who turned that
+  setting off for one-click reposting lost the ability to quote a post at
+  all — with nothing anywhere saying that was the trade. The menu is now
+  always shown and the setting is gone, which also means reposting always
+  costs the one extra click. That was already what everyone saw who hadn't
+  gone looking: the setting defaulted to on. A setting that quietly doubles
+  as a feature switch is worse than no setting.
+
+- **"Build the catch-up without an AppView" no longer hides a fallback.**
+  The mode can only rebuild your Following feed; one person's posts still go
+  through an AppView, and the header said so — until the line reporting how
+  far back the catch-up reached was written straight over the top of it. For
+  one person, running out of posts is the ordinary case, so the disclosure
+  vanished almost every time it mattered: two AppView requests, and a header
+  that mentioned neither. Both lines are kept now, and the wording of the
+  first is plainer.
+
+- **Pressing Ctrl/⌘+Enter twice no longer posts twice.** The shortcut calls
+  the publish straight off and never looked at the disabled Post button —
+  which the publish itself turned back on a line later, while the words were
+  still in the box. Two quick presses wrote the post twice, and Undo only
+  took back the second of them. One press, one post.
+
+- **Names are links again in “Build the catch-up without an AppView”.** That
+  mode has no AppView to build a profile panel from, so a name is supposed to
+  stay a link out. The click was being swallowed before anything found that
+  out, leaving the name dead: no panel, and no link either.
+
+- **Back works once, where it used to need pressing twice.** Opening the
+  composer over a profile panel (Quote, or Write a reply, from one of the
+  panel's own posts) took two history entries and gave only one back, so the
+  next Back press went nowhere. Following a name from inside the panel —
+  which replaces the panel rather than stacking a second one — took an extra
+  entry for the same reason. Both now take and give back exactly one.
+
+- **Unfolded replies survive a display setting change.** Changing a setting
+  rebuilds the feed, which threw away the replies you had open while leaving
+  the button saying “Hide the replies” over a post showing none — and
+  pressing it unfolded a second copy rather than folding. They are put back
+  from what was already fetched, so nothing is asked of the server again.
+
+- **The composer keeps what you wrote.** “Escape or Back closes without
+  losing anything” is what 1.5.0 promised; closing actually emptied the box.
+  Drafts are now kept per post, so reopening the same quote or reply hands
+  the words back, a different one starts clean, and writing the second thing
+  doesn't throw away the first. Posting clears it.
+
+- The button on a very tall picture reads **"Show this picture larger"**
+  rather than "Show this one larger", which left you to work out what "one"
+  meant. It uncrops that one picture, not the post.
+
+- **A link in somebody's post can't move where pictures come from.** The page
+  learns an AppView's picture and video hosts from the addresses it serves,
+  but it was reading every URL in a post — including the one the author
+  typed. A post linking to a site that happens to use /img/ set the picture
+  host to that stranger, which silently dropped the thumbnails on deeply
+  nested quotes while Settings → Advanced described the stranger's host as
+  the AppView's own.
+
+- **Settings → Advanced stops crediting a choice that moved nothing.**
+  Choosing Bluesky's own AppView was reported as “that choice moved the reads
+  and not the pictures”, which is only true of somebody else's AppView that
+  still serves Bluesky's pictures.
+
+- **“Which of their posts” says when it takes effect.** It chooses what
+  Bluesky sends rather than how it is drawn, so changing it part-way through
+  reading somebody's posts rebuilt the feed out of the same posts and looked
+  like a setting that did nothing. It now says it applies to the next
+  catch-up.
 
 ## [1.5.0] - 2026-11-10
 
@@ -2203,7 +2281,7 @@ site with this release.
      from the <link> below (which is why the icon is not written out here: that
      base64 is 14KB, and it may appear in this file exactly once). -->
 <link rel="manifest" id="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Bluesky%20Catch-up%22%2C%22short_name%22%3A%22Catch-up%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230F141B%22%2C%22theme_color%22%3A%22%230F141B%22%7D">
-<title>Catch-up v1.5.0 · Bluesky</title>
+<title>Catch-up v1.5.1 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -2407,7 +2485,7 @@ main{max-width:var(--col); margin:0 auto; padding:16px 12px calc(120px + env(saf
    so that it and tileCols() can't disagree (see there).
    Only the FEED is allowed to be that wide: main holds the login, start and
    progress screens too, and a start screen stretched across a wide monitor
-   is nobody's idea of better. data-view (set by show()) says which screen is
+   is nobody's idea of better. data-view (set by showView()) says which screen is
    up. The top bar is left alone for the same reason -- it reads the same at
    every width, so it keeps the measure it has always had. */
 :root[data-tile][data-view="feed"] main,
@@ -2967,7 +3045,7 @@ body{transition:padding-right .18s ease}
 .comp-quote .cq-text{white-space:pre-wrap}
 @media (max-width:600px){ .composer{top:0; width:100vw; border:0; border-radius:0} }
 /* ---------- the profile panel ----------
-   A floating panel rather than a fifth view (see show()): the catch-up
+   A floating panel rather than a fifth view (see showView()): the catch-up
    underneath is never torn down, so closing it puts the reader back exactly
    where they were -- which matters more here than anywhere, because leaving
    the page with #from=... in the address re-runs the whole catch-up.
@@ -3388,7 +3466,7 @@ body{transition:padding-right .18s ease}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.5.0";
+const APP_VERSION = "1.5.1";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -3427,6 +3505,15 @@ const plural = (n, word, many) => n === 1 ? word : (many || word + "s");
    is what most callers actually mean. */
 const isHidden = sel => $(sel).classList.contains("hidden");
 const viewing = name => !isHidden("#view" + name[0].toUpperCase() + name.slice(1));
+/* The other half of it. All three take selectors or elements, and take
+   several, because what gets toggled here usually comes in pairs: an overlay
+   and the scrim behind it. showIf exists so callers don't write the
+   inversion (toggle("hidden", !on)) and get it backwards. Not showView,
+   which switches between the four whole screens. */
+const elOf = x => typeof x === "string" ? $(x) : x;
+const show = (...xs) => { for (const x of xs) elOf(x)?.classList.remove("hidden"); };
+const hide = (...xs) => { for (const x of xs) elOf(x)?.classList.add("hidden"); };
+const showIf = (on, ...xs) => { for (const x of xs) elOf(x)?.classList.toggle("hidden", !on); };
 /* Brief message at the bottom of the screen (e.g. "Link copied"). */
 let toastTimer;
 /* A short message at the bottom of the screen. `action` adds one button to
@@ -3439,12 +3526,12 @@ function toast(msg, { action = null, ms = 2200 } = {}) {
   if (action) {
     const b = document.createElement("button");
     b.type = "button"; b.className = "linkbtn toast-action"; b.textContent = action.label;
-    b.addEventListener("click", () => { t.classList.add("hidden"); action.run(); });
+    b.addEventListener("click", () => { hide(t); action.run(); });
     t.append(" ", b);
   }
-  t.classList.remove("hidden");
+  show(t);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.add("hidden"), ms);
+  toastTimer = setTimeout(() => hide(t), ms);
 }
 
 /* Inline SVG icons (stroke uses currentColor so CSS colour states apply). */
@@ -3522,7 +3609,7 @@ const DEFAULTS = {
   // value -- which also keeps it out of the changed-dot machinery, since that
   // walks the schema.
   hideFollowedBy: {},
-  sensitive: "blur", videoMode: "click", gifMode: "auto", preloadVideos: defaultPreloadVideos(), confirmRepost: true, confirmFollow: true, galleryProxy: true, galleryProxyHost: "xbsky.app",
+  sensitive: "blur", videoMode: "click", gifMode: "auto", preloadVideos: defaultPreloadVideos(), confirmFollow: true, galleryProxy: true, galleryProxyHost: "xbsky.app",
   wholeImages: "app", mediaWidth: 1, wholeAlt: true, wholeVideo: true, wholeLinkThumbs: true,
   authorPosts: "posts_with_replies", repliesShown: 10,
   contextCount: 12, scrollTo: "anchor", trackPosition: true, showBrokenFeeds: false, fetchMethod: "auto",
@@ -3578,6 +3665,11 @@ delete savedSettings.wholeFullsize;
    saveSettings keeps every key it finds, and a key with no default can
    never compare equal to one. */
 delete savedSettings.actionsAt;
+/* 1.5.1: confirmRepost ("Ask before reposting") is gone. Quote was only ever
+   reachable from the menu that setting controlled, so turning it off put
+   Quote away with it -- a setting that silently removed a feature. The menu
+   is now always shown; the key would otherwise sit in saved settings forever. */
+delete savedSettings.confirmRepost;
 let settings = Object.assign(structuredClone(DEFAULTS), savedSettings);
 delete settings._v;
 /* (more migrations)
@@ -3716,11 +3808,16 @@ const SETTINGS_SCHEMA = [
   // everywhere else -- and feedQuery falls back to the default rather than
   // reading a value that arrived from a link or saved settings (see
   // EXTENDING: the drawer alone isn't enough).
-  { key: "authorPosts", link: true, label: "Which of their posts", sub: "When reading one person's posts. Bluesky offers these three; “posts and replies” is everything they wrote, which is what a catch-up usually wants.", type: "select",
+  // No `apply`, like fetchMethod and for the same reason: this is not a way
+  // of drawing what has been gathered, it is the `filter` sent to
+  // getAuthorFeed, so it chooses what Bluesky hands over in the first place.
+  // It carried apply: "render", which rebuilt the feed out of the posts
+  // already fetched -- the same posts, redrawn, so changing it mid-read
+  // looked like a setting that did nothing at all.
+  { key: "authorPosts", link: true, label: "Which of their posts", sub: "When reading one person's posts. Bluesky offers these three; “posts and replies” is everything they wrote, which is what a catch-up usually wants. This one chooses what Bluesky sends, so it applies to the next catch-up rather than to the posts already on screen.", type: "select",
     options: [["posts_with_replies", "Posts and replies"], ["posts_no_replies", "Posts only"], ["posts_and_author_threads", "Posts and their own threads"]],
     needs: () => feedInQuestion().kind === "author",
-    needsWhy: "Only applies while you're reading one person's posts.",
-    apply: "render" },
+    needsWhy: "Only applies while you're reading one person's posts." },
   { group: "Media and actions" },
   { key: "wholeImages", link: true, label: "Show images whole", sub: "The Bluesky app crops pictures to squares and hides most of a gallery. \u201cShow them whole\u201d gives every picture its own shape, and lets posts with pictures be wider than the text column.", type: "select",
     options: [["app", "Like the Bluesky app"], ["whole", "Show them whole"]], apply: "both" },
@@ -3731,7 +3828,6 @@ const SETTINGS_SCHEMA = [
   { key: "videoMode", link: true, label: "Videos", type: "select", options: [["click", "Click to play"], ["autoplay", "Autoplay muted in view"]], apply: "render" },
   { key: "gifMode", link: true, label: "GIFs", sub: "Bluesky turns uploaded GIFs into short silent videos; these loop like GIFs. If your system asks for reduced motion, they always wait for a click.", type: "select", options: [["auto", "Play automatically"], ["click", "Click to play"]], apply: "render" },
   { key: "preloadVideos", link: true, label: "Videos to preload ahead", sub: "Buffers the first few seconds of the next videos so they start instantly when you press play. 0 turns this off.", type: "number", min: 0, max: 10, apply: "videos" },
-  { key: "confirmRepost", link: true, label: "Ask before reposting", sub: "Shows a small menu instead of reposting on one click", type: "bool" },
   { key: "confirmFollow", link: true, label: "Ask before following", sub: "Shows a small menu instead of following on one click. Unfollowing asks the same way.", type: "bool" },
   { key: "galleryProxy", link: true, label: "Copy gallery links via an embed proxy", sub: "Bluesky's own link previews don't show galleries. When on, “Copy link” on gallery posts uses the proxy below instead of bsky.app.", type: "bool" },
   { key: "galleryProxyHost", link: true, label: "Embed proxy for gallery links", sub: "The site that replaces the front-end above in copied links, e.g. xbsky.app. Leave empty to use the front-end itself.", type: "text", placeholder: "xbsky.app",
@@ -4147,15 +4243,28 @@ function videoThumbUrl(did, cid) {
 }
 /* Walks one feed entry for those URLs. Depth-capped, and it stops the moment
    both hosts are known, which the first post carrying an avatar usually
-   settles -- so this costs nothing on all but the first few items. The walk is
-   deliberately shape-agnostic rather than a list of known embed fields: a new
-   embed type then teaches it the host without anyone remembering to come back
-   here (see EXTENDING). */
-function noteMediaHosts(v, depth = 0) {
+   settles -- so this costs nothing on all but the first few items.
+   The walk stays shape-agnostic about WHERE in the entry a URL sits -- a new
+   embed type teaches it the host without anyone coming back here -- but it
+   only reads the FIELDS an AppView mints addresses into. That distinction is
+   the whole of it: `external.thumb` is the AppView's own proxy of a link
+   preview and counts, while `external.uri` is the address the author typed
+   and must not. Without the field check, one post linking to
+   https://anything/img/... set the picture host to that stranger, which
+   disagreed with the AppView's name, which made namingDisproved() true,
+   which silently dropped every deeply-nested-quote video thumbnail -- while
+   the settings readout went on calling it "where the AppView's own answers
+   point". Blob fields (items[].image) are objects, never addresses, so they
+   are not in the list. */
+const MEDIA_FIELDS = new Set(["avatar", "banner", "thumb", "thumbnail", "fullsize", "playlist"]);
+function noteMediaHosts(v, depth = 0, key = "") {
   if (seenMediaHosts.cdn && seenMediaHosts.video) return;
-  if (typeof v === "string") { if (v.startsWith("https://")) noteMediaUrl(v); return; }
+  if (typeof v === "string") { if (MEDIA_FIELDS.has(key) && v.startsWith("https://")) noteMediaUrl(v); return; }
   if (!v || typeof v !== "object" || depth > 6) return;
-  for (const x of Object.values(v)) noteMediaHosts(x, depth + 1);
+  // Arrays keep their parent's field name: images[] under `thumb` is still
+  // a thumb. Objects hand down their own keys.
+  const arr = Array.isArray(v);
+  for (const [k, x] of Object.entries(v)) noteMediaHosts(x, depth + 1, arr ? key : k);
 }
 /* The hosts that serve an AppView's pictures and video. No part of the
    protocol names them, so there is nothing to look up. What the AppView has
@@ -4588,7 +4697,7 @@ function forgetAccount() {
     sel.value = "";
   }
   const url = $("#inFeedUrl"); if (url) url.value = "";
-  $("#feedUrlBox")?.classList.add("hidden");
+  hide("#feedUrlBox");
 }
 /* Best-effort server-side session deletion, then clears local state and storage. */
 async function signOut() {
@@ -4596,7 +4705,7 @@ async function signOut() {
   if (s) netFetch(`${s.pds}/xrpc/com.atproto.server.deleteSession`, { method: "POST", headers: { Authorization: `Bearer ${s.refreshJwt}` } }).catch(() => {});
   LS.del("session");
   forgetAccount();
-  show("login");
+  showView("login");
 }
 
 /* ============================== feed items ============================== */
@@ -4714,15 +4823,19 @@ async function loadProfile() {
   }
   try { state.profile = await xrpc("app.bsky.actor.getProfile", { actor: me() }); } catch { state.profile = null; }
 }
+/* Every paging loop here stops. At 100 records a request that is 50,000 of
+   them, past any real follow list or account history -- and the number is
+   not the point: the point is that a server which keeps handing back a
+   cursor can't make this page ask for ever. Each loop has its own reasons
+   for stopping sooner (see loadFollows for the cursor that doesn't move);
+   this is the backstop under all of them. */
+const MAX_PAGES = 500;
 /* Loads every account the user follows into state.follows (DID -> profile).
    Used by rebuild mode (the list of feeds to fetch) and by the reply filter
    ("only replies to people I follow") in both modes. ~100 per request. */
 async function loadFollows(signal, onProgress) {
   const m = new Map(); let cursor;
-  // Bounded, like every other paging loop here (fetchFeed, fetchRebuild).
-  // 500 pages is 50,000 accounts: past any real follow list, and the point
-  // is that there IS a last page rather than what the number is.
-  for (let page = 0; page < 500; page++) {
+  for (let page = 0; page < MAX_PAGES; page++) {
     const r = await xrpc("app.bsky.graph.getFollows", { actor: me(), limit: 100, cursor }, { signal });
     const before = m.size;
     for (const p of r.follows || []) m.set(p.did, p);
@@ -4870,7 +4983,7 @@ async function fetchRebuild(until, signal, onProgress) {
   const out = []; const failures = []; let done = 0, idx = 0;
   async function fetchAuthor(did) {
     let cursor;
-    for (let page = 0; page < 500; page++) {
+    for (let page = 0; page < MAX_PAGES; page++) {
       const r = await xrpc("app.bsky.feed.getAuthorFeed", { actor: did, limit: 100, filter: "posts_with_replies", cursor }, { signal });
       const feed = r.feed || []; let oldest = Infinity;
       for (const fi of feed) {
@@ -4995,7 +5108,7 @@ function protoPost(did, info, rec, fetchedAt) {
    wrong would not error -- it would silently return an empty catch-up. */
 async function pageCollection(pds, did, collection, until, signal, onRecord) {
   let cursor, reverse;
-  for (let page = 0; page < 500; page++) {
+  for (let page = 0; page < MAX_PAGES; page++) {
     const r = await repoGet(pds, "com.atproto.repo.listRecords", { repo: did, collection, limit: 100, cursor, reverse }, signal);
     const recs = (r.records || []).map(x => ({ uri: x.uri, cid: x.cid, value: x.value, rkey: parseAtUri(x.uri)?.rkey, t: Date.parse(x.value?.createdAt) }));
     if (!recs.length) return;
@@ -5158,9 +5271,8 @@ async function gather(src, until, max, signal, label) {
   // Following feed and is ignored elsewhere, with the note saying so.
   if (settings.protocolOnly) {
     if (!canRebuild) {
-      note = src.kind === "author"
-        ? `${src.name}'s posts came through an AppView: reading one account straight from its own repository isn't built yet.`
-        : `${src.name || "This feed"} is put together by an AppView, so it can't be read from repositories. This one came the usual way.`;
+      note = `Reading repositories instead of an AppView only rebuilds your Following feed, so ${
+        src.kind === "author" ? `${src.name}'s posts` : src.name || "this feed"} came from an AppView after all.`;
     } else {
       setProgress({ title: label, stage: "Finding the accounts you follow…", fraction: 0 });
       const r = await fetchProtocol(until, signal, p => setProgress({
@@ -5183,11 +5295,11 @@ async function gather(src, until, max, signal, label) {
         : `${p.count.toLocaleString()} posts · back to ${fmtClock(p.oldest)} · ${state.stats.requests.toLocaleString()} requests`,
     }));
     if (!r.exhausted || fm === "timeline") {
-      if (r.exhausted) note = canRebuild
+      if (r.exhausted) note += (note ? " " : "") + (canRebuild
         ? `The timeline only reached back to ${fmtClock(r.oldest)}.`
         : src.kind === "author"
-          ? `${src.name} only goes back to ${fmtClock(r.oldest)} here — that looks like the whole of what they've posted.`
-          : `${src.name || "This feed"} only goes back to ${fmtClock(r.oldest)}. Custom feeds decide for themselves how much history they keep.`;
+          ? `${src.name} only goes back to ${fmtClock(r.oldest)}, which looks like everything they've posted.`
+          : `${src.name || "This feed"} only goes back to ${fmtClock(r.oldest)}. Custom feeds decide for themselves how much history they keep.`);
       return { items: r.items, method, note, ranked: r.ranked };
     }
     note = `The timeline stopped at ${fmtClock(r.oldest)}, so the feed was rebuilt from your follows.`;
@@ -5516,13 +5628,13 @@ function readHashStart(q, end, feed) {
 /* Prefills the start form from a request (so "New catch-up" shows it),
    then starts the catch-up. Errors land on the start screen. */
 function runHashRequest(req) {
-  show("start");
+  showView("start");
   if (req.error) { $("#startErr").textContent = req.error; return; }
   const { start, end, feed } = req;
   if (feed) setFeedChoice(feed);
   if (start.kind === "date") { $('input[name="kind"][value="date"]').checked = true; $("#inDate").value = toLocalInput(start.t); }
   if (start.kind === "post") { $('input[name="kind"][value="post"]').checked = true; $("#inPost").value = start.input; }
-  $("#inUseEnd").checked = !!end; $("#endBox").classList.toggle("hidden", !end);
+  $("#inUseEnd").checked = !!end; showIf(end, "#endBox");
   if (end?.kind === "date") { $('input[name="endKind"][value="date"]').checked = true; $("#inEndDate").value = toLocalInput(end.t); }
   if (end?.kind === "post") { $('input[name="endKind"][value="post"]').checked = true; $("#inEndPost").value = end.input; }
   if (start.kind === "resume") {
@@ -5680,7 +5792,7 @@ function showLinkSettingsNote(bad = []) {
        <button class="btn" type="button" id="btnKeepLinkSettings">Keep these settings</button><button class="btn" type="button" id="btnDropLinkSettings">Use my own settings</button>`
     : "";
   if (bad.length) html += `<span class="hint">Ignored unrecognized settings in the link: ${esc(bad.join(", "))}.</span>`;
-  note.innerHTML = html; note.classList.toggle("hidden", !html);
+  note.innerHTML = html; showIf(html, note);
   if (keys.length) {
     $("#btnKeepLinkSettings").onclick = () => { endLinkOverlay(true); toast("Settings saved"); };
     $("#btnDropLinkSettings").onclick = () => { endLinkOverlay(false, true); toast("Back to your own settings"); };
@@ -5689,7 +5801,7 @@ function showLinkSettingsNote(bad = []) {
 /* Ends the overlay. keep=true saves the link's values as the user's own;
    revert=true puts the user's own values back on screen. */
 function endLinkOverlay(keep, revert = false) {
-  if (!linkOverrides) { $("#linkSettingsNote").classList.add("hidden"); return; }
+  if (!linkOverrides) { hide("#linkSettingsNote"); return; }
   if (revert) settings = structuredClone(baseSettings);
   linkOverrides = null; baseSettings = null;
   if (keep || revert) saveSettings();
@@ -5698,7 +5810,7 @@ function endLinkOverlay(keep, revert = false) {
     const q = location.hash.replace(/^#/, "").split("&").filter(part => !part.startsWith("s."));
     setAddress(location.pathname + location.search + (q.length ? "#" + q.join("&") : ""));
   }
-  $("#linkSettingsNote").classList.add("hidden");
+  hide("#linkSettingsNote");
   if (revert) {
     applyLook();
     if (!isHidden("#drawer")) renderDrawer();
@@ -5776,7 +5888,7 @@ async function startCatchup(kind, value, end = null, feed = null, atT = null) {
   state.abort?.abort();
   const ac = new AbortController(); state.abort = ac; const signal = ac.signal;
   state.stats.requests = 0;
-  show("progress");
+  showView("progress");
   netNote = null; rateNote = null;
   setProgress({ title: "Loading posts", stage: "Getting ready…", fraction: 0, stats: "" });
   try {
@@ -5863,11 +5975,11 @@ async function startCatchup(kind, value, end = null, feed = null, atT = null) {
     const order = kind === "recent" && g.ranked ? "feed" : "time";
     state.run = { kind, startT, anchor, end: endPoint, fetchedAt, method: g.method, note: g.note, startNote, feed: src, max, order };
     state.maxRead = null;
-    show("feed");
+    showView("feed");
     buildView({ fresh: true });
   } catch (e) {
-    if (isAbort(e)) { show("start"); return; }
-    show("start");
+    if (isAbort(e)) { showView("start"); return; }
+    showView("start");
     $("#startErr").textContent = e.message || String(e);
   } finally {
     if (state.abort === ac) state.abort = null;
@@ -6147,7 +6259,7 @@ function tileOn() { return settings.tile === true && tileCols() >= 2; }
 /* Every direct child of a .band is a grid item over 2px rows, so it has to
    say how many rows it covers (grid has no masonry of its own). Heights
    change after insertion -- a picture with no reserved ratio arriving, alt
-   text, "show this one larger", a video player attaching, expandThreadGap()
+   text, "show this picture larger", a video player attaching, expandThreadGap()
    adding posts inside a card, a change of text size or column width -- so
    one ResizeObserver keeps the spans in step, instead of a pass per
    occasion. Setting a span changes the item's grid AREA, never its own box
@@ -6568,6 +6680,9 @@ function renderMore() {
   }
   feedEl().append(frag);
   state.rendered = end;
+  // Before the heights are taken: a restored reply box makes its card taller,
+  // and measuring without it would size every tile in the band too short.
+  restoreOpenReplies(feedEl());
   for (const el of placed) measureTile(el);   // heights are only real in the DOM
   // A batch is 150 posts by default, which can take a band past the number
   // of grid lines an engine allows all by itself (see fitBand).
@@ -6633,9 +6748,9 @@ function updateFeedHead() {
    quietly hold posts back say their piece through here. */
 function setFilterNote(sel, html, btnLabel, onClick) {
   const note = $(sel);
-  if (!html) { note.classList.add("hidden"); note.innerHTML = ""; return; }
+  if (!html) { hide(note); note.innerHTML = ""; return; }
   note.innerHTML = `<span>${html}</span>` + (btnLabel ? `<button class="btn" type="button" data-note-btn="1">${esc(btnLabel)}</button>` : "");
-  note.classList.remove("hidden");
+  show(note);
   const btn = note.querySelector("[data-note-btn]");
   if (btn) btn.onclick = onClick;
 }
@@ -6649,8 +6764,8 @@ function turnFilterOff(key, value) {
 /* Bottom-of-feed block with "caught up to" time and the Load newer posts button. */
 function updateEndcap() {
   const e = $("#endcap");
-  if (!state.run || state.rendered < state.view.length) { e.classList.add("hidden"); return; }
-  e.classList.remove("hidden");
+  if (!state.run || state.rendered < state.view.length) { hide(e); return; }
+  show(e);
   const empty = !state.view.length ? "<div>Nothing here with your current filters.</div>" : "";
   if (state.run.end) {
     // Posts after the end point were already fetched; "keep going" just
@@ -7190,6 +7305,35 @@ async function toggleReplies(btn) {
   refreshActions(uri);
 }
 const replyTime = node => (isTVP(node) ? sortAtOf({ post: node.post }) : 0);
+/* Puts unfolded replies back after the feed has been rebuilt.
+   buildView throws the markup away and renders it again (a display setting
+   changing, tiling coming on), which takes the boxes with it -- but
+   state.openReplies is deliberately kept across that, because an unfolded
+   thread "should survive the way the reading position does". It didn't: the
+   set survived and the markup didn't, so the button came back wearing .on
+   and "Hide the replies" over a post showing none, and pressing it unfolded
+   instead of folding. Everything needed is already in replyCache, so this
+   refetches nothing.
+   A URI we have no cache for can't be put back (a reload empties the cache),
+   so it is dropped from the set and its buttons redrawn -- a button that
+   says "Show" and shows is better than one that lies. */
+function restoreOpenReplies(root) {
+  if (!state.openReplies.size) return;
+  for (const pv of root.querySelectorAll("[data-uri]")) {
+    const uri = pv.dataset.uri;
+    if (!state.openReplies.has(uri) || pv.querySelector(":scope > .replies")) continue;
+    if (!replyCache.has(uri)) {
+      state.openReplies.delete(uri);
+      if (state.postState.has(uri)) refreshActions(uri);
+      continue;
+    }
+    const el = document.createElement("div");
+    el.className = "replies";
+    el.dataset.for = uri;
+    pv.append(el);
+    drawReplies(el, uri, numSetting("repliesShown"));
+  }
+}
 /* Opens the composer to answer one post. A reply names the post it answers
    (parent) AND the post the thread hangs off (root). They differ the moment
    you answer a reply: taking the parent for the root would file the whole
@@ -7368,7 +7512,7 @@ function imageCellHtml(im, cols) {
   const ar = arOf(im);
   const btn = `<button class="img" type="button" data-act="zoom" data-full="${esc(im.fullsize)}" data-alt="${esc(im.alt || "")}"${ar ? ` style="${ar.vars}"` : ""}><img ${imgSrcAttrs(im, cellWidthPx(cols))} alt="${esc(im.alt || "")}" loading="lazy" decoding="async">${im.alt && !settings.wholeAlt ? '<span class="alt-badge">ALT</span>' : ""}</button>`;
   const body = ar?.tall
-    ? `<div class="tallwrap">${btn}<div class="tall-cover"><button class="btn" type="button" data-act="expand-img">Show this one larger</button></div></div>`
+    ? `<div class="tallwrap">${btn}<div class="tall-cover"><button class="btn" type="button" data-act="expand-img">Show this picture larger</button></div></div>`
     : btn;
   const cap = settings.wholeAlt && im.alt ? `<div class="alt-cap">${esc(im.alt)}</div>` : "";
   return `<div class="img-cell">${body}${cap}</div>`;
@@ -8046,10 +8190,15 @@ function showMenu(btn, items) {
   m.addEventListener("click", ev => { const b = ev.target.closest("[data-m]"); if (!b) return; items[Number(b.dataset.m)].run?.(); closeMenu(); });
   openMenu = m;
 }
-/* Repost / Quote, when "Ask before reposting" is on. The quote item names
-   the front-end it will actually open (webHost), like every other label
-   that links out; it said "bsky.app" until 1.4.2, while the link beside it
-   already followed the setting. */
+/* Repost / Quote / Open, shown by the repost button. Always: until 1.5.1 an
+   "Ask before reposting" setting could turn it off for one-click reposting,
+   but Quote lived in here and nowhere else, so turning that setting off took
+   Quote away entirely -- a confirmation setting quietly doubling as a feature
+   switch. One click costing a menu is the smaller price, and it is the price
+   everyone was paying anyway: the setting defaulted to on.
+   The quote item names the front-end it will actually open (webHost), like
+   every other label that links out; it said "bsky.app" until 1.4.2, while the
+   link beside it already followed the setting. */
 function showRepostMenu(btn, uri) {
   const s = state.postState.get(uri);
   showMenu(btn, [
@@ -8071,8 +8220,10 @@ function showFollowMenu(btn, did) {
 }
 /* One delegated click handler for every interactive element inside the feed
    (elements are re-created often, so per-element listeners would leak).
-   Elements declare their action with
-   data-act="like|repost|follow|copy|zoom|gscroll|reveal|play|retry|expand-parent|expand-gap". */
+   Elements declare what they do with data-act; the branches below are the
+   list of them. It used to be written out here as well, and the copy was
+   seven actions out of date by 1.5.0 -- an enumeration kept by hand beside
+   the thing it enumerates only ever rots, so read the branches. */
 document.addEventListener("click", ev => {
   if (openMenu && !openMenu.contains(ev.target) && !ev.target.closest('[data-act="repost"], [data-act="follow"]')) closeMenu();
   // The panel's posts carry the same action buttons as the feed's, and its
@@ -8081,10 +8232,7 @@ document.addEventListener("click", ev => {
   const act = btn.dataset.act;
   const uri = btn.closest("[data-uri]")?.dataset.uri;
   if (act === "like") toggleRecord(uri, "like");
-  else if (act === "repost") {
-    if (settings.confirmRepost) { if (openMenu) closeMenu(); else showRepostMenu(btn, uri); }
-    else toggleRecord(uri, "repost");
-  }
+  else if (act === "repost") { if (openMenu) closeMenu(); else showRepostMenu(btn, uri); }
   else if (act === "follow") {
     // This action is the author's, not the post's: the DID is on the button.
     const did = btn.dataset.follow;
@@ -8124,6 +8272,12 @@ document.addEventListener("click", ev => {
     // Modified clicks and middle clicks belong to the browser: someone
     // asking for a new tab gets the front-end, as the href says.
     if (ev.defaultPrevented || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) return;
+    // Only swallow the click if there is actually a panel to put in its
+    // place. In protocol mode openProfile does nothing (there is no AppView
+    // to ask), so preventing the default here left the name link dead: no
+    // panel, and no link out either, which is the one thing that mode
+    // promises still works.
+    if (settings.protocolOnly || !btn.dataset.actor) return;
     ev.preventDefault();
     openProfile(btn.dataset.actor);
   }
@@ -8151,7 +8305,7 @@ document.addEventListener("click", ev => {
    replaceState and only runs as a catch-up starts, with nothing open, so
    the two can't collide either.)
 
-   Only the two overlays that take over the screen are in here. The repost
+   Only the overlays that take over the screen are in here. The repost
    menu is not: it is dismissed by tapping away from it, and nobody presses
    Back at a popup menu.
 
@@ -8185,10 +8339,16 @@ function pushOverlay(name) {
    So it is settled when the rewind ARRIVES. popstate runs before hashchange,
    so the address is put back to the one the running catch-up owns, and the
    hashchange that follows is swallowed rather than read as a request.
-   Closing an overlay that has been buried (which shouldn't happen -- the two
-   are mutually exclusive in practice) just forgets it rather than rewinding
-   past somebody else's entry. */
-let rewinding = false;   // our own back() is in flight
+   Closing an overlay that has been BURIED just forgets it rather than
+   rewinding past somebody else's entry -- rewinding there would give back an
+   entry that isn't ours. That leaves the buried entry stale, so the next Back
+   press is spent on it and appears to do nothing. Overlays do stack: the
+   panel's posts carry a repost menu offering Quote, and its replies offer
+   Write a reply, both of which open the composer over an open panel. So
+   closing several at once goes through closeOverlays, below, rather than
+   calling the close functions one after another. */
+let rewinding = 0;       // how many traversals of our own are in flight
+let unwinding = false;   // closeOverlays is giving the entries back in one go
 let hashIsOurs = false;  // the next hashchange is one we caused; don't read it as a request
 function dropOverlay(name) {
   let i = -1;
@@ -8196,13 +8356,33 @@ function dropOverlay(name) {
   if (i < 0) return;
   const top = i === overlays.length - 1;
   overlays.splice(i, 1);
-  if (!top) return;
-  rewinding = true;
-  try { history.back(); } catch { rewinding = false; }
+  if (!top || unwinding) return;
+  rewinding++;
+  try { history.back(); } catch { rewinding--; }
+}
+/* Shuts everything that is open and gives back every entry they took, which
+   is what Escape means.
+   The load-bearing part is ONE go(-n) rather than n back() calls: separate
+   back() calls issued in the same tick are not guaranteed to make separate
+   traversals, and the ones that get collapsed leave their entries behind --
+   which is the stale entry this exists to avoid. `unwinding` is what lets
+   that work: each close still drops its own overlay, but none of them
+   rewinds on its own while this is running.
+   Closing top down is then just the natural order (innermost first, the way
+   they were opened); with `unwinding` set it no longer changes the history
+   outcome, so don't read it as a guard. */
+function closeOverlays() {
+  const n = overlays.length;
+  if (!n) return;
+  unwinding = true;
+  try { for (let k = n; k > 0 && overlays.length; k--) OVERLAY_CLOSE[overlays.at(-1).name](); }
+  finally { unwinding = false; }
+  rewinding++;
+  try { history.go(-n); } catch { rewinding--; }
 }
 window.addEventListener("popstate", () => {
   if (rewinding) {
-    rewinding = false;
+    rewinding--;
     // Our own rewind, arriving. hereHref is the address the RUNNING catch-up
     // owns -- read now, not when back() was asked for, because the rewrite
     // may have landed in between. If the entry we came down onto describes
@@ -8250,12 +8430,31 @@ function graphemeLength(text) {
 /* What is being written: {quote} for a quote post, {} for a plain one. null
    when the composer is shut. */
 let composing = null;
+/* A publish is in flight. The disabled Post button is not enough on its own:
+   Ctrl/Cmd+Enter never looks at it, and publishComposed's own opening call to
+   updateComposerCount re-enables it anyway while the text is still there. Two
+   quick presses therefore wrote the post twice, and Undo only took back the
+   second. One latch, cleared in the finally, is what actually holds. */
+let publishing = false;
+/* Words left in the box when the composer was shut, kept per target.
+   The changelog's promise is that "Escape or Back closes without losing
+   anything", and closing used to empty the box outright.
+   Per target, because a draft belongs to the thing it was written for:
+   reopening the same quote or reply hands the words back, while going to
+   write something else starts clean rather than putting a half-sentence
+   about somebody else's post in front of you. A map rather than one slot,
+   so writing the second thing doesn't throw away the first. Entries are
+   dropped when emptied and when posted (see publishComposed), so nothing
+   outlives having been said, and the whole thing is a handful of short
+   strings for as long as the tab is open. */
+const drafts = new Map();
+const draftKey = opts => (opts.quote?.uri ? "q:" + opts.quote.uri : opts.reply?.parent?.uri ? "r:" + opts.reply.parent.uri : "new");
 function openComposer(opts = {}) {
   if (!state.session) return;
   composing = opts;
   const shown = opts.quote || opts.to;     // the post being quoted, or replied to
   const qb = $("#compQuote");
-  qb.classList.toggle("hidden", !shown);
+  showIf(shown, qb);
   if (shown) {
     const a = shown.post?.author || {};
     const what = opts.quote ? "Quoting" : "Replying to";
@@ -8263,18 +8462,20 @@ function openComposer(opts = {}) {
       `<div class="cq-text">${esc((shown.post?.record?.text || "").slice(0, 300))}</div>`;
   }
   $("#compText").placeholder = opts.reply ? "Write a reply\u2026" : "Write something\u2026";
-  $("#compText").value = "";
+  $("#compText").value = drafts.get(draftKey(opts)) || "";
   $("#compErr").textContent = "";
-  $("#composer").classList.remove("hidden");
-  $("#compScrim").classList.remove("hidden");
+  show("#composer", "#compScrim");
   updateComposerCount();
   pushOverlay("composer");
   $("#compText").focus();
 }
 function closeComposer() {
   if (isHidden("#composer")) return;     // see closeLightbox
-  $("#composer").classList.add("hidden");
-  $("#compScrim").classList.add("hidden");
+  // Read before composing is cleared: it is what says which post the words
+  // belong to. An empty box is a deletion, not a draft.
+  const key = composing ? draftKey(composing) : "new", text = $("#compText").value;
+  if (text.trim()) drafts.set(key, text); else drafts.delete(key);
+  hide("#composer", "#compScrim");
   composing = null;
   dropOverlay("composer");
 }
@@ -8342,8 +8543,10 @@ function postLangs() {
    for a like: the server named it in THIS account's repo and reading it back
    found it. */
 async function publishComposed() {
+  if (publishing) return;
   const { text, over } = updateComposerCount();
   if (over || !text.trim() || !composing) return;
+  publishing = true;
   const btn = $("#compPost"), cancel = $("#compCancel");
   btn.disabled = cancel.disabled = true;
   $("#compErr").textContent = "";
@@ -8366,6 +8569,9 @@ async function publishComposed() {
     // conversation everywhere.
     if (composing.reply) record.reply = composing.reply;
     const uri = await createConfirmedRecord(collection, record, "post", log);
+    // Emptied BEFORE closing, because closeComposer keeps whatever is in the
+    // box: once the words have been said there is no draft left to hand back.
+    $("#compText").value = "";
     closeComposer();
     // Undo rather than a second "are you sure": the composer IS the
     // deliberate act (you typed it and pressed Post), and a confirm on top
@@ -8375,6 +8581,7 @@ async function publishComposed() {
     console.warn("[catch-up] post failed", e);
     $("#compErr").textContent = e.message || String(e);
   } finally {
+    publishing = false;
     btn.disabled = cancel.disabled = false;
     updateComposerCount();
   }
@@ -8413,17 +8620,23 @@ function openProfile(actor) {
   // asserts not a single app.bsky request). So the name link stays a link
   // out, which is what it was before this existed.
   if (settings.protocolOnly) return;
+  const already = profileOpen();
   profileFor = actor;
   const box = $("#profile");
   box.innerHTML = `<button class="btn pf-close" type="button" data-act="prof-close">Close</button><div class="pf-note">Loading\u2026</div>`;
   box.scrollTop = 0;
-  box.classList.remove("hidden"); $("#profScrim").classList.remove("hidden");
-  pushOverlay("profile");
+  show(box, "#profScrim");
+  // Following a name from inside the panel REPLACES what it shows rather
+  // than stacking a second panel, so it must not take a second history
+  // entry: one panel, one entry. Pushing again left a phantom on the stack
+  // that Close could not reach, and the Back press that should have left
+  // the panel was spent on it instead.
+  if (!already) pushOverlay("profile");
   loadProfilePanel(actor);
 }
 function closeProfile() {
   if (isHidden("#profile")) return;    // see closeLightbox
-  $("#profile").classList.add("hidden"); $("#profScrim").classList.add("hidden");
+  hide("#profile", "#profScrim");
   $("#profile").innerHTML = "";
   profileFor = null;
   dropOverlay("profile");
@@ -8510,7 +8723,7 @@ function readAuthorHere(did) {
   const handle = profileFor && !String(profileFor).startsWith("did:") ? String(profileFor) : null;
   const src = authorSource(did, handle || $("#profile .pf-handle")?.textContent?.replace(/^@/, "") || null);
   closeProfile();
-  show("start");
+  showView("start");
   setFeedChoice(src);
   $('input[name="kind"][value="date"]').checked = true;
   const from = Date.now() - PROFILE_READ_DAYS * 864e5;
@@ -8539,7 +8752,8 @@ $("#profile").addEventListener("pointerup", ev => {
   if (dy >= SWIPE_Y && dy > Math.abs(dx)) closeProfile();  // downwards, and more down than across
 });
 
-/* Full-screen image viewer; click anywhere, swipe it away or press Escape to
+/* ---------- the image viewer ----------
+   Full-screen image viewer; click anywhere, swipe it away or press Escape to
    close. For posts with several images, arrows (on screen or keyboard) and a
    sideways swipe step through them. */
 /* lb holds the open viewer's images [{src, alt}] and the current index. */
@@ -8547,15 +8761,15 @@ const lb = { list: [], idx: 0 };
 function openLightbox(list, idx) {
   lb.list = list; lb.idx = Math.max(0, idx);
   showLightboxImage();
-  $("#lightbox").classList.remove("hidden");
+  show("#lightbox");
   pushOverlay("lightbox");
 }
 function showLightboxImage() {
   const box = $("#lightbox"); const cur = lb.list[lb.idx]; const many = lb.list.length > 1;
   $("img", box).src = cur.src; $("img", box).alt = cur.alt || ""; $(".lb-alt", box).textContent = cur.alt || "";
   $(".lb-count", box).textContent = many ? `${lb.idx + 1} / ${lb.list.length}` : "";
-  $(".lb-nav.prev", box).classList.toggle("hidden", !many || lb.idx === 0);
-  $(".lb-nav.next", box).classList.toggle("hidden", !many || lb.idx === lb.list.length - 1);
+  showIf(many && lb.idx > 0, $(".lb-nav.prev", box));
+  showIf(many && lb.idx < lb.list.length - 1, $(".lb-nav.next", box));
 }
 function stepLightbox(dir) {
   const n = lb.idx + dir; if (n < 0 || n >= lb.list.length) return;
@@ -8563,7 +8777,7 @@ function stepLightbox(dir) {
 }
 function closeLightbox() {
   if (isHidden("#lightbox")) return;   // so Escape, which closes everything, only gives back the entry that exists
-  $("#lightbox").classList.add("hidden"); $("#lightbox img").src = "";
+  hide("#lightbox"); $("#lightbox img").src = "";
   swipe = null; swiped = false;        // a gesture interrupted by Escape shouldn't outlive the viewer
   dropOverlay("lightbox");
 }
@@ -8623,7 +8837,7 @@ $("#lightbox").addEventListener("pointerup", ev => {
   else if (dy >= SWIPE_Y) closeLightbox();         // downwards only; flicking up is not "away"
 });
 document.addEventListener("keydown", ev => {
-  if (ev.key === "Escape") { closeLightbox(); closeMenu(); closeDrawer(); closeProfile(); closeComposer(); }
+  if (ev.key === "Escape") { closeMenu(); closeOverlays(); }
   // Ctrl/Cmd+Enter posts, the shortcut every composer has.
   if (composerOpen() && ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); publishComposed(); }
   if (lightboxOpen() && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) { ev.preventDefault(); stepLightbox(ev.key === "ArrowRight" ? 1 : -1); }
@@ -8744,14 +8958,13 @@ window.addEventListener("resize", () => {
 /* ============================== views ============================== */
 /* ---------- views and forms ----------
    Switches between the four screens and resets the header when leaving the feed. */
-function show(name) {
+function showView(name) {
   // Which screen is up, for the CSS: only the feed may be as wide as a tiled
   // layout needs (see --tile-width).
   document.documentElement.setAttribute("data-view", name);
-  for (const v of ["login", "start", "progress", "feed"]) $("#view" + v[0].toUpperCase() + v.slice(1)).classList.toggle("hidden", v !== name);
-  $("#btnNew").classList.toggle("hidden", !(name === "feed"));
-  $("#btnWrite").classList.toggle("hidden", name === "login");
-  $("#btnSignOut").classList.toggle("hidden", name === "login");
+  for (const v of ["login", "start", "progress", "feed"]) showIf(v === name, "#view" + v[0].toUpperCase() + v.slice(1));
+  showIf(name === "feed", "#btnNew");
+  showIf(name !== "login", "#btnWrite", "#btnSignOut");
   if (name !== "feed") { $("#clockTime").textContent = "Catch-up"; $("#clockSub").textContent = "Read your Bluesky Following feed from any point in time"; $("#stripFill").style.width = "0"; }
   if (name === "start") prepareStart();
   if (name === "login") { $("#loginErr").textContent = ""; }
@@ -8790,8 +9003,7 @@ function setFeedChoice(src) {
     sel.insertBefore(new Option(chosenFeed.name || value.split("/").pop(), value), sel.querySelector('option[value="url"]'));
   }
   sel.value = value;
-  $("#feedUrlBox").classList.add("hidden");
-  $("#authorBox").classList.add("hidden");
+  hide("#feedUrlBox", "#authorBox");
   updateFeedHint();
 }
 function updateFeedHint() {
@@ -8834,7 +9046,7 @@ function prepareStart() {
   $("#whoBox").innerHTML = p ? `${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : ""}<div><strong>${esc(p.displayName || p.handle)}</strong><div class="hint">@${esc(p.handle)}${p.followsCount == null ? "" : ` · following ${p.followsCount.toLocaleString()}`}</div></div>` : `<div class="hint">Signed in as @${esc(state.session?.handle)}</div>`;
   const pos = LS.get("position:" + me());
   const resume = $("#choiceResume");
-  resume.classList.toggle("hidden", !pos);
+  showIf(pos, resume);
   if (pos) $("#resumeDesc").textContent = `Last read: ${pos.repost ? "a repost by" : "a post by"} @${pos.by || "someone"} from ${fmtClock(pos.t)}`;
   if (!$("#inDate").value) $("#inDate").value = toLocalInput(pos ? pos.t : Date.now() - 24 * 3600e3);
   $("#postHint").textContent = `Paste a post link. The feed starts there, with ${settings.contextCount} earlier ${plural(settings.contextCount, "post")} above it for context. If you saw it as a repost, it finds the repost.`;
@@ -8861,7 +9073,7 @@ $("#btnLogin").addEventListener("click", async ev => {
     $("#inPass").value = "";
     await loadProfile();
     if (pendingHash) { const req = pendingHash; pendingHash = null; runHashRequest(req); }
-    else show("start");
+    else showView("start");
   } catch (e) { $("#loginErr").textContent = e.message || String(e); }
   finally { b.disabled = false; b.textContent = "Sign in"; }
 });
@@ -8913,8 +9125,8 @@ $("#btnLoad").addEventListener("click", ev => {
 });
 $("#inFeed").addEventListener("change", () => {
   const v = $("#inFeed").value;
-  $("#feedUrlBox").classList.toggle("hidden", v !== "url");
-  $("#authorBox").classList.toggle("hidden", v !== "author");
+  showIf(v === "url", "#feedUrlBox");
+  showIf(v === "author", "#authorBox");
   // "url" and "author" are the two "I'll say which" options: they keep
   // whatever was chosen last until the box below them is filled in and the
   // form is submitted.
@@ -8933,14 +9145,14 @@ $("#inRecent").addEventListener("focus", () => ($('input[name="kind"][value="rec
 $("#inDate").addEventListener("focus", () => ($('input[name="kind"][value="date"]').checked = true));
 // End point: reveal its options when ticked, defaulting the end time to now.
 $("#inUseEnd").addEventListener("change", () => {
-  $("#endBox").classList.toggle("hidden", !$("#inUseEnd").checked);
+  showIf($("#inUseEnd").checked, "#endBox");
   if ($("#inUseEnd").checked && !$("#inEndDate").value) $("#inEndDate").value = toLocalInput(Date.now());
 });
 $("#inEndDate").addEventListener("focus", () => ($('input[name="endKind"][value="date"]').checked = true));
 $("#inEndPost").addEventListener("focus", () => ($('input[name="endKind"][value="post"]').checked = true));
 $("#inPost").addEventListener("focus", () => ($('input[name="kind"][value="post"]').checked = true));
 $("#btnCancel").addEventListener("click", () => state.abort?.abort());
-$("#btnNew").addEventListener("click", () => { state.abort?.abort(); disconnectVideos(); clearHash(); show("start"); window.scrollTo(0, 0); });
+$("#btnNew").addEventListener("click", () => { state.abort?.abort(); disconnectVideos(); clearHash(); showView("start"); window.scrollTo(0, 0); });
 $("#btnWrite").addEventListener("click", () => openComposer());
 $("#btnSignOut").addEventListener("click", () => { state.abort?.abort(); signOut(); });
 
@@ -9034,7 +9246,12 @@ function protocolReadout() {
   // Bluesky's CDN, and Blacksky's does -- but it is the exact thing someone
   // who chose another AppView would assume they had left behind. So it is
   // said out loud here rather than left to the mark at the end of the row.
-  const picsAreBluesky = seenPics && appViewTarget() && isBlueskyHost(cdn || vid);
+  // Only worth remarking on when the AppView is SOMEONE ELSE'S and its
+  // pictures still come from Bluesky -- that is the case where the choice
+  // moved the reads and not the pictures. Picking Bluesky's own AppView
+  // from the picker also satisfies appViewTarget(), and saying it there
+  // told the reader their choice had done something it plainly hadn't.
+  const picsAreBluesky = seenPics && appViewTarget() && !isBlueskyHost(appViewHost()) && isBlueskyHost(cdn || vid);
   rows.push(["Pictures and video", cdn || vid ? [cdn, vid].filter(Boolean).join(" · ") : null,
     !cdn && !vid
       ? "The chosen AppView isn't named api.something and hasn't served a picture yet, so there's no telling where it keeps them. Nothing is guessed: thumbnails for deeply nested quotes are left out, and their descriptions shown instead."
@@ -9284,7 +9501,7 @@ function syncDependents() {
       const on = settingApplies(s);
       row?.classList.toggle("off", !on);
       for (const el of $$(`#drawer [data-k="${s.key}"]`)) el.disabled = !on;
-      $(`#drawer [data-why="${s.key}"]`)?.classList.toggle("hidden", on);
+      showIf(!on, `#drawer [data-why="${s.key}"]`);
     }
     // A derived row is a view over other settings: it has nothing of its own
     // to save, so it gets no dot, and its control is re-read from value() so
@@ -9320,12 +9537,12 @@ function setDrawerShift(on) {
   if (state.run && viewing("feed")) keepReadingSpot(spot);
 }
 function openDrawer() {
-  renderDrawer(); $("#drawer").classList.remove("hidden"); $("#scrim").classList.remove("hidden"); setDrawerShift(true);
+  renderDrawer(); show("#drawer", "#scrim"); setDrawerShift(true);
   pushOverlay("drawer");
 }
 function closeDrawer() {
   if (isHidden("#drawer")) return;     // see closeLightbox
-  $("#drawer").classList.add("hidden"); $("#scrim").classList.add("hidden"); setDrawerShift(false);
+  hide("#drawer", "#scrim"); setDrawerShift(false);
   dropOverlay("drawer");
 }
 $("#btnSettings").addEventListener("click", openDrawer);
@@ -9338,9 +9555,9 @@ $("#scrim").addEventListener("click", closeDrawer);
 function showBanner(msg, { notice = false } = {}) {
   $("#bannerText").textContent = msg;
   $("#banner").classList.toggle("notice", notice);
-  $("#banner").classList.remove("hidden");
+  show("#banner");
 }
-$("#bannerClose").addEventListener("click", () => $("#banner").classList.add("hidden"));
+$("#bannerClose").addEventListener("click", () => hide("#banner"));
 window.addEventListener("error", ev => {
   if (ev.target && ev.target !== window) return; // resource load errors (e.g. a broken image) aren't app errors
   showBanner(`Something went wrong: ${ev.message || "unknown error"}. Reloading the page usually fixes it; if it keeps happening, the browser console (F12) has details.`);
@@ -9387,7 +9604,7 @@ function applyWebHostLinks() {
   applyLinkSettings();              // settings carried by the link, if any (temporary)
   const req = readHashRequest();   // a catch-up link, if the address has one
   if (!s) {
-    show("login");
+    showView("login");
     if (req) { pendingHash = req; $("#loginErr").textContent = ""; showBanner("Sign in to open the catch-up in this link.", { notice: true }); }
     return;
   }
@@ -9400,15 +9617,15 @@ function applyWebHostLinks() {
     // on every launch.
     if (settings.protocolOnly) { await xrpc("com.atproto.server.getSession", {}, { retries: 1 }); await loadProfile(); }
     else await xrpc("app.bsky.actor.getProfile", { actor: s.did }, { retries: 1 }).then(p => (state.profile = p));
-    if (req) runHashRequest(req); else show("start");
+    if (req) runHashRequest(req); else showView("start");
   } catch (e) {
     if (e.network) {
       // Can't reach Bluesky right now: keep the saved session (it may be fine)
       // and say why, rather than pretending it expired.
-      show("start");
+      showView("start");
       $("#startErr").textContent = e.message;
     } else {
-      LS.del("session"); state.session = null; show("login");
+      LS.del("session"); state.session = null; showView("login");
       if (req) pendingHash = req;
       $("#loginErr").textContent = "Your saved session expired. Sign in again.";
     }
