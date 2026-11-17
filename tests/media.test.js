@@ -274,6 +274,27 @@ test("reduced motion stops GIFs from autoplaying", async () => {
   assert.ok(!auto || !auto.targets.length);
 });
 
+/* GIF-picker links: Tenor until 2026, Klipy since. The link card's thumb is
+   only the first frame, so the GIF file itself has to be shown. */
+test("GIF-picker links (Tenor and Klipy) play as the GIF, not a link card", async () => {
+  const klipy = "https://static.klipy.com/ii/abc/cf/fc/BIqU.gif?hh=281&ww=498&mp4=x&webm=y";
+  const kEmbed = { $type: "app.bsky.embed.external#view", external: { uri: klipy, title: "Lego Press", description: "ALT: Lego Press", thumb: "kthumb.jpg" } };
+  const quoted = h.post("Q", h.actor(9), 5);
+  const page = await h.loadPage({ server: { timeline: [
+    h.item(h.post("K", a, 10, { embed: { $type: "app.bsky.embed.recordWithMedia#view", media: kEmbed, record: h.embeds.quote(quoted) } })),
+    h.item(h.post("T", a, 11, { embed: h.embeds.gif() })),
+  ] } });
+  await page.startDate(h.BASE);
+  const gifs = [...page.$$("img.gif")];
+  const k = gifs.find(i => i.getAttribute("src") === klipy);
+  assert.ok(k, "Klipy GIF shown as an image of the GIF file");
+  assert.equal(k.getAttribute("alt"), "Lego Press", "ALT: prefix stripped");
+  assert.match(k.getAttribute("style") || "", /aspect-ratio:\s*498\s*\/\s*281/, "sized from ww/hh");
+  assert.ok(gifs.some(i => i.getAttribute("src").includes("media.tenor.com")), "Tenor still works");
+  assert.ok(!page.$("a.ext"), "no link card for either");
+  assert.ok(page.eval(`[...postKinds(state.view.find(i => i.fi?.post?.embed?.media?.external).fi.post)].includes("gif")`), "counts as a GIF for filters");
+});
+
 test("regular videos keep their controls and don't loop", async () => {
   const page = await h.loadPage({ server: { timeline: [h.item(h.post("V", a, 10, { embed: h.embeds.video() }))] } });
   await page.startDate(h.BASE);

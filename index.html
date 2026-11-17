@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.5.1
+  Version 1.5.2
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -701,6 +701,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Versions before 0.1.1 were numbered retroactively, when versioning started.
+
+## [1.5.2] - 2026-11-17
+
+### Fixed
+
+- **GIFs from Bluesky's GIF picker play again.** The picker moved from Tenor
+  to Klipy, and the page only knew Tenor's address, so every new GIF came
+  out as a link card holding its own first frame. Both are recognised now,
+  in one place, and Klipy GIFs play inline like Tenor ones always did. They
+  also count as GIFs for "Only show: GIFs", say "GIF" when they turn up in a
+  quote of a quote, take their shape before the file has loaded, and lose
+  the "ALT:" the picker puts in front of their description.
+
+- **Unfolding the replies under one post no longer unfolds every copy of
+  it.** The same post can turn up several times in a catch-up — a parent
+  shown again above a later reply, a repost, a quote — and which reply boxes
+  were open was kept by post, so opening one opened the others as later
+  batches arrived, and a setting change put all of them back. It is kept by
+  place in the feed now: the copy you opened is the one that stays open, and
+  each copy's button says whether its own replies are showing.
 
 ## [1.5.1] - 2026-11-10
 
@@ -2281,7 +2301,7 @@ site with this release.
      from the <link> below (which is why the icon is not written out here: that
      base64 is 14KB, and it may appear in this file exactly once). -->
 <link rel="manifest" id="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Bluesky%20Catch-up%22%2C%22short_name%22%3A%22Catch-up%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230F141B%22%2C%22theme_color%22%3A%22%230F141B%22%7D">
-<title>Catch-up v1.5.1 · Bluesky</title>
+<title>Catch-up v1.5.2 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -3466,7 +3486,7 @@ body{transition:padding-right .18s ease}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.5.1";
+const APP_VERSION = "1.5.2";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -4085,10 +4105,10 @@ const state = {
   band: null,             // tiled mode: the .band being filled, and
   tile: null,             // the .tile a joined reply gets fused into
   shownUris: new Set(),
-  // Post URIs whose replies are unfolded. Kept on state rather than read off
-  // the DOM because buildView rebuilds the feed from scratch (a setting
-  // change, tiling coming on), and an unfolded thread should survive that
-  // the way the reading position does.
+  // Which unfolded reply boxes are open, by PLACE, not by post (see
+  // repliesKey). Kept on state rather than read off the DOM because buildView
+  // rebuilds the feed from scratch (a setting change, tiling coming on), and
+  // an unfolded thread should survive that the way the reading position does.
   openReplies: new Set(),
   itemByKey: new Map(),
   viewIdxByKey: new Map(),
@@ -6090,10 +6110,7 @@ function postKinds(p) {
       case "app.bsky.embed.images#view": kinds.add("images"); break;
       case "app.bsky.embed.gallery#view": kinds.add("gallery"); break;
       case "app.bsky.embed.video#view": kinds.add(e.presentation === "gif" ? "gif" : "video"); break;
-      case "app.bsky.embed.external#view": {
-        let host = ""; try { host = new URL(e.external?.uri).hostname; } catch {}
-        kinds.add(host === "media.tenor.com" ? "gif" : "link"); break;
-      }
+      case "app.bsky.embed.external#view": kinds.add(isGifLink(e.external?.uri) ? "gif" : "link"); break;
       case "app.bsky.embed.record#view":
         if (!inQuote && e.record?.$type === "app.bsky.embed.record#viewRecord") { kinds.add("quote"); scan(e.record.embeds?.[0], true); }
         break;
@@ -6116,12 +6133,9 @@ function postKinds(p) {
     const media = raw.$type === "app.bsky.embed.recordWithMedia" ? raw.media : raw;
     if (m.images.length) kinds.add(String(media?.$type).startsWith("app.bsky.embed.gallery") ? "gallery" : "images");
     if (m.video) kinds.add(m.video.gif ? "gif" : "video");
-    // A Tenor link is how a GIF arrives; the embed-view branch above says the
-    // same, and disagreeing meant "Only show: GIFs" skipped them here.
-    if (m.link) {
-      let host = ""; try { host = new URL(m.link.uri).hostname; } catch {}
-      kinds.add(host === "media.tenor.com" ? "gif" : "link");
-    }
+    // A GIF-picker link is how a GIF arrives; the embed-view branch above says
+    // the same, and disagreeing meant "Only show: GIFs" skipped them here.
+    if (m.link) kinds.add(isGifLink(m.link.uri) ? "gif" : "link");
     if (m.quotes) kinds.add("quote");
   }
   if (!p.embed && !p.record?.embed) kinds.add("text");
@@ -7045,8 +7059,17 @@ function observeVideos(root) {
 function repliesBtnHtml(p, s, c) {
   const out = `<a class="act" href="${esc(postUrl(p))}" target="_blank" rel="noopener" title="Reply on ${esc(webLinkHost())}">${ICON.reply}${c(s.replyCount)}</a>`;
   if (settings.protocolOnly) return out;
-  const open = state.openReplies.has(p.uri);
-  return `<button class="act${open ? " on" : ""}" type="button" data-act="replies" title="${open ? "Hide the replies" : "Show the replies"}">${ICON.reply}${c(s.replyCount)}</button>`;
+  // Always drawn shut. Whether it's open belongs to ONE copy of the post, and
+  // the markup is shared by every copy (refreshActions redraws them all), so
+  // syncRepliesBtn reads each copy's own box afterwards.
+  return `<button class="act" type="button" data-act="replies" title="Show the replies">${ICON.reply}${c(s.replyCount)}</button>`;
+}
+/* Sets one action bar's reply button from whether ITS post has a box open. */
+function syncRepliesBtn(bar) {
+  const btn = bar.querySelector(':scope > [data-act="replies"]'); if (!btn) return;
+  const open = !!bar.closest("[data-uri]")?.querySelector(":scope > .replies");
+  btn.classList.toggle("on", open);
+  btn.title = open ? "Hide the replies" : "Show the replies";
 }
 /* Action bar markup. Reply unfolds the replies in place (see repliesBtnHtml). */
 function actionsHtml(p) {
@@ -7276,8 +7299,8 @@ async function toggleReplies(btn) {
   const box = pv.querySelector(":scope > .replies");
   if (box) {                          // open: fold it away again
     box.remove();
-    state.openReplies.delete(uri);
-    refreshActions(uri);
+    state.openReplies.delete(repliesKey(pv));
+    syncRepliesBtn(btn.parentElement);
     return;
   }
   btn.disabled = true; btn.classList.add("busy");
@@ -7293,7 +7316,27 @@ async function toggleReplies(btn) {
     return;
   }
   btn.disabled = false; btn.classList.remove("busy");
-  state.openReplies.add(uri);
+  if (pv.querySelector(":scope > .replies")) return;   // opened while we waited
+  state.openReplies.add(repliesKey(pv));
+  openRepliesBox(pv, uri);
+}
+/* Where a reply box is, rather than whose: the feed card it's in, then the
+   chain of posts from that card's post down to this one. The same post turns
+   up more than once in a catch-up -- a parent shown again above a later
+   reply, a repost, a quote -- and keying the open state by URI alone
+   unfolded every one of those copies as later batches rendered. Card keys
+   are what the reading position is kept by, so they survive buildView too. */
+function repliesKey(pv) {
+  const chain = [];
+  for (let el = pv; el && el.dataset.uri; el = el.parentElement?.closest("[data-uri], .post")) chain.unshift(el.dataset.uri);
+  return (pv.closest(".post")?.dataset.key || "") + " " + chain.join(" ");
+}
+/* The action bar belonging to this post itself, not to a reply or quote
+   nested inside it. */
+function ownBar(pv) {
+  return [...pv.querySelectorAll("[data-actions]")].find(bar => bar.closest("[data-uri]") === pv) || null;
+}
+function openRepliesBox(pv, uri) {
   const el = document.createElement("div");
   el.className = "replies";
   el.dataset.for = uri;
@@ -7302,7 +7345,8 @@ async function toggleReplies(btn) {
   // is the post itself" stays true for anything that walks the markup.
   pv.append(el);
   drawReplies(el, uri, numSetting("repliesShown"));
-  refreshActions(uri);
+  const bar = ownBar(pv); if (bar) syncRepliesBtn(bar);
+  return el;
 }
 const replyTime = node => (isTVP(node) ? sortAtOf({ post: node.post }) : 0);
 /* Puts unfolded replies back after the feed has been rebuilt.
@@ -7314,24 +7358,22 @@ const replyTime = node => (isTVP(node) ? sortAtOf({ post: node.post }) : 0);
    and "Hide the replies" over a post showing none, and pressing it unfolded
    instead of folding. Everything needed is already in replyCache, so this
    refetches nothing.
-   A URI we have no cache for can't be put back (a reload empties the cache),
-   so it is dropped from the set and its buttons redrawn -- a button that
-   says "Show" and shows is better than one that lies. */
+   One we have no cache for can't be put back (a reload empties the cache),
+   so it is dropped from the set; its button was drawn shut and stays so --
+   a button that says "Show" and shows is better than one that lies.
+   Only a box whose own PLACE was open comes back (see repliesKey): another
+   copy of the same post further down the feed stays folded. */
 function restoreOpenReplies(root) {
   if (!state.openReplies.size) return;
-  for (const pv of root.querySelectorAll("[data-uri]")) {
+  // Posts and quotes only: the buttons inside a reply box carry data-uri too.
+  for (const pv of root.querySelectorAll(".pv[data-uri], .quote[data-uri]")) {
     const uri = pv.dataset.uri;
-    if (!state.openReplies.has(uri) || pv.querySelector(":scope > .replies")) continue;
-    if (!replyCache.has(uri)) {
-      state.openReplies.delete(uri);
-      if (state.postState.has(uri)) refreshActions(uri);
-      continue;
-    }
-    const el = document.createElement("div");
-    el.className = "replies";
-    el.dataset.for = uri;
-    pv.append(el);
-    drawReplies(el, uri, numSetting("repliesShown"));
+    if (pv.querySelector(":scope > .replies")) continue;
+    const key = repliesKey(pv);
+    if (!state.openReplies.has(key)) continue;
+    if (!replyCache.has(uri)) { state.openReplies.delete(key); continue; }
+    // And its replies' own open boxes, which weren't in the markup until now.
+    restoreOpenReplies(openRepliesBox(pv, uri));
   }
 }
 /* Opens the composer to answer one post. A reply names the post it answers
@@ -7582,12 +7624,29 @@ function gifAutoplay() {
   const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   return settings.gifMode === "auto" && !reduce;
 }
-/* Link card. Tenor GIF links (how Bluesky posts GIFs) are shown as the GIF
-   itself instead of a card. */
+/* Whether a link is a GIF from Bluesky's GIF picker: an external embed whose
+   uri IS the animated file, with the link card's thumb only its first frame.
+   The picker used Tenor (media.tenor.com) and switched to Klipy
+   (static.klipy.com) in 2026; posts from both eras are still around. Every
+   place that asks "is this link a GIF" goes through here, so a new provider
+   is one line. */
+const GIF_LINK_HOSTS = new Set(["media.tenor.com", "static.klipy.com"]);
+function isGifLink(uri) {
+  try { return GIF_LINK_HOSTS.has(new URL(uri).hostname); } catch { return false; }
+}
+/* Link card. GIF-picker links (isGifLink) are shown as the GIF itself
+   instead of a card. Both providers put the size in the query (ww, hh), so
+   the box takes its shape before the file arrives; the picker writes the alt
+   text into the description as "ALT: ...". */
 function externalHtml(x, p) {
   const href = safeUrl(x.uri); if (!href) return "";
   const host = new URL(href).hostname.replace(/^www\./, "");
-  if (host === "media.tenor.com") return wrapSensitive(`<img class="gif" src="${esc(href)}" alt="${esc(x.title || x.description || "GIF")}" loading="lazy">`, p);
+  if (isGifLink(href)) {
+    const q = new URL(href).searchParams, w = +q.get("ww"), h = +q.get("hh");
+    const ar = w > 0 && h > 0 ? ` style="aspect-ratio:${w}/${h}"` : "";
+    const alt = (x.description || "").replace(/^ALT:\s*/, "") || x.title || "GIF";
+    return wrapSensitive(`<img class="gif" src="${esc(href)}" alt="${esc(alt)}"${ar} loading="lazy">`, p);
+  }
   return `<a class="ext" href="${esc(href)}" target="_blank" rel="noopener">
     ${x.thumb ? `<img src="${esc(x.thumb)}" alt="" loading="lazy">` : ""}
     <div class="ext-body">${x.title ? `<div class="ext-title">${esc(x.title)}</div>` : ""}${x.description ? `<div class="ext-desc">${esc(x.description)}</div>` : ""}<div class="ext-domain">${esc(host)}</div></div></a>`;
@@ -7638,7 +7697,7 @@ function mediaLabels(m) {
   if (m.video) labels.push(m.video.gif ? "GIF" : "Video");
   if (m.link) {
     let host = ""; try { host = new URL(m.link.uri).hostname.replace(/^www\./, ""); } catch {}
-    labels.push(host === "media.tenor.com" ? "GIF" : `Link: ${m.link.title || host || "a website"}`);
+    labels.push(isGifLink(m.link.uri) ? "GIF" : `Link: ${m.link.title || host || "a website"}`);
   }
   if (m.quotes) labels.push("Quotes another post");
   if (m.other && !labels.length) labels.push("An attachment");
@@ -8037,7 +8096,7 @@ function disconnectVideos() {
    Record key = last segment of an at:// URI. */
 function rkeyOf(uri) { return uri.split("/").pop(); }
 /* Re-renders the action bar everywhere this post appears on screen. */
-function refreshActions(uri) { $$(`[data-actions="${CSS.escape(uri)}"]`).forEach(el => (el.innerHTML = actionsHtml(state.postState.get(uri).post))); }
+function refreshActions(uri) { $$(`[data-actions="${CSS.escape(uri)}"]`).forEach(el => { el.innerHTML = actionsHtml(state.postState.get(uri).post); syncRepliesBtn(el); }); }
 /* Re-draws the Follow button everywhere this AUTHOR appears: one follow is
    about the person, so every post of theirs on screen has to agree. The button
    lives in the action bar, so this is refreshActions once per post of theirs
@@ -8049,14 +8108,19 @@ function refreshFollow(did) {
   for (const btn of $$(`[data-follow="${CSS.escape(did)}"]`)) {
     const uri = btn.closest("[data-actions]")?.dataset.actions;
     if (uri && state.postState.has(uri)) uris.add(uri);
+    // A button outside any action bar -- the profile panel's -- has no post
+    // to redraw, so it is redrawn on its own.
+    else if (!uri) { const a = authorOfButton(btn); if (a) btn.outerHTML = followBtnHtml(a); }
   }
   for (const uri of uris) refreshActions(uri);
 }
-/* The author a gutter button belongs to, taken from the post it sits beside --
-   the post view holds the handle the button's labels need. */
+/* The author a follow button belongs to, taken from the post it sits beside --
+   the post view holds the handle the button's labels need. The profile
+   panel's button sits beside no post; its author is the panel's person. */
 function authorOfButton(btn) {
   const uri = btn.closest("[data-uri]")?.dataset.uri;
-  return uri ? state.postState.get(uri)?.post?.author || null : null;
+  if (uri) return state.postState.get(uri)?.post?.author || null;
+  return btn.closest("#profile") && profileAuthor?.did === btn.dataset.follow ? profileAuthor : null;
 }
 /* Follow or unfollow the author. A follow is a record in the user's own repo
    (app.bsky.graph.follow) naming their DID; unfollowing deletes it. Optimistic
@@ -8074,9 +8138,12 @@ async function followUriFor(did) {
   if (!uri) throw new Error("Bluesky didn't say which follow record to remove.");
   return uri;
 }
-async function toggleFollow(did) {
-  const btn = $(`[data-follow="${CSS.escape(did)}"]`);
-  const a = btn && authorOfButton(btn); if (!a) return;
+async function toggleFollow(a) {
+  // The author, taken by the caller from the button that was pressed (see
+  // authorOfButton) -- not looked up from the first button with this DID,
+  // which could be in the feed under the profile panel, or the panel's own.
+  if (!a?.did) return;
+  const did = a.did;
   const s = fs(a); if (s.busy) return;
   s.busy = true;
   const prev = s.follow;
@@ -8214,7 +8281,7 @@ function showFollowMenu(btn, did) {
   const a = authorOfButton(btn); if (!a) return;
   const on = !!fs(a).follow;
   showMenu(btn, [
-    { icon: on ? ICON.following : ICON.follow, label: `${on ? "Unfollow" : "Follow"} @${a.handle}`, run: () => toggleFollow(did) },
+    { icon: on ? ICON.following : ICON.follow, label: `${on ? "Unfollow" : "Follow"} @${a.handle}`, run: () => toggleFollow(a) },
     { icon: ICON.open, label: `Their profile on ${webLinkHost()}`, href: profileUrl(a) },
   ]);
 }
@@ -8237,7 +8304,7 @@ document.addEventListener("click", ev => {
     // This action is the author's, not the post's: the DID is on the button.
     const did = btn.dataset.follow;
     if (settings.confirmFollow) { if (openMenu) closeMenu(); else showFollowMenu(btn, did); }
-    else toggleFollow(did);
+    else toggleFollow(authorOfButton(btn));
   }
   else if (act === "copy") {
     const { url, proxied } = shareUrl(state.postState.get(uri).post);
@@ -8612,6 +8679,7 @@ $("#compScrim").addEventListener("click", closeComposer);
    infinite scroll in here would be a second thing to keep right. */
 const PROFILE_POSTS = 12;
 let profileFor = null;         // the DID or handle the open panel is about
+let profileAuthor = null;      // its person as the follow button needs them (see authorOfButton)
 function openProfile(actor) {
   if (!actor) return;
   // The panel is built from getProfile and getAuthorFeed, both AppView
@@ -8638,7 +8706,7 @@ function closeProfile() {
   if (isHidden("#profile")) return;    // see closeLightbox
   hide("#profile", "#profScrim");
   $("#profile").innerHTML = "";
-  profileFor = null;
+  profileFor = profileAuthor = null;
   dropOverlay("profile");
 }
 const profileOpen = () => !isHidden("#profile");
@@ -8670,7 +8738,7 @@ function drawProfileError(e) {
 }
 /* The panel's markup. `posts` null means they haven't arrived yet. */
 function drawProfile(p, posts, postsErr) {
-  const a = { did: p.did, handle: p.handle, displayName: p.displayName, viewer: p.viewer };
+  const a = profileAuthor = { did: p.did, handle: p.handle, displayName: p.displayName, viewer: p.viewer };
   const n = v => (typeof v === "number" ? v.toLocaleString() : "\u2014");
   const blocked = p.viewer?.blocking || p.viewer?.blockedBy;
   // Muted is not blocked: their posts are still readable, they are just kept

@@ -369,7 +369,7 @@ test("the reply button on a QUOTED post opens that post's replies", async () => 
   const box = quote.querySelector(":scope > .replies");
   assert.match(box.textContent, /post IR1/, "showing the quoted post's reply");
   assert.ok(!art.querySelector(":scope > .pv > .replies"), "and nothing was hung under the quoting post");
-  assert.ok(page.eval(`state.openReplies.has(${JSON.stringify(inner.uri)})`), "the quoted post is the one marked open");
+  assert.ok(page.eval(`[...state.openReplies].some(k => k.endsWith(${JSON.stringify(" " + inner.uri)}))`), "the quoted post is the one marked open");
 });
 
 test("replying from a quoted post answers that post", async () => {
@@ -419,6 +419,33 @@ test("unfolded replies survive a rebuild, as the button claims they do", async (
   btn.click();
   await h.wait(20);
   assert.ok(!page.article("TOP").querySelector(".replies"), "one press folds it away");
+});
+
+/* Open is a PLACE, not a post. The same post turns up more than once in a
+   catch-up -- here, on its own and again as a quote further down -- and the
+   open state was kept by URI, so unfolding one copy unfolded every other
+   copy as soon as the feed was drawn again (a later batch, a rebuild), and
+   lit up every copy's button meanwhile. */
+test("unfolding a post's replies leaves its other copies in the feed folded", async () => {
+  const top = h.post("TOP", u1, 10, { replyCount: 2 });
+  const replies = [h.post("R1", R, 11, { replyTo: top }), h.post("R2", R, 12, { replyTo: top })];
+  const outer = h.post("OUTER", u2, 20, { embed: h.embeds.quote(top) });
+  const page = await h.loadPage({ server: {
+    timeline: [h.item(top), h.item(outer)],
+    posts: Object.fromEntries([top, outer, ...replies].map(x => [x.uri, x])),
+  } });
+  await page.startDate(h.BASE);
+  await openReplies(page);
+  const copy = () => page.article("OUTER").querySelector(`.quote[data-uri="${top.uri}"]`);
+  assert.ok(copy(), "the post is on screen twice");
+  assert.ok(!copy().querySelector('[data-act="replies"]').classList.contains("on"), "the other copy's button stays shut");
+
+  await page.setSetting("collapseRepeats", false);   // the feed is drawn again
+  await h.wait(60);
+
+  assert.ok(page.article("TOP").querySelector(".replies"), "the one that was opened comes back open");
+  assert.ok(!copy().querySelector(".replies"), "and the other copy is still folded");
+  assert.ok(!copy().querySelector('[data-act="replies"]').classList.contains("on"), "with its button saying so");
 });
 
 test("replies that can't be put back stop the button claiming they are open", async () => {

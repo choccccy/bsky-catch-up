@@ -290,6 +290,29 @@ test("the panel closes without disturbing the catch-up", async () => {
   assert.deepEqual(page.ids(), ids, "the catch-up is untouched");
 });
 
+/* The panel's Follow button sits beside no post, and the author used to be
+   looked up from the post the button was in -- so it found nobody and the
+   click did nothing at all. It must follow, and the feed's buttons for the
+   same person must agree with it. */
+test("the panel's Follow button follows, and the feed agrees", async () => {
+  const stranger = h.actor(9);
+  const page = await h.loadPage({ settings: { confirmFollow: false }, server: {
+    timeline: [h.item(h.post("S", stranger, 10))],
+    profiles: { "did:plc:u9": stranger },
+  } });
+  await page.startDate(h.BASE);
+  page.eval(`openProfile("did:plc:u9")`);
+  const panelBtn = () => page.$('#profile [data-act="follow"]');
+  await h.waitFor(() => panelBtn(), { message: "the panel's button" });
+  assert.ok(!panelBtn().classList.contains("on"));
+  panelBtn().click();
+  await h.waitFor(() => panelBtn().classList.contains("on") && !panelBtn().classList.contains("pending"),
+    { message: "the follow to be confirmed" });
+  const rec = page.records().find(r => r.collection === "app.bsky.graph.follow");
+  assert.equal(rec?.record.subject, "did:plc:u9");
+  assert.ok(page.article("S").querySelector('[data-act="follow"]').classList.contains("on"), "their post in the feed agrees");
+});
+
 test("Escape closes the panel too", async () => {
   const page = await h.loadPage({ server: { timeline: profTimeline } });
   await page.startDate(h.BASE);
