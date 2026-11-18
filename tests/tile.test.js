@@ -525,6 +525,29 @@ test("a band whose posts fall out of the bottom is given taller rows", async () 
   assert.equal(tile.style.gridRow, "span 250", "spans are re-counted in the new rows (1000 / 4px)");
 });
 
+test("a tile hanging out only because its span is stale doesn't re-row the band", async () => {
+  // A tile further off than the per-frame sweep reaches can grow (its
+  // picture's size known before the load event, the observer not yet run)
+  // and hang out of its band's bottom for a frame. That is a short span, not
+  // the line limit: read as the limit, it doubled the band's rows for good,
+  // and a band that collected a few ended up on 32-64px rows with tens of
+  // pixels of empty space under its posts.
+  const page = await h.loadPage({ settings: TILED, server });
+  await page.startDate(start);
+  const band = page.$("#feed > .band");
+  const tile = band.querySelector(".tile");
+  rects(band, 0, 1000);
+  Object.defineProperty(tile, "offsetHeight", { value: 1000, configurable: true });
+  tile.style.gridRow = "span 1";
+  // Out of the near-the-screen sweep's own reach, and outside the band only
+  // while its span is short.
+  tile.getBoundingClientRect = () => ({ top: 2e5, bottom: tile.style.gridRow === "span 500" ? 1000 : 1500, left: 0, right: 100, width: 100, height: 1000 });
+  page.window.dispatchEvent(new page.window.Event("scroll"));
+  await h.wait(80);
+  assert.equal(band.dataset.row, undefined, "the band keeps its 2px rows");
+  assert.equal(tile.style.gridRow, "span 500", "the stale span is what gets fixed");
+});
+
 test("a band that fits is left on the ordinary rows", async () => {
   const page = await h.loadPage({ settings: TILED, server });
   await page.startDate(start);
@@ -578,4 +601,36 @@ test("a batch that overflows its band is re-rowed as it lands", async () => {
   const grew = landed.filter(b => !bandsBefore.has(b) || b.dataset.row);
   assert.ok(grew.length, "the batch landed in some band");
   for (const b of grew) assert.equal(b.dataset.row, "4", "the new batch's band is re-rowed without waiting for a scroll");
+});
+
+/* ---- holding the post being read while the page settles ----
+   A rebuild re-creates every picture, and they arrive for seconds after it;
+   so does a fast-path append, which hides the end block before anything is
+   put below it. Correcting three times in the first ~150ms and leaving the
+   rest to the browser's scroll anchoring let the post drift off screen where
+   there is none (Safari) or it has given up (Firefox). Rectangles are all
+   zero in jsdom, so the post is "always" 120px from where it should be, and
+   every correction is a recorded scroll of [0, -120]. */
+test("the reading spot is held past the first frames, not just three times", async () => {
+  const page = await h.loadPage({ settings: TILED, server });
+  await page.startDate(start);
+  page.scrolls.length = 0;
+  page.eval(`settleScroll(document.querySelector("#feed .post"), () => 120)`);
+  await h.wait(400);
+  assert.ok(page.scrolls.length > 3, `still holding at 400ms (${page.scrolls.length} corrections)`);
+  assert.deepEqual(page.scrolls[0], [0, -120]);
+  page.eval("stopSettle?.()");
+});
+
+test("the hold lets go as soon as the reader scrolls", async () => {
+  const page = await h.loadPage({ settings: TILED, server });
+  await page.startDate(start);
+  for (const type of ["wheel", "touchstart", "keydown", "pointerdown"]) {
+    page.eval(`settleScroll(document.querySelector("#feed .post"), () => 120)`);
+    await h.wait(50);
+    page.window.dispatchEvent(new page.window.Event(type));
+    page.scrolls.length = 0;
+    await h.wait(150);
+    assert.deepEqual(page.scrolls, [], `no more corrections after ${type}`);
+  }
 });

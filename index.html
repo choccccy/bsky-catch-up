@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.5.2
+  Version 1.5.3
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -702,6 +702,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Versions before 0.1.1 were numbered retroactively, when versioning started.
 
+## [1.5.3] - 2026-11-18
+
+### Fixed
+
+- **No more stray gaps between posts while tiled.** Posts side by side sit
+  on a grid of thin rows, and an hour with more posts than Firefox will give
+  a grid lines for gets coarser rows instead. The check for that was fooled
+  by a post that had just grown off screen — a picture whose size arrived
+  before the page had re-measured it — and took one frame of it hanging out
+  of the bottom for the real limit. Each time, the hour's rows doubled for
+  good, and every post in it was rounded up to the next row: after a few,
+  up to 60-odd pixels of empty space under posts at random. Posts are now
+  re-measured before that check is believed, so only an hour that really
+  needs coarser rows gets them.
+
+- **"Load newer posts" keeps your place.** It sometimes threw you back up
+  the feed, further the longer you'd been reading. A post Bluesky indexed
+  late can land among ones you've already passed, and then the whole feed is
+  rebuilt: every picture in it loads again, for seconds afterwards, and the
+  page only held the post you were reading for the first fraction of one,
+  leaving the rest to the browser — which in Safari, and in Firefox once it
+  has given up on it, does nothing. The post you're reading is now held in
+  place until the page stops moving, and let go the moment you scroll. The
+  same hold stops the smaller jump when the button itself goes away at the
+  very bottom of the page.
+
 ## [1.5.2] - 2026-11-17
 
 ### Fixed
@@ -774,9 +800,9 @@ Versions before 0.1.1 were numbered retroactively, when versioning started.
   the words back, a different one starts clean, and writing the second thing
   doesn't throw away the first. Posting clears it.
 
-- The button on a very tall picture reads **"Show this picture larger"**
+- The button on a very tall image reads **"Show this image larger"**
   rather than "Show this one larger", which left you to work out what "one"
-  meant. It uncrops that one picture, not the post.
+  meant. It uncrops that one image, not the post.
 
 - **A link in somebody's post can't move where pictures come from.** The page
   learns an AppView's picture and video hosts from the addresses it serves,
@@ -2301,7 +2327,7 @@ site with this release.
      from the <link> below (which is why the icon is not written out here: that
      base64 is 14KB, and it may appear in this file exactly once). -->
 <link rel="manifest" id="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Bluesky%20Catch-up%22%2C%22short_name%22%3A%22Catch-up%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230F141B%22%2C%22theme_color%22%3A%22%230F141B%22%7D">
-<title>Catch-up v1.5.2 · Bluesky</title>
+<title>Catch-up v1.5.3 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -3486,7 +3512,7 @@ body{transition:padding-right .18s ease}
 "use strict";
 /* App version (semver). Keep in sync with the file header and the <title>
    tag; see VERSIONING at the top of the file. */
-const APP_VERSION = "1.5.2";
+const APP_VERSION = "1.5.3";
 /* Where this page comes from. Used by the provenance links on the sign-in
    page, which boot() fills in so they always point at the running version. */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
@@ -6272,8 +6298,8 @@ function tileWidth(n = numSetting("tileMax")) {
 function tileOn() { return settings.tile === true && tileCols() >= 2; }
 /* Every direct child of a .band is a grid item over 2px rows, so it has to
    say how many rows it covers (grid has no masonry of its own). Heights
-   change after insertion -- a picture with no reserved ratio arriving, alt
-   text, "show this picture larger", a video player attaching, expandThreadGap()
+   change after insertion -- an image with no reserved ratio arriving, alt
+   text, "show this image larger", a video player attaching, expandThreadGap()
    adding posts inside a card, a change of text size or column width -- so
    one ResizeObserver keeps the spans in step, instead of a pass per
    occasion. Setting a span changes the item's grid AREA, never its own box
@@ -6339,15 +6365,32 @@ function fixIfShort(el) { if (spanFor(el) > spanOf(el)) setSpan(el); }
    rows can leave up to 7px under a tile. Only bands that would otherwise
    break pay it, and a 20,000px band is not somewhere 7px shows. */
 const MAX_TILE_ROW = 64;     // 9,999 rows of these is ~640,000px of band
+/* Overflow only means "out of grid lines" once every span in the band is
+   right. sweepSpans only fixes the items near the screen, and a tile further
+   off that has just grown (its picture's size known before its load event,
+   the observer not yet run) hangs out of the bottom for a frame too.
+   Reading that as the line limit doubled the band's rows for good, and
+   enough of those leave a band on 32px or 64px rows with every tile rounded
+   up to the next one: tens of pixels of empty space under random posts. So
+   overflow is checked twice, the second time after every span in the band
+   has been put right; only what is still outside then is the line limit. */
+function bandOverflow(band) {
+  const bottom = band.getBoundingClientRect().bottom;
+  let past = 0;
+  for (const el of band.children) {
+    // The day banner is sticky: while stuck it is painted away from where
+    // it lives, which is not the overflow being looked for.
+    if (getComputedStyle(el).position === "sticky") continue;
+    past = Math.max(past, el.getBoundingClientRect().bottom - bottom);
+  }
+  return past;
+}
 function fitBand(band) {
   for (let guard = 0; guard < 6; guard++) {
-    const bottom = band.getBoundingClientRect().bottom;
-    let past = 0;
-    for (const el of band.children) {
-      // The day banner is sticky: while stuck it is painted away from where
-      // it lives, which is not the overflow being looked for.
-      if (getComputedStyle(el).position === "sticky") continue;
-      past = Math.max(past, el.getBoundingClientRect().bottom - bottom);
+    let past = bandOverflow(band);
+    if (past > 1 && guard === 0) {
+      for (const el of band.children) fixIfShort(el);
+      past = bandOverflow(band);
     }
     const row = rowOf(band.firstElementChild);
     if (past <= 1 || row >= MAX_TILE_ROW) return;
@@ -6401,15 +6444,56 @@ document.addEventListener("load", ev => {
 /* The reading spot, as last seen by the scroll handler: the post at the top
    of the screen and where its top edge was. */
 function readingSpot() { return state.clockKey ? { key: state.clockKey, offset: state.clockTop } : null; }
-/* Puts `el` where `want()` says it should sit on screen, three times: now,
-   on the next frame, and shortly after. Once isn't enough -- pictures
+/* Puts `el` where `want()` says it should sit on screen, and HOLDS it there
+   until the page stops moving under it. Once isn't enough -- pictures
    arriving, content-visibility and (tiled) the row spans, which are
-   re-measured asynchronously by the ResizeObserver, all move things right
-   after insertion. want() is called each time so it can read a layout value
-   (the bar's height) that may itself have settled in between. */
+   re-measured asynchronously by the ResizeObserver, all move things after
+   insertion, some of it seconds later (every picture in a rebuilt feed is a
+   new <img>, loaded and decoded again). want() is called each time so it can
+   read a layout value (the bar's height) that may itself have settled.
+   This used to correct three times in the first ~150ms and leave the rest to
+   the browser's scroll anchoring. Safari has none, and Firefox switches it
+   off for a page after a run of adjustments, so there a rebuild after a long
+   read ("Load newer posts" where a late post lands among ones already shown)
+   let the post being read drift hundreds of pixels down the screen. So the
+   check runs every frame, and stops:
+     - when nothing has needed moving for SETTLE_QUIET_MS (or SETTLE_MAX_MS
+       in all, so a page that never settles isn't watched forever);
+     - the moment the reader scrolls: on wheel/touch/key/pointer input, and,
+       for a scrollbar drag (which some browsers send no event for), when the
+       post is off its spot while the page under it hasn't moved -- only the
+       viewport can have done that, and it wasn't us;
+     - when another settle starts, the post leaves the page, or so does the feed. */
+const SETTLE_QUIET_MS = 3000, SETTLE_MAX_MS = 15000;
+const SETTLE_INPUT = ["wheel", "touchstart", "keydown", "pointerdown"];
+let stopSettle = null;
 function settleScroll(el, want) {
-  const go = () => window.scrollBy(0, el.getBoundingClientRect().top - want());
-  go(); requestAnimationFrame(() => { go(); setTimeout(go, 120); });
+  stopSettle?.();
+  const t0 = performance.now();
+  let lastMoved = t0, onSpot = false, docTop = null, raf = 0;
+  const stop = () => {
+    if (stopSettle !== stop) return;
+    stopSettle = null; cancelAnimationFrame(raf);
+    for (const t of SETTLE_INPUT) window.removeEventListener(t, stop, true);
+  };
+  stopSettle = stop;
+  for (const t of SETTLE_INPUT) window.addEventListener(t, stop, { capture: true, passive: true });
+  const go = () => {
+    const now = performance.now();
+    if (stopSettle !== stop) return;
+    if (!el.isConnected || !viewing("feed") || now - lastMoved > SETTLE_QUIET_MS || now - t0 > SETTLE_MAX_MS) return stop();
+    const top = el.getBoundingClientRect().top, off = top - want(), y = window.scrollY;
+    const here = top + y;                        // the post's place on the PAGE
+    if (onSpot && docTop != null && Math.abs(here - docTop) < 1 && Math.abs(off) >= 1) return stop();
+    if (Math.abs(off) >= 1) {
+      window.scrollBy(0, off);
+      if (window.scrollY !== y) lastMoved = now;
+      onSpot = Math.abs(el.getBoundingClientRect().top - want()) < 1;
+    } else onSpot = true;
+    docTop = here;
+    raf = requestAnimationFrame(go);
+  };
+  go();
 }
 /* Puts that post back where it was after something reflowed the feed
    WITHOUT rebuilding it -- a change in the number of columns moves every
@@ -6562,8 +6646,9 @@ function arrangeThreads(view, mode) {
                  the screen now. Used after a reflow has already happened
                  (a resize), where what's on screen is no longer what the
                  reader was looking at.
-   The scroll correction runs three times (now, next frame, +120ms) because
-   images and content-visibility can shift layout right after insertion. */
+   The scroll correction holds the post in place until layout settles (see
+   settleScroll), because images and content-visibility shift it for a while
+   after insertion -- and, on the append fast path, the end block going away. */
 function buildView({ fresh, keepPosition = !fresh, append = false, spot = null } = {}) {
   const newView = computeView();
   // Fast path, ONLY for append (fetchNewer): if nothing already on screen
@@ -6573,7 +6658,15 @@ function buildView({ fresh, keepPosition = !fresh, append = false, spot = null }
   // so the key check alone would wrongly skip the re-render.
   if (append && state.rendered > 0 && newView.length >= state.rendered &&
       newView.slice(0, state.rendered).every((it, i) => it.key === state.view[i]?.key)) {
-    state.view = newView; updateFeedHead(); updateEndcap(); maybeRenderMore(); return;
+    // Nothing above moves, but the page still changes length under you:
+    // updateEndcap hides the button you just pressed before maybeRenderMore
+    // puts anything below it, and if you were scrolled right to the bottom,
+    // the browser pulls the page up by that block's height to stay in range.
+    // The summary above the feed changes too. So hold the post being read.
+    const top = topVisiblePost(), offset = top?.getBoundingClientRect().top;
+    state.view = newView; updateFeedHead(); updateEndcap(); maybeRenderMore();
+    if (top) settleScroll(top, () => offset);
+    return;
   }
   let topKey = null, topOffset = 0;
   if (keepPosition && spot) { topKey = spot.key; topOffset = spot.offset; }
@@ -7554,7 +7647,7 @@ function imageCellHtml(im, cols) {
   const ar = arOf(im);
   const btn = `<button class="img" type="button" data-act="zoom" data-full="${esc(im.fullsize)}" data-alt="${esc(im.alt || "")}"${ar ? ` style="${ar.vars}"` : ""}><img ${imgSrcAttrs(im, cellWidthPx(cols))} alt="${esc(im.alt || "")}" loading="lazy" decoding="async">${im.alt && !settings.wholeAlt ? '<span class="alt-badge">ALT</span>' : ""}</button>`;
   const body = ar?.tall
-    ? `<div class="tallwrap">${btn}<div class="tall-cover"><button class="btn" type="button" data-act="expand-img">Show this picture larger</button></div></div>`
+    ? `<div class="tallwrap">${btn}<div class="tall-cover"><button class="btn" type="button" data-act="expand-img">Show this image larger</button></div></div>`
     : btn;
   const cap = settings.wholeAlt && im.alt ? `<div class="alt-cap">${esc(im.alt)}</div>` : "";
   return `<div class="img-cell">${body}${cap}</div>`;
