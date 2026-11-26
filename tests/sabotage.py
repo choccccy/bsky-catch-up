@@ -48,11 +48,11 @@ GUARDS = [
      'const proxy = method.startsWith("app.bsky.") ? appViewTarget() : null;',
      'const proxy = appViewTarget();'),
     ('marks ignore which side runs it',
-     'const href = MARK_DOCS[term]?.[op];',
-     'const href = MARK_DOCS[term]?.atproto;'),
+     'const href = DOC[MARK_DOCS[term]?.[op]];',
+     'const href = DOC[MARK_DOCS[term]?.atproto];'),
     ('marks all point at one front door',
-     'const href = MARK_DOCS[term]?.[op];',
-     'const href = ATPROTO_DOCS;'),
+     'const href = DOC[MARK_DOCS[term]?.[op]];',
+     'const href = DOC.protocol;'),
     ('classifier calls everything Bluesky',
      'const isBlueskyHost = host => !!host && BLUESKY_HOSTS.some(re => re.test(String(host)));',
      'const isBlueskyHost = host => !!host;'),
@@ -100,17 +100,17 @@ GUARDS = [
      '    if (s.derived) {',
      '    if (false) {'),
     ('follows paging trusts a cursor that never moves',
-     '    if (r.cursor === cursor || m.size === before) break;',
-     ''),
+     '    if (!r?.cursor || !list.length || r.cursor === cursor) return;',
+     '    if (!r?.cursor || !list.length) return;'),
     ('video URL shape assumed instead of learned',
      '  const seg = seenMediaHosts.videoPath || "watch";',
      '  const seg = "watch";'),
     ('swipe-to-dismiss ignores where the panel was scrolled to',
-     '  profSwipe = ev.isPrimary && $("#profile").scrollTop <= 0 ? { x: ev.clientX, y: ev.clientY } : null;',
-     '  profSwipe = ev.isPrimary ? { x: ev.clientX, y: ev.clientY } : null;'),
+     '  canStart: () => $("#profile").scrollTop <= 0,',
+     '  canStart: () => true,'),
     ('an upward flick dismisses the panel too',
-     '  if (dy >= SWIPE_Y && dy > Math.abs(dx)) closeProfile();  // downwards, and more down than across',
-     '  if (Math.abs(dy) >= SWIPE_Y) closeProfile();'),
+     '  onDrag: (dx, dy) => { if (dy >= SWIPE_Y && dy > Math.abs(dx)) closeProfile(); },',
+     '  onDrag: (dx, dy) => { if (Math.abs(dy) >= SWIPE_Y) closeProfile(); },'),
     ('a muted account is shown as if nothing were set',
      '  const muted = !blocked && (p.viewer?.muted || p.viewer?.mutedByList);',
      '  const muted = false;'),
@@ -217,8 +217,8 @@ GUARDS = [
      '    openProfile(btn.dataset.actor);',
      ''),
     ('the profile panel never gives back its history entry',
-     '  dropOverlay("profile");',
-     ''),
+     '  if (!closeOverlay("profile", "#profile", "#profScrim")) return;',
+     '  if (isHidden("#profile")) return; hide("#profile", "#profScrim");'),
     ('a late profile response overwrites a closed panel',
      '  if (profileFor !== mine) return;     // closed, or another one opened, while we waited',
      ''),
@@ -235,7 +235,7 @@ GUARDS = [
      'const LINK_FORMAT = 5;',
      'const LINK_FORMAT = 4;'),
     ('author links never written',
-     '  if (src?.kind === "author") h += "&author=" + encodeURIComponent(src.did);',
+     '  if (feed?.kind === "author") h += "&author=" + encodeURIComponent(feed.did);',
      '  if (false) {}'),
     ('anything at all accepted as a person',
      '  return /^[a-z0-9-]+(\\.[a-z0-9-]+)+$/i.test(s) ? s : null;',
@@ -280,8 +280,8 @@ GUARDS = [
      '  if (row) dl.innerHTML = infraRows(row);',
      '  if (row) renderDrawer();'),
     ('docs links can point anywhere',
-     'const docsHtml = docs => !docs?.length ? "" :\n  `<span class="docs">${docs.map(([label, path]) => `<a href="${esc(ATPROTO_DOCS + path)}"',
-     'const docsHtml = docs => !docs?.length ? "" :\n  `<span class="docs">${docs.map(([label, path]) => `<a href="${esc("https://bsky.app/" + path)}"'),
+     '.map(([label, n]) => extLink(DOC[n], esc(label)))',
+     '.map(([label, n]) => extLink("https://bsky.app/" + n, esc(label)))'),
     ('unknown rows stop explaining themselves',
      '    : "Recorded when you sign in: your own domain if it publishes a DID, otherwise the AppView, otherwise Bluesky\'s public API.",',
      '    : "",'),
@@ -358,11 +358,11 @@ GUARDS = [
      'const cdnImg = (kind, did, cid, pds) => {\n  if (pds) return blobUrl(pds, did, cid);',
      'const cdnImg = (kind, did, cid, pds) => {\n  if (false) return blobUrl(pds, did, cid);'),
     ('listRecords order never checked',
-     '    if (page === 0 && reverse === undefined && recs.length > 1 && recs[0].t < recs[recs.length - 1].t) {',
-     '    if (false) {'),
+     '      if (first && reverse === undefined && recs.length > 1 && recs[0].t < recs[recs.length - 1].t) break;',
+     '      if (false) break;'),
     ('unreachable accounts fail the whole catch-up',
-     '      catch (e) { if (isAbort(e) || signal?.aborted) throw e; failures.push(did); }\n      done++; onProgress?.({ done, total: dids.length, count: out.length });',
-     '      catch (e) { throw e; }\n      done++; onProgress?.({ done, total: dids.length, count: out.length });'),
+     '      try { await fn(x); } catch (e) { if (isAbort(e) || signal?.aborted) throw e; failures.push(x); }',
+     '      try { await fn(x); } catch (e) { throw e; }'),
     ('pacer shares one queue across servers',
      '    const l = this.lane(hostOf(host));\n    const interval = 60000',
      '    const l = this.lane("all");\n    const interval = 60000'),
@@ -379,8 +379,8 @@ GUARDS = [
      'const followed = new Set(dids);',
      'const followed = new Set([...dids, ...people.keys()]);'),
     ('post lookups cache a null placeholder again',
-     '    posts.set(uri, p);\n    return p;\n  }',
-     '    posts.set(uri, null);\n    return p;\n  }'),
+     'const once = (map, key, make) => { if (!map.has(key)) map.set(key, make()); return map.get(key); };',
+     'const once = (map, key, make) => { if (map.has(key)) return map.get(key); map.set(key, null); return make(); };'),
     ('quote filter blind to raw records',
      '  const raw = p?.record?.embed, t = raw?.$type;',
      '  const raw = null, t = undefined;'),
@@ -409,8 +409,8 @@ GUARDS = [
      '  if (!identitySaveTimer) identitySaveTimer = setTimeout(saveIdentities, 2000);',
      '  LS.set("identities", identityCache);'),
     ('listRecords order detection removed',
-     '    if (page === 0 && reverse === undefined && recs.length > 1 && recs[0].t < recs[recs.length - 1].t) {',
-     '    if (false) {'),
+     '      if (first && reverse === undefined && recs.length > 1 && recs[0].t < recs[recs.length - 1].t) break;',
+     '      if (false) break;'),
     ('short row spans are never put right',
      'function fixIfShort(el) { if (spanFor(el) > spanOf(el)) setSpan(el); }',
      'function fixIfShort(el) {}'),
@@ -457,8 +457,8 @@ GUARDS = [
      'return esc(text).replace(/\\[([^\\]]+)\\]\\(([a-zA-Z]+)\\)/g,',
      'return String(text).replace(/\\[([^\\]]+)\\]\\(([a-zA-Z]+)\\)/g,'),
     ('a setting can link anywhere',
-     'DOC[name] ? `<a href="${esc(DOC[name])}"',
-     'true ? `<a href="${esc(DOC[name] || name)}"'),
+     'DOC[name] ? extLink(DOC[name], words) : whole',
+     'true ? extLink(DOC[name] || name, words) : whole'),
     ('settings lose their documentation links',
      '${s.sub ? `<span class="sub">${subHtml(s.sub)}${docLinksHtml(s.docs)}</span>` : ""}',
      '${s.sub ? `<span class="sub">${subHtml(s.sub)}</span>` : ""}'),
@@ -548,8 +548,8 @@ GUARDS = [
      '      const viaT = like.via ? await repostTime(like.via, like.likedAt, signal) : null;',
      '      const viaT = null;'),
     ('the repost record is never read, only its key',
-     '    if (r?.value?.createdAt) t = Date.parse(r.value.createdAt);',
-     '    if (r?.value?.createdAt) t = NaN;'),
+     '  if (r?.value?.createdAt) t = Date.parse(r.value.createdAt);',
+     '  if (r?.value?.createdAt) t = NaN;'),
     ('a key that is not a TID is read as one anyway',
      '  if (!/^[234567a-z]{13}$/.test(String(rkey || \'\'))) return NaN;'.replace("'", '"'),
      '  if (false) return NaN;'),
@@ -560,11 +560,11 @@ GUARDS = [
      '        if (a.t < like.likedAt - LIKE_CLAMP) {',
      '        if (false) {'),
     ('a post point in a link drops the time it was read at',
-     '    return postLinkFrom(v) + (t != null ? "@" + Math.round(t / 1000) : "");',
-     '    return postLinkFrom(v);'),
+     '  const start = kind === "recent" ? Math.max(1, Number(value) || 0) : kind === "date" ? { t: value } : { post: value, t: atT };',
+     '  const start = kind === "recent" ? Math.max(1, Number(value) || 0) : kind === "date" ? { t: value } : { post: value };'),
     ('a copied link drops the time it was read at',
-     '  const at = p => postLinkFrom(p.uri) + "@" + Math.round(p.t / 1000);',
-     '  const at = p => postLinkFrom(p.uri);'),
+     '  const pt = p => p.uri ? { post: p.uri, t: p.t } : { t: p.t };',
+     '  const pt = p => p.uri ? { post: p.uri } : { t: p.t };'),
     ('a time in a link is ignored when it is read back',
      '    if (at) pt.t = at[1].length === 10 ? Number(at[1]) * 1000 : Number(at[1]);',
      '    if (false) pt.t = 0;'),
@@ -596,8 +596,8 @@ GUARDS = [
     # A drag must never fall through to "click anywhere closes": an upward
     # flick, or a pinch, would put the picture away mid-gesture.
     ('a drag in the image viewer falls through to the tap that closes it',
-     '  if (Math.hypot(dx, dy) <= TAP_SLOP) return;      // a tap: the click handler below has it\n  swiped = true;',
-     '  if (Math.hypot(dx, dy) <= TAP_SLOP) return;\n  swiped = false;'),
+     '  onDrag: (dx, dy) => {\n    swiped = true;',
+     '  onDrag: (dx, dy) => {\n    swiped = false;'),
     ('the picture slot forgets the card it sits in',
      'function postInnerPad() { return 2 * (narrowNow() ? POST_PAD_NARROW : POST_PAD) + 2; }',
      'function postInnerPad() { return 24; }'),
@@ -639,10 +639,10 @@ GUARDS = [
     ('the top bar stays above a quote put first',
      """    ${lead ? `<div class="pv-lead">${lead}</div>` : ""}
     ${meta}
-    <a class="avatar-link" href="${esc(profileUrl(a))}" target="_blank" rel="noopener" tabindex="-1" data-act="profile" data-actor="${esc(a.did || a.handle || "")}">${avatar}</a>
+    ${profileLink(a, avatar, ' class="avatar-link" tabindex="-1"')}
     ${headHtml(a, { href: postUrl(p), timeHtml: esc(fmtPostTime(time, feedT ?? time)), timeTitle: new Date(time).toLocaleString() })}""",
      """    ${meta}
-    <a class="avatar-link" href="${esc(profileUrl(a))}" target="_blank" rel="noopener" tabindex="-1" data-act="profile" data-actor="${esc(a.did || a.handle || "")}">${avatar}</a>
+    ${profileLink(a, avatar, ' class="avatar-link" tabindex="-1"')}
     ${headHtml(a, { href: postUrl(p), timeHtml: esc(fmtPostTime(time, feedT ?? time)), timeTitle: new Date(time).toLocaleString() })}
     ${lead ? `<div class="pv-lead">${lead}</div>` : ""}"""),
     ('quote-first ordering is ignored',
@@ -680,7 +680,7 @@ def run_suite(page, inner):
 
 
 def main():
-    src = (REPO / "index.html").read_text()
+    src = (REPO / "index.html").read_text(encoding="utf-8")
     args = sys.argv[1:]
     check_only = "--check" in args
     only = args[args.index("--only") + 1].lower() if "--only" in args else None
@@ -722,7 +722,7 @@ def main():
         # The control. Same load, unmodified page: anything failing here is
         # the machine, not a guard.
         control = work / "control.html"
-        control.write_text(src)
+        control.write_text(src, encoding="utf-8", newline="")
         print(f"control ({workers} guards at a time)...", flush=True)
         fails = run_suite(control, inner)
         if fails:
@@ -737,7 +737,7 @@ def main():
             name, old, new = guard[:3]
             unobservable = guard[3] if len(guard) > 3 else None
             page = work / f"s{i}.html"
-            page.write_text(src.replace(old, new, 1))
+            page.write_text(src.replace(old, new, 1), encoding="utf-8", newline="")
             try:
                 return name, run_suite(page, inner), unobservable
             finally:

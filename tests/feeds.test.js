@@ -710,6 +710,16 @@ test("a catch-up link can name one person, and round-trips", async () => {
   assert.match(back.$("#feedHead").textContent, /from @u1\.test/, "and the handle is fetched for the name");
 });
 
+test("the copied link of one person's posts still names them", async () => {
+  // "Copy link" is built from the finished run, not from the address, and
+  // until 1.5.4 that builder knew feed= but not author=: the link it copied
+  // opened the reader's own Following feed instead.
+  const page = await h.loadPage({ server: { timeline: [], authorFeeds: AUTHOR_POSTS } });
+  await page.startDate(h.BASE, null, { author: "u1.test" });
+  page.$("#btnCopyCatchup").click(); await h.wait(20);
+  assert.match(page.clip.at(-1), /author=did%3Aplc%3Au1/, `the copied link names them: ${page.clip.at(-1)}`);
+});
+
 test("the author= link format bump is complete", async () => {
   // A link naming one person would be IGNORED by a copy of the page from
   // before this existed, which would then quietly read Following instead --
