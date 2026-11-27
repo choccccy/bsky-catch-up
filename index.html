@@ -2,7 +2,7 @@
 <!--
 ================================================================================
   Bluesky Catch-up: a single-file, local reader for your Bluesky Following feed
-  Version 1.5.4
+  Version 1.5.5
   SPDX-License-Identifier: MIT
   Published at https://bsky-catch-up.choccy.gay/
 ================================================================================
@@ -236,6 +236,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Versions before 0.1.1 were numbered retroactively, when versioning started.
+
+## [1.5.5] - 2026-11-26
+
+### Fixed
+
+- **Videos stop using memory once they're gone.** A video played in a
+  profile panel or a reply box kept downloading and holding its buffer after
+  the panel was closed or the replies folded away; so did every video in the
+  feed when a setting change redrew it. They are now shut down with the
+  markup they belonged to.
+- **Signing out leaves nothing of the last account behind.** Its feed stayed
+  in the page, hidden, and the replies fetched during the session were kept;
+  both are now dropped (replies also on each new catch-up).
+- **Protocol mode's saved account lookups no longer pile up.** Expired ones
+  were ignored but never deleted; saving now drops them.
+- **Tiled view no longer stutters when you stop scrolling a long catch-up.**
+  The check that keeps tiles from overlapping went through the whole feed
+  in one go, laying the page out again for every tile it corrected. It now
+  works in short slices between frames, nearest posts first, and stops if
+  you start scrolling again.
 
 ## [1.5.4] - 2026-11-25
 
@@ -1878,7 +1898,7 @@ site with this release.
      from the <link> below (which is why the icon is not written out here: that
      base64 is 14KB, and it may appear in this file exactly once). -->
 <link rel="manifest" id="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Bluesky%20Catch-up%22%2C%22short_name%22%3A%22Catch-up%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230F141B%22%2C%22theme_color%22%3A%22%230F141B%22%7D">
-<title>Catch-up v1.5.4 · Bluesky</title>
+<title>Catch-up v1.5.5 · Bluesky</title>
 <!-- Tab icon: the brick heart, inline as data: URIs, and it MUST stay inline.
      An external favicon.svg would reach only the hosted copy, would be the one
      thing this page fetches that isn't Bluesky, and would leave every copy
@@ -2797,7 +2817,7 @@ body{transition:padding-right .18s ease}
 <script>
 "use strict";
 /* App version (semver); see VERSIONING at the top of the file. */
-const APP_VERSION = "1.5.4";
+const APP_VERSION = "1.5.5";
 /* Where this page comes from (the provenance links boot() fills in). */
 const REPO_URL = "https://github.com/choccccy/bsky-catch-up";
 /* ============================== utilities ============================== */
@@ -3722,6 +3742,8 @@ function forgetAccount() {
   state.follows = new Map();
   state.hiddenFollowed = 0;
   state.items = []; state.view = []; state.rendered = 0;
+  disconnectVideos(); feedEl().innerHTML = ""; disconnectTiles();
+  replyCache.clear(); state.openReplies.clear();
   state.postState = new Map(); state.authors = new Map(); hydrateQueue.clear();
   // Learned from the last account's AppView, so it must not outlive it.
   resetSeenMediaHosts();
@@ -3994,7 +4016,13 @@ function cachedIdentity(did) {
 /* Writes are coalesced: saving the whole map per account was quadratic over
    a few thousand follows. Flushed when the catch-up ends. */
 let identitySaveTimer = 0;
-function saveIdentities() { clearTimeout(identitySaveTimer); identitySaveTimer = 0; LS.set("identities", identityCache); }
+function saveIdentities() {
+  clearTimeout(identitySaveTimer); identitySaveTimer = 0;
+  // Expired entries are never read again: drop them, or the store only grows.
+  const now = Date.now();
+  for (const [did, e] of Object.entries(identityStore())) if (!(now - e?.at < IDENTITY_TTL)) delete identityCache[did];
+  LS.set("identities", identityCache);
+}
 function rememberIdentity(did, info) {
   identityStore()[did] = { ...info, at: Date.now() };
   if (!identitySaveTimer) identitySaveTimer = setTimeout(saveIdentities, 2000);
@@ -4678,6 +4706,7 @@ async function startCatchup(kind, value, end = null, feed = null, atT = null) {
   state.abort?.abort();
   const ac = new AbortController(); state.abort = ac; const signal = ac.signal;
   state.stats.requests = 0;
+  replyCache.clear(); state.openReplies.clear();
   showView("progress");
   netNote = null; rateNote = null;
   setProgress({ title: "Loading posts", stage: "Getting ready…", fraction: 0, stats: "" });
@@ -4985,7 +5014,7 @@ function setSpan(el) { el.style.gridRow = "span " + spanFor(el); }
 const tileObserver = typeof ResizeObserver === "undefined" ? null
   : new ResizeObserver(entries => { for (const e of entries) setSpan(e.target); });
 function measureTile(el) { setSpan(el); tileObserver?.observe(el); }
-function disconnectTiles() { tileObserver?.disconnect(); }
+function disconnectTiles() { tileObserver?.disconnect(); cancelSettleSweep(); }
 /* Two more passes than the observer, because the failures aren't symmetrical:
    a span too LONG is a gap nobody sees; too SHORT and the item paints over the
    posts beside and below it and the next band's divider. The observer only
@@ -4995,6 +5024,14 @@ function disconnectTiles() { tileObserver?.disconnect(); }
        which costs nothing while every span is right.
    Neither ever shortens a span. */
 function fixIfShort(el) { if (spanFor(el) > spanOf(el)) setSpan(el); }
+/* fixIfShort for many items: every height is read before any span is
+   written, since a read after a write lays the grid out again -- one layout
+   per changed item, the whole feed's worth after a font swap. */
+function fixSpans(items) {
+  const short = [];
+  for (const el of items) { const n = spanFor(el); if (n > spanOf(el)) short.push([el, n]); }
+  for (const [el, n] of short) el.style.gridRow = "span " + n;
+}
 /* A grid only has so many lines: Gecko stops at 10,000, so a band of 2px rows
    tops out near 20,000px -- one busy hour of pictures -- and everything past
    it is pinned to the last line, painted below the band and over the next.
@@ -5021,37 +5058,67 @@ function fitBand(band) {
   for (let guard = 0; guard < 6; guard++) {
     let past = bandOverflow(band);
     if (past > 1 && guard === 0) {
-      for (const el of band.children) fixIfShort(el);
+      fixSpans(band.children);
       past = bandOverflow(band);
     }
     const row = rowOf(band.firstElementChild);
     if (past <= 1 || row >= MAX_TILE_ROW) return;
     band.dataset.row = row * 2;
     band.style.setProperty("--tile-row", row * 2 + "px");
-    for (const el of band.children) setSpan(el);
+    const kids = [...band.children], spans = kids.map(spanFor);
+    kids.forEach((el, i) => { el.style.gridRow = "span " + spans[i]; });
   }
 }
-function sweepSpans({ all = false } = {}) {
+/* Per scroll frame: the items near the screen only. */
+function sweepSpans() {
   if (!tileOn()) return;
   const h = window.innerHeight;
   // A screen of slack either side: put right just before it scrolls in.
-  const near = r => all || (r.bottom > -h && r.top < 2 * h);
+  const near = r => r.bottom > -h && r.top < 2 * h;
   for (const band of feedEl().children) {
     if (!band.classList.contains("band") || !near(band.getBoundingClientRect())) continue;
-    for (const el of band.children) if (near(el.getBoundingClientRect())) fixIfShort(el);
-  // After the spans: a band only overflows once everything is counted right.
+    fixSpans([...band.children].filter(el => near(el.getBoundingClientRect())));
+    // After the spans: a band only overflows once everything is counted right.
     fitBand(band);
   }
 }
 /* When scrolling stops, check EVERY grid item, not just those near the screen:
    one that grew while far off keeps its band short, which moves everything
-   below. It also catches causes nobody has thought of yet. */
-let settleSweep = 0;
-function sweepSpansSoon() { clearTimeout(settleSweep); settleSweep = setTimeout(() => sweepSpans({ all: true }), 400); }
+   below. It also catches causes nobody has thought of yet. A long tiled feed
+   is thousands of items, so the work is spread over frames, a few ms each,
+   nearest bands first; scrolling again or a rebuild cancels it. */
+const SWEEP_BUDGET_MS = 6;
+let settleSweep = 0, settleFrame = 0;
+function cancelSettleSweep() {
+  clearTimeout(settleSweep); settleSweep = 0;
+  cancelAnimationFrame(settleFrame); settleFrame = 0;
+}
+function sweepSpansSoon() { cancelSettleSweep(); settleSweep = setTimeout(sweepAllSliced, 400); }
+function sweepAllSliced() {
+  cancelSettleSweep();
+  if (!tileOn()) return;
+  const h = window.innerHeight;
+  const dist = r => (r.bottom < 0 ? -r.bottom : r.top > h ? r.top - h : 0);
+  const bands = [...feedEl().children].filter(b => b.classList.contains("band"))
+    .map(b => [b, dist(b.getBoundingClientRect())]).sort((a, c) => a[1] - c[1]).map(x => x[0]);
+  let i = 0;
+  const slice = () => {
+    settleFrame = 0;
+    if (!tileOn()) return;
+    const until = performance.now() + SWEEP_BUDGET_MS;
+    while (i < bands.length) {
+      const band = bands[i++];
+      if (band.isConnected) { fixSpans(band.children); fitBand(band); }
+      if (performance.now() >= until) break;
+    }
+    if (i < bands.length) settleFrame = requestAnimationFrame(slice);
+  };
+  slice();
+}
 /* The embedded typeface still loads asynchronously (font-display:swap), and
    the swap re-wraps every line at once -- the biggest height change there is.
    "loadingdone", because fonts.ready has usually resolved before any feed. */
-document.fonts?.addEventListener?.("loadingdone", () => sweepSpans({ all: true }));
+document.fonts?.addEventListener?.("loadingdone", sweepAllSliced);
 /* Media loads don't bubble, hence the capture phase. Re-measure the grid item
    the picture sits in. */
 document.addEventListener("load", ev => {
@@ -5246,7 +5313,7 @@ function buildView({ fresh, keepPosition = !fresh, append = false, spot = null }
   state.view = newView; state.rendered = 0; state.lastDay = null; state.lastHour = null;
   state.prevItem = null; state.prevEl = null; state.shownUris = new Set();
   state.band = null; state.tile = null;
-  feedEl().innerHTML = ""; disconnectVideos(); disconnectTiles();
+  disconnectVideos(); feedEl().innerHTML = ""; disconnectTiles();
   updateFeedHead();
   let targetKey = topKey || (fresh ? (settings.scrollTo === "context" ? state.contextStartKey : state.anchorKey) : null);
   let targetIdx = targetKey ? state.view.findIndex(it => it.key === targetKey) : -1;
@@ -5819,7 +5886,7 @@ async function toggleReplies(btn) {
   if (!uri || btn.disabled) return;
   const box = pv.querySelector(":scope > .replies");
   if (box) {                          // open: fold it away again
-    box.remove();
+    releaseVideos(box); box.remove();
     state.openReplies.delete(repliesKey(pv));
     syncRepliesBtn(btn.parentElement);
     return;
@@ -5902,6 +5969,7 @@ function drawReplies(el, uri, shown) {
   const all = replyCache.get(uri) || [];
   const n = Math.max(0, Math.min(shown, all.length));
   const rest = all.length - n;
+  releaseVideos(el);
   // The way to answer comes first, so it costs one press with 400 replies or none.
   el.innerHTML = `<button type="button" class="reply-write" data-act="reply-to" data-uri="${esc(uri)}">Write a reply\u2026</button>`
     + (n ? all.slice(0, n).map(replyNodeHtml).join("") : `<div class="reply-note">No replies yet.</div>`)
@@ -6466,6 +6534,13 @@ function videoObserver() {
   }, { threshold: [0, 0.6] });
   return _vo;
 }
+/* Tears down the players in `root` before its markup is replaced or removed:
+   a detached player keeps its buffer, and hls.js keeps downloading. */
+function releaseVideos(root) {
+  for (const box of $$(".video", root)) {
+    teardownPlayer(box); _po?.unobserve(box); _vo?.unobserve(box); nearVideos.delete(box);
+  }
+}
 /* Tears down all players and observers before the feed DOM is replaced. */
 function disconnectVideos() {
   $$(".video", feedEl()).forEach(teardownPlayer);
@@ -6960,6 +7035,7 @@ function openProfile(actor) {
   const already = profileOpen();
   profileFor = actor;
   const box = $("#profile");
+  releaseVideos(box);
   box.innerHTML = `<button class="btn pf-close" type="button" data-act="prof-close">Close</button><div class="pf-note">Loading\u2026</div>`;
   box.scrollTop = 0;
   show(box, "#profScrim");
@@ -6970,7 +7046,7 @@ function openProfile(actor) {
 }
 function closeProfile() {
   if (!closeOverlay("profile", "#profile", "#profScrim")) return;
-  $("#profile").innerHTML = "";
+  releaseVideos($("#profile")); $("#profile").innerHTML = "";
   profileFor = profileAuthor = null;
 }
 const profileOpen = () => !isHidden("#profile");

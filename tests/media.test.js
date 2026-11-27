@@ -933,3 +933,59 @@ test("a quoted post's own body is reordered the same way", async () => {
   await page.startDate(h.BASE);
   assert.deepEqual(bodyParts(page.$(`.quote[data-uri="${quoted.uri}"]`)), ["quote", "pv-head", "pv-text", "actions"]);
 });
+
+/* ---------- players are shut down with their markup ---------- */
+// A player left in detached markup keeps its buffer, and hls.js keeps
+// downloading. The feed tore its own down; nothing else did.
+
+const vpost = (id, who, min, extra = {}) => h.post(id, who, min, { embed: h.embeds.video(), ...extra });
+const playIn = async (page, sel) => {
+  page.$(`${sel} [data-act="play"]`).click();
+  await h.waitFor(() => page.window.__hls?.length, { message: "a player" });
+  return page.window.__hls.at(-1);
+};
+
+test("folding a reply box shuts down a video played in it", async () => {
+  const top = h.post("TOP", a, 10, { replyCount: 1 });
+  const rep = vpost("R", b, 11, { replyTo: top });
+  const page = await h.loadPage({ server: { timeline: [h.item(top)], posts: { [top.uri]: top, [rep.uri]: rep } } });
+  await page.startDate(h.BASE);
+  const btn = () => page.article("TOP").querySelector('[data-act="replies"]');
+  btn().click();
+  await h.waitFor(() => page.$(".replies .video"), { message: "the reply's video" });
+  const hls = await playIn(page, ".replies");
+  btn().click();
+  assert.ok(!page.$(".replies"), "folded");
+  assert.equal(hls.destroyed, true, "and its player went with it");
+});
+
+test("closing the profile panel shuts down a video played in it", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(vpost("V", a, 10))] } });
+  await page.startDate(h.BASE);
+  page.eval(`openProfile("${a.did}")`);
+  await h.waitFor(() => page.$('#profile [data-act="play"]'), { message: "the panel's video" });
+  const hls = await playIn(page, "#profile");
+  page.$('#profile [data-act="prof-close"]').click();
+  assert.equal(hls.destroyed, true);
+});
+
+test("redrawing the feed shuts down its players first", async () => {
+  // It emptied the feed and THEN looked in it for players to stop.
+  const page = await h.loadPage({ server: { timeline: [h.item(vpost("V", a, 10))] } });
+  await page.startDate(h.BASE);
+  const hls = await playIn(page, "#feed");
+  page.eval(`buildView({ keepPosition: true })`);
+  assert.equal(hls.destroyed, true);
+});
+
+test("signing out drops the feed, its players and the fetched replies", async () => {
+  const page = await h.loadPage({ server: { timeline: [h.item(vpost("V", a, 10))] } });
+  await page.startDate(h.BASE);
+  const hls = await playIn(page, "#feed");
+  page.eval(`replyCache.set("at://x", [])`);
+  page.$("#btnSignOut").click();
+  await h.wait(30);
+  assert.equal(hls.destroyed, true, "the player is shut down");
+  assert.equal(page.$("#feed").children.length, 0, "the last account's posts are gone from the page");
+  assert.equal(page.eval("replyCache.size"), 0, "and so are its replies");
+});

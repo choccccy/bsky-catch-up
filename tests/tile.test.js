@@ -634,3 +634,68 @@ test("the hold lets go as soon as the reader scrolls", async () => {
     assert.deepEqual(page.scrolls, [], `no more corrections after ${type}`);
   }
 });
+
+/* ---------- the settle sweep, on a long feed ----------
+   It checks every item in the feed, which on a long tiled catch-up is
+   thousands of style and layout reads: done at once, that was a pause right
+   as the reader stopped to read. So it is spread over frames and cancelled
+   by scrolling again, and within a band every height is read before any
+   span is written (a read after a write lays the grid out again). */
+
+/** Every grid item made 1000px tall with a 1-row span; returns the bands. */
+const allShort = page => {
+  const bands = page.$$("#feed > .band");
+  assert.ok(bands.length >= 2, "the feed has more than one band to sweep");
+  for (const el of page.$$("#feed > .band > *")) {
+    Object.defineProperty(el, "offsetHeight", { value: 1000, configurable: true });
+    el.style.gridRow = "span 1";
+  }
+  return bands;
+};
+// Not "span 500" for all: dividers' margins count too.
+const fixed = band => [...band.children].every(el => el.style.gridRow !== "span 1");
+/** Makes every performance.now() call 10ms later than the last: over budget after one band. */
+const slowClock = page => {
+  let t = 0;
+  Object.defineProperty(page.window.performance, "now", { value: () => (t += 10), configurable: true });
+};
+
+test("the settle sweep yields between frames", async () => {
+  const page = await h.loadPage({ settings: TILED, server });
+  await page.startDate(start);
+  const bands = allShort(page);
+  slowClock(page);
+  page.eval("sweepAllSliced()");
+  assert.ok(fixed(bands[0]), "the first slice does a band");
+  assert.ok(!fixed(bands.at(-1)), "and stops there, over its budget");
+  await h.wait(40 * bands.length);
+  assert.ok(bands.every(fixed), "later frames finish the feed");
+});
+
+test("scrolling again cancels a settle sweep in progress", async () => {
+  const page = await h.loadPage({ settings: TILED, server });
+  await page.startDate(start);
+  const bands = allShort(page);
+  slowClock(page);
+  page.eval("sweepAllSliced(); sweepSpansSoon()");   // what a new scroll frame does
+  await h.wait(100);
+  assert.ok(!fixed(bands.at(-1)), "the sweep in progress stopped");
+  await h.wait(400 + 40 * bands.length);
+  assert.ok(bands.every(fixed), "and a fresh one ran once the scrolling stopped");
+});
+
+test("a sweep reads every height in a band before writing any span", async () => {
+  const page = await h.loadPage({ settings: TILED, server });
+  await page.startDate(start);
+  const band = allShort(page)[0];
+  const kids = [...band.children];
+  assert.ok(kids.length >= 2, "a band of several items");
+  let readAfterWrite = 0;
+  for (const el of kids) Object.defineProperty(el, "offsetHeight", { configurable: true, get() {
+    if (kids.some(k => k.style.gridRow !== "span 1")) readAfterWrite++;
+    return 1000;
+  } });
+  page.eval("sweepAllSliced()");
+  assert.ok(fixed(band), "the band is put right");
+  assert.equal(readAfterWrite, 0, "with no height read after a span was written");
+});

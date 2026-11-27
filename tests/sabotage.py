@@ -666,6 +666,35 @@ GUARDS = [
     ('the grid puts a quote put first below the bar',
      '.pv.has-lead{grid-template-areas:"lead lead" "av head" "body body"}',
      '.pv.has-lead{grid-template-areas:"av head" "lead lead" "body body"}'),
+    # Players are shut down with the markup they belong to: a detached one
+    # keeps its buffer and hls.js keeps downloading. Each sabotage = skip it
+    # in one place.
+    ('leak: folding a reply box keeps its player',
+     '    releaseVideos(box); box.remove();',
+     '    box.remove();'),
+    ('leak: closing the profile panel keeps its player',
+     '  releaseVideos($("#profile")); $("#profile").innerHTML = "";',
+     '  $("#profile").innerHTML = "";'),
+    ('leak: a feed redraw empties the feed before stopping its players',
+     '  disconnectVideos(); feedEl().innerHTML = ""; disconnectTiles();\n  updateFeedHead();',
+     '  feedEl().innerHTML = ""; disconnectVideos(); disconnectTiles();\n  updateFeedHead();'),
+    ('leak: sign-out leaves the last account\'s feed in the page',
+     '  disconnectVideos(); feedEl().innerHTML = ""; disconnectTiles();\n  replyCache.clear();',
+     '  replyCache.clear();'),
+    # The settle sweep checks the whole feed, so it is done in slices,
+    # cancellable, and without a layout per changed span.
+    ('the span sweep writes as it reads (a layout per item)',
+     '  for (const el of items) { const n = spanFor(el); if (n > spanOf(el)) short.push([el, n]); }\n  for (const [el, n] of short) el.style.gridRow = "span " + n;',
+     '  for (const el of items) fixIfShort(el);'),
+    ('the settle sweep stops after its first slice',
+     '    if (i < bands.length) settleFrame = requestAnimationFrame(slice);',
+     ''),
+    ('scrolling again leaves a settle sweep running',
+     '  cancelAnimationFrame(settleFrame); settleFrame = 0;',
+     ''),
+    ('leak: expired identities are saved for ever',
+     ' if (!(now - e?.at < IDENTITY_TTL)) delete identityCache[did];',
+     ' if (false) delete identityCache[did];'),
 ]
 
 

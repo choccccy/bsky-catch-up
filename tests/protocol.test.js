@@ -451,3 +451,16 @@ test("a name is still a link out, since there is no panel to open", async () => 
   assert.ok(!ev.defaultPrevented, "the click is left to the browser, which follows the href");
   assert.ok(!page.visible("profile"), "and no panel was opened behind it");
 });
+
+test("saving the identity cache drops expired entries", async () => {
+  // Expired ones are never read again, so keeping them only grows the store.
+  const week = 7 * 24 * 3600 * 1000;
+  const page = await h.loadPage({ settings: { protocolOnly: true }, storage: { identities: {
+    "did:plc:old": { pds: "https://old.example", handle: "old.test", at: Date.now() - week - 60000 },
+    "did:plc:new": { pds: "https://new.example", handle: "new.test", at: Date.now() },
+  } }, server: world() });
+  page.eval("saveIdentities()");
+  const saved = JSON.parse(page.window.localStorage.getItem("bcu:identities"));
+  assert.ok(!saved["did:plc:old"], "the expired one is gone");
+  assert.ok(saved["did:plc:new"], "the fresh one stays");
+});
